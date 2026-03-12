@@ -7,6 +7,10 @@ use pruneguard_config::ResolverConfig;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
+/// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
+/// default extensions, condition names) so that the analysis cache is invalidated.
+pub const RESOLVER_LOGIC_VERSION: u32 = 2;
+
 /// Result of resolving a module specifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedModule {
@@ -214,10 +218,35 @@ impl ResolveError {
 }
 
 fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason {
-    if specifier.starts_with("node:") {
+    // Runtime-specific built-in module prefixes.
+    if specifier.starts_with("node:")
+        || specifier.starts_with("bun:")
+        || specifier.starts_with("deno:")
+    {
         return UnresolvedReason::Externalized;
     }
 
+    // Template literal syntax — cannot be statically resolved.
+    if specifier.contains("${") {
+        return UnresolvedReason::UnsupportedSpecifier;
+    }
+
+    // Glob / wildcard patterns.
+    if specifier.contains('*') || specifier.contains('?') {
+        return UnresolvedReason::UnsupportedSpecifier;
+    }
+
+    // Node.js subpath imports (package.json "imports" field, e.g. `#utils/foo`).
+    if specifier.starts_with('#') {
+        if error.contains("exports") || error.contains("condition") || error.contains("imports") {
+            return UnresolvedReason::ExportsConditionMiss;
+        }
+        // Subpath imports that failed resolution default to exports/condition miss
+        // since they rely on the package.json "imports" map (same mechanism as exports).
+        return UnresolvedReason::ExportsConditionMiss;
+    }
+
+    // Bare specifiers (not relative, not absolute).
     if !specifier.starts_with('.') && !specifier.starts_with('/') {
         if error.contains("tsconfig") || error.contains("paths") {
             return UnresolvedReason::TsconfigPathMiss;
@@ -225,14 +254,39 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
         if error.contains("exports") || error.contains("condition") {
             return UnresolvedReason::ExportsConditionMiss;
         }
+        // Looks like a valid package name — treat as a missing/uninstalled dependency
+        // rather than a missing file.
+        if looks_like_package_name(specifier) {
+            return UnresolvedReason::MissingFile;
+        }
         return UnresolvedReason::MissingFile;
     }
 
-    if specifier.contains('*') || specifier.contains('?') {
-        return UnresolvedReason::UnsupportedSpecifier;
-    }
-
     UnresolvedReason::MissingFile
+}
+
+/// Heuristic: does this bare specifier look like a valid npm package name?
+/// Scoped (`@scope/name`) or unscoped (`name`) with valid characters.
+fn looks_like_package_name(specifier: &str) -> bool {
+    let name_part = if let Some(rest) = specifier.strip_prefix('@') {
+        // Scoped: expect `@scope/name` optionally followed by a subpath.
+        match rest.find('/') {
+            Some(idx) => {
+                let after_scope = &rest[idx + 1..];
+                // Get the package name portion (before any further `/`).
+                after_scope.split('/').next().unwrap_or("")
+            }
+            None => return false, // `@scope` alone is not valid.
+        }
+    } else {
+        specifier.split('/').next().unwrap_or("")
+    };
+
+    !name_part.is_empty()
+        && !name_part.starts_with('.')
+        && name_part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
 }
 
 fn resolved_via_package_exports(specifier: &str, resolution: &oxc_resolver::Resolution) -> bool {

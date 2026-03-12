@@ -27,8 +27,6 @@ jobs:
       - run: pnpm --dir apps/pruneguard build-js
       - run: cargo run -p pruneguard --bin generate_schemas
       - run: git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
-      - run: pnpm --dir npm/pruneguard pack --pack-destination /tmp/pruneguard-pack
-
       - name: Check version consistency
         run: |
           VERSION=$(node -e "console.log(require('./npm/pruneguard/package.json').version)")
@@ -45,3 +43,27 @@ jobs:
               if (v !== 'workspace:*') { console.error(dep + ' is ' + v + ', expected workspace:*'); process.exit(1); }
             }
           "
+
+      - name: Stage release packages
+        run: node scripts/stage_npm_release.mjs
+
+      - name: Verify staged packages have no workspace references
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('.release/npm/pruneguard/package.json', 'utf8'));
+            for (const field of ['dependencies','optionalDependencies','peerDependencies','devDependencies']) {
+              for (const [dep, ver] of Object.entries(pkg[field] || {})) {
+                if (ver.startsWith('workspace:')) {
+                  console.error('ERROR: staged package has workspace: reference: ' + dep + '@' + ver);
+                  process.exit(1);
+                }
+              }
+            }
+            console.log('Staged root package is clean');
+          "
+
+      - name: Pack smoke (staged root package)
+        run: |
+          mkdir -p /tmp/pruneguard-pack
+          npm pack --pack-destination /tmp/pruneguard-pack .release/npm/pruneguard

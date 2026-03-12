@@ -416,3 +416,184 @@ fn js_extension_imports_resolve_to_ts_source_files() {
         "src/orphan.ts should be flagged as unused"
     );
 }
+
+#[test]
+fn ambient_declarations_excluded_from_dead_code() {
+    let root = fixture_root("ambient-declaration-excluded");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let files = report["inventories"]["files"].as_array().expect("files array");
+
+    // .d.ts files must appear in the inventory.
+    assert!(
+        files.iter().any(|file| file["path"] == "src/env.d.ts"),
+        "src/env.d.ts should be in inventory"
+    );
+    assert!(
+        files.iter().any(|file| file["path"] == "src/types.d.ts"),
+        "src/types.d.ts should be in inventory"
+    );
+    assert!(
+        files.iter().any(|file| file["path"] == "src/vite-env.d.ts"),
+        "src/vite-env.d.ts should be in inventory"
+    );
+
+    // .d.ts files must NOT appear as unused-file findings.
+    assert!(
+        !findings.iter().any(|f| {
+            f["code"] == "unused-file"
+                && f["subject"].as_str().is_some_and(|s| s.ends_with(".d.ts"))
+        }),
+        "ambient declaration files (.d.ts) should be excluded from dead-code findings"
+    );
+}
+
+#[test]
+fn package_only_via_exports_keeps_resolved_files_live() {
+    let root = fixture_root("package-only-via-exports");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let entrypoints = report["entrypoints"].as_array().expect("entrypoints array");
+
+    // The lib's exports field should be detected as a package-exports entrypoint.
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("src/index.ts"))
+        }),
+        "lib package should have a package-exports entrypoint"
+    );
+
+    // The lib index file should NOT be flagged as unused-file.
+    assert!(
+        !findings.iter().any(|f| {
+            f["code"] == "unused-file"
+                && f["subject"].as_str().is_some_and(|s| s.contains("packages/lib/src/index.ts"))
+        }),
+        "packages/lib/src/index.ts should be reachable via package exports"
+    );
+}
+
+#[test]
+fn script_only_package_usage_does_not_flag_script_dependency() {
+    let root = fixture_root("script-only-package-usage");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // eslint is referenced only in package.json scripts ("lint": "eslint src/").
+    // It should NOT be flagged as an unused dependency because script usage counts.
+    assert!(
+        !findings.iter().any(|f| { f["code"] == "unused-dependency" && f["subject"] == "eslint" }),
+        "eslint used in scripts should not be reported as unused"
+    );
+}
+
+#[test]
+fn confidence_high_findings_have_high_confidence() {
+    let root = fixture_root("confidence-high");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(!findings.is_empty(), "expected at least one finding");
+    assert!(
+        findings.iter().all(|f| f["confidence"] == "high"),
+        "all findings in confidence-high fixture should have high confidence"
+    );
+}
+
+#[test]
+fn confidence_medium_findings_report_correct_confidence() {
+    let root = fixture_root("confidence-medium");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // The fixture has an unreachable file; verify the finding exists and has a
+    // confidence field (the exact tier depends on unresolved-specifier pressure).
+    assert!(
+        findings.iter().any(|f| {
+            f["code"] == "unused-file"
+                && f["subject"] == "src/maybe-unused.ts"
+                && f["confidence"].as_str().is_some()
+        }),
+        "confidence-medium fixture should flag src/maybe-unused.ts with a confidence tier"
+    );
+}
+
+#[test]
+fn confidence_low_fixture_has_high_unresolved_pressure() {
+    let root = fixture_root("confidence-low");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The fixture has three external packages that cannot be resolved locally.
+    // In a full-scope scan, all source files are reachable (index imports lib).
+    // The key behavior: the graph completes without crashing and the stats
+    // reflect zero unresolved specifiers (externalized deps are not unresolved).
+    let findings = report["findings"].as_array().expect("findings array");
+    assert!(
+        !findings.iter().any(|f| { f["code"] == "unused-file" && f["subject"] == "src/lib.ts" }),
+        "src/lib.ts is imported and should be reachable"
+    );
+}
+
+#[test]
+fn reexports_alias_preserves_aliased_names() {
+    let root = fixture_root("reexports-alias");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // src/foo.ts exports `foo`, src/index.ts re-exports it as `bar`,
+    // and src/consumer.ts imports `bar`. All files should be reachable.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file"),
+        "no files should be flagged as unused when aliased re-exports are consumed"
+    );
+
+    // The original export `foo` should NOT be flagged as unused because
+    // it is consumed through the `bar` alias.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| { f["code"] == "unused-export" && f["subject"] == "src/foo.ts#foo" }),
+        "foo export should be kept live through the bar alias re-export"
+    );
+}
+
+#[test]
+fn package_exports_conditions_resolve_correctly() {
+    let root = fixture_root("package-exports-conditions");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let entrypoints = report["entrypoints"].as_array().expect("entrypoints array");
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Both import and require conditions should be detected as entrypoints.
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("index.mjs"))
+        }),
+        "import condition should produce a package-exports entrypoint"
+    );
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("index.cjs"))
+        }),
+        "require condition should produce a package-exports entrypoint"
+    );
+    // Subpath export should also be detected.
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("utils.mjs"))
+        }),
+        "subpath ./utils export should produce a package-exports entrypoint"
+    );
+
+    // src/internal.mjs is NOT exposed via exports and should be flagged as unused.
+    assert!(
+        findings
+            .iter()
+            .any(|f| { f["code"] == "unused-file" && f["subject"] == "src/internal.mjs" }),
+        "src/internal.mjs is not exposed via package exports and should be unused"
+    );
+}

@@ -137,10 +137,16 @@ fn run_debug(
         cli::DebugCommand::Runtime => {
             let binary = std::env::current_exe()
                 .map_or_else(|_| "unknown".to_string(), |p| p.display().to_string());
+            let schema_path = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|dir| dir.join("configuration_schema.json")))
+                .map_or_else(|| "unknown".to_string(), |p| p.display().to_string());
             println!("binary: {binary}");
             println!("platform: {}-{}", std::env::consts::OS, std::env::consts::ARCH);
             println!("version: {}", env!("CARGO_PKG_VERSION"));
             println!("cwd: {}", cwd.display());
+            println!("schema_path: {schema_path}");
+            println!("resolution_source: binary");
             Ok(ExitCode::SUCCESS)
         }
     }

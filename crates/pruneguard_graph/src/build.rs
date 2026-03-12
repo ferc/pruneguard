@@ -22,7 +22,8 @@ use pruneguard_report::{
     UnresolvedByReasonStats, WorkspaceInfo,
 };
 use pruneguard_resolver::{
-    ModuleResolver, ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind, dependency_name,
+    ModuleResolver, RESOLVER_LOGIC_VERSION, ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind,
+    dependency_name,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -100,7 +101,12 @@ pub fn build_graph_with_options(
 
     let resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
     let config_hash = hash_json(config);
-    let resolver_hash = hash_json(&config.resolver);
+    let resolver_hash = {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hasher::write_u32(&mut h, RESOLVER_LOGIC_VERSION);
+        std::hash::Hasher::write_u64(&mut h, hash_json(&config.resolver));
+        std::hash::Hasher::finish(&h)
+    };
     let tsconfig_hash = compute_tsconfig_hash(&discovery.project_root, &files);
     let manifest_hashes = discovery
         .workspaces

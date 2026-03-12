@@ -173,8 +173,8 @@ jobs:
         with:
           path: artifacts
 
-      # Stage platform binaries and restore executable permission
-      - name: Stage binaries
+      # Restore binaries into source dirs (needed by staging script)
+      - name: Restore binaries
         run: |
           for dir in artifacts/binary-cli-*; do
             npm_dir=$(basename "$dir" | sed 's/^binary-//')
@@ -183,18 +183,41 @@ jobs:
             chmod +x "npm/${npm_dir}/bin/"* 2>/dev/null || true
           done
 
-      # Stage JS dist + schemas
-      # upload-artifact@v4 uses the common ancestor (npm/pruneguard/) as root
-      - name: Stage JS artifacts
+      # Restore JS dist + schemas
+      - name: Restore JS artifacts
         run: |
           cp -r artifacts/js-dist/dist/ npm/pruneguard/dist/
           cp artifacts/js-dist/configuration_schema.json npm/pruneguard/
           cp artifacts/js-dist/report_schema.json npm/pruneguard/
 
-      # Verify all binaries are present
-      - name: Verify binaries
+      # Stage release packages (rewrites workspace:* to concrete versions, injects metadata)
+      - name: Stage release packages
+        run: node scripts/stage_npm_release.mjs
+
+      # Copy binaries into staged release packages
+      - name: Stage binaries into release packages
         run: |
-          for dir in npm/cli-*/; do
+          for dir in .release/npm/cli-*/; do
+            name=$(basename "$dir")
+            src="npm/${name}/bin"
+            if [ -d "$src" ]; then
+              mkdir -p "${dir}bin"
+              cp -r "${src}/"* "${dir}bin/"
+              chmod +x "${dir}bin/"* 2>/dev/null || true
+            fi
+          done
+
+      # Copy JS dist + schemas into staged root package
+      - name: Stage JS into release package
+        run: |
+          cp -r npm/pruneguard/dist/ .release/npm/pruneguard/dist/
+          cp npm/pruneguard/configuration_schema.json .release/npm/pruneguard/
+          cp npm/pruneguard/report_schema.json .release/npm/pruneguard/
+
+      # Verify all binaries are present in staged packages
+      - name: Verify staged binaries
+        run: |
+          for dir in .release/npm/cli-*/; do
             name=$(basename "$dir")
             if [[ "$name" == *win32* ]]; then
               bin="${dir}bin/pruneguard.exe"
@@ -208,16 +231,16 @@ jobs:
             echo "✓ $bin"
           done
 
-      # Publish platform packages first
+      # Publish staged platform packages first
       - name: Publish platform packages
         run: |
-          for dir in npm/cli-*/; do
+          for dir in .release/npm/cli-*/; do
             bash .github/scripts/publish-if-needed.sh "$dir" --provenance --access public --no-git-checks
           done
 
-      # Publish main package
+      # Publish staged main package
       - name: Publish pruneguard
-        run: bash .github/scripts/publish-if-needed.sh npm/pruneguard --provenance --access public --no-git-checks
+        run: bash .github/scripts/publish-if-needed.sh .release/npm/pruneguard --provenance --access public --no-git-checks
 
       # Create git tag and GitHub Release
       - name: Create git tag

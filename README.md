@@ -12,7 +12,10 @@ ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
 npm install pruneguard
 ```
 
-## Usage
+The `pruneguard` package automatically installs the correct platform-specific binary.
+No Rust toolchain or local compilation required.
+
+## CLI Usage
 
 ```sh
 # Full scan
@@ -47,16 +50,86 @@ pruneguard init
 
 # Debug resolution
 pruneguard debug resolve ./utils --from src/index.ts
+
+# Debug runtime/install info
+pruneguard debug runtime
 ```
 
-Dead-code trust model:
+## JS API
 
-- full-repo `scan` is the trustworthy mode for deletion decisions
+```js
+import { scan, impact, explain, run, binaryPath, loadConfig, schemaPath } from "pruneguard";
+
+// Full scan
+const report = await scan({ cwd: "/path/to/repo" });
+console.log(report.summary.totalFindings);
+
+// Impact analysis
+const blast = await impact({ target: "src/utils/helpers.ts" });
+console.log(blast.affectedEntrypoints);
+
+// Explain a finding
+const proof = await explain({ query: "src/old.ts#deprecatedFn" });
+console.log(proof.proofs);
+
+// Run arbitrary CLI args
+const result = await run(["--format", "json", "scan"]);
+console.log(result.exitCode);
+
+// Resolve binary path (for custom integrations)
+console.log(binaryPath());
+
+// Load resolved config
+const config = await loadConfig();
+
+// Additional helpers
+import { scanDot, migrateKnip, migrateDepcruise } from "pruneguard";
+
+const dot = await scanDot();                    // Graphviz DOT output
+const knipMigration = await migrateKnip();      // Migrate from knip config
+const dcMigration = await migrateDepcruise();   // Migrate from dependency-cruiser
+```
+
+## Daily-Use Workflows
+
+### Branch scan with `--changed-since`
+
+```sh
+pruneguard --changed-since origin/main scan
+```
+
+Only reports findings related to files changed on the current branch.
+
+### CI with `--no-baseline`
+
+```sh
+pruneguard --no-baseline --no-cache --format json scan
+```
+
+Deterministic, no prior-state influence. Use exit code to gate merges.
+
+### Safe deletion review
+
+```sh
+# 1. Scan for unused code
+pruneguard --format json scan > report.json
+
+# 2. Check blast radius of a candidate removal
+pruneguard impact src/utils/old-helper.ts
+
+# 3. Understand why something is live or unused
+pruneguard explain src/utils/old-helper.ts
+```
+
+## Trust Model
+
+- Full-repo `scan` is the trustworthy mode for deletion decisions
 - `--focus` filters reported findings after full analysis
-- positional `scan <paths...>` narrows the analyzed file set and is reported as partial-scope/advisory in the output
+- Positional `scan <paths...>` narrows the analyzed file set and is reported as partial-scope/advisory
 - `--require-full-scope` turns advisory partial-scope dead-code scans into a hard failure
 - `--no-baseline` disables baseline auto-discovery for deterministic CI, parity, and benchmarks
-- use `impact` and `explain` before removing code on unresolved-specifier-heavy repos
+- Use `impact` and `explain` before removing code on repos with many unresolved specifiers
+- Findings carry `confidence` (high, medium, low) to indicate trustworthiness
 
 ## Configuration
 
@@ -83,27 +156,19 @@ Create `pruneguard.json`:
 Requires: Rust (stable), Node.js, pnpm, just
 
 ```sh
-just ready    # fmt + check + test + lint
-just build    # release binary
-just run scan # run against current directory
-just schemas  # regenerate shipped schemas
-just schemas-check
-just build-js
-just check-napi
+just ready          # fmt + check + test + lint
+just build          # release binary
+just run scan       # run against current directory
+just build-js       # build JS wrapper
+just schemas        # regenerate shipped schemas
+just schemas-check  # verify schemas are committed
+just stage-release  # stage npm packages into .release/
+just pack-smoke     # end-to-end package install smoke test
 just benchmark ../../claude-attack
 just benchmark-repos
-just parity   # opt-in real-repo smoke
+just smoke-repos    # opt-in real-repo smoke
+just parity         # opt-in real-repo parity check
 ```
-
-## Experimental JS Exports
-
-The npm package currently exposes these additional helpers as experimental:
-
-- `scanDot`
-- `migrateKnip`
-- `migrateDepcruise`
-
-They are usable now, but they are not yet treated as fully stable semver surface.
 
 ## License
 

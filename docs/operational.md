@@ -33,7 +33,6 @@ just benchmark-repos
 just parity
 just smoke-repos
 pnpm --dir apps/pruneguard build-js
-cargo check -p pruneguard --features napi
-pnpm -r build
-npm pack --prefix npm/pruneguard --pack-destination /tmp/pruneguard-pack
+just stage-release
+just pack-smoke
 ```

@@ -103,9 +103,14 @@ pub fn analyze(
 
         let subject = format!("{relative_path}#{}", export.name);
         let unresolved_count = file_unresolved_count(build, export.file);
-        let confidence = if unresolved_count == 0 && !live.has_any_demand(export.file) {
+        let confidence = if unresolved_count >= 5 {
+            // Many unresolved specifiers — high chance of false positive.
+            FindingConfidence::Low
+        } else if unresolved_count == 0 && !live.has_any_demand(export.file) {
+            // Truly isolated unused export: no unresolved specifiers and no demand on the file.
             FindingConfidence::High
         } else {
+            // Some unresolved specifiers (< 5) or file has demand but this export is unused.
             FindingConfidence::Medium
         };
         let mut evidence = vec![Evidence {

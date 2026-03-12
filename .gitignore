@@ -12,6 +12,9 @@ dist/
 npm/pruneguard/*.tgz
 npm/cli-*/bin/
 
+# Release staging
+.release/
+
 # Cache
 .pruneguard-cache/
 .pruneguard/

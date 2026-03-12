@@ -21,25 +21,84 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: cargo build -p pruneguard --release
       - run: pnpm --dir apps/pruneguard build-js
-      - name: Stage platform binary
+      - run: cargo run -p pruneguard --bin generate_schemas
+
+      - name: Stage release packages
+        run: node scripts/stage_npm_release.mjs
+
+      - name: Stage platform binary into release package
         run: |
-          PLATFORM_DIR="npm/cli-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')"
-          if [ "$(uname -s)" = "Linux" ]; then
+          ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          PLATFORM_DIR="cli-${OS}-${ARCH}"
+          if [ "$OS" = "linux" ]; then
             if ldd --version 2>&1 | grep -q musl; then
               PLATFORM_DIR="${PLATFORM_DIR}-musl"
             else
               PLATFORM_DIR="${PLATFORM_DIR}-gnu"
             fi
           fi
-          mkdir -p "${PLATFORM_DIR}/bin"
-          cp target/release/pruneguard "${PLATFORM_DIR}/bin/"
-      - run: mkdir -p /tmp/pruneguard-pack && npm pack --pack-destination /tmp/pruneguard-pack
-        working-directory: npm/pruneguard
-      - run: |
-          mkdir -p /tmp/pruneguard-pack-smoke
-          cd /tmp/pruneguard-pack-smoke
-          TARBALL="$(ls /tmp/pruneguard-pack/pruneguard-*.tgz | head -n 1)"
+          mkdir -p ".release/npm/${PLATFORM_DIR}/bin"
+          cp target/release/pruneguard ".release/npm/${PLATFORM_DIR}/bin/"
+          chmod +x ".release/npm/${PLATFORM_DIR}/bin/pruneguard"
+
+      - name: Pack and smoke test
+        run: |
+          PACK_DIR="/tmp/pruneguard-pack"
+          SMOKE_DIR="/tmp/pruneguard-smoke"
+          rm -rf "$PACK_DIR" "$SMOKE_DIR"
+          mkdir -p "$PACK_DIR" "$SMOKE_DIR"
+
+          # Detect platform package dir
+          ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          PLATFORM_DIR="cli-${OS}-${ARCH}"
+          if [ "$OS" = "linux" ]; then
+            if ldd --version 2>&1 | grep -q musl; then
+              PLATFORM_DIR="${PLATFORM_DIR}-musl"
+            else
+              PLATFORM_DIR="${PLATFORM_DIR}-gnu"
+            fi
+          fi
+
+          # Pack staged packages
+          npm pack --pack-destination "$PACK_DIR" ".release/npm/${PLATFORM_DIR}"
+          npm pack --pack-destination "$PACK_DIR" ".release/npm/pruneguard"
+
+          # Install into temp project
+          cd "$SMOKE_DIR"
           npm init -y
-          npm install "$TARBALL"
-          node -e "import('pruneguard').then((mod) => { if (typeof mod.binaryPath !== 'function' || typeof mod.scan !== 'function') process.exit(1); console.log('binaryPath:', typeof mod.binaryPath, 'scan:', typeof mod.scan); })"
+          PLATFORM_TGZ=$(ls "$PACK_DIR"/pruneguard-cli-*.tgz | head -n1)
+          ROOT_TGZ=$(ls "$PACK_DIR"/pruneguard-0*.tgz | head -n1)
+          npm install "$PLATFORM_TGZ" "$ROOT_TGZ"
+
+          # Verify
+          node -e "import('pruneguard').then(m => { console.log('binaryPath:', m.binaryPath()); console.log('scan:', typeof m.scan); })"
           npx pruneguard --help
+
+          # Scan verification on fixture project
+          echo "--- Verifying scan on fixture project ---"
+          mkdir -p "$SMOKE_DIR/fixture/src"
+          cat > "$SMOKE_DIR/fixture/package.json" <<'FIXTURE_PKG'
+          { "name": "fixture", "version": "0.0.0", "private": true }
+          FIXTURE_PKG
+          cat > "$SMOKE_DIR/fixture/src/index.ts" <<'FIXTURE_INDEX'
+          import { helper } from "./used";
+          console.log(helper());
+          FIXTURE_INDEX
+          cat > "$SMOKE_DIR/fixture/src/used.ts" <<'FIXTURE_USED'
+          export function helper() { return 42; }
+          FIXTURE_USED
+          cat > "$SMOKE_DIR/fixture/src/unused.ts" <<'FIXTURE_UNUSED'
+          export function neverCalled() { return "dead code"; }
+          FIXTURE_UNUSED
+          echo "  -> CLI scan"
+          CLI_OUT=$(cd "$SMOKE_DIR/fixture" && npx pruneguard --format json --no-cache --no-baseline scan)
+          echo "$CLI_OUT" | node -e "
+            let buf=''; process.stdin.on('data',c=>buf+=c); process.stdin.on('end',()=>{
+              const j=JSON.parse(buf);
+              if(!j.findings||j.findings.length===0){console.error('Expected findings in CLI output');process.exit(1);}
+              console.log('CLI scan found',j.findings.length,'findings');
+            });"
+          echo "  -> JS scan() API"
+          node -e "import('pruneguard').then(m => m.scan({ cwd: '$SMOKE_DIR/fixture' }).then(r => { if (r.findings.length === 0) { console.error('Expected findings'); process.exit(1); } console.log('scan() found', r.findings.length, 'findings'); }))"

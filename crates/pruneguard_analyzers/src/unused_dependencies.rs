@@ -87,6 +87,12 @@ pub fn analyze(
                 continue;
             }
 
+            // Skip dependencies that are referenced directly in package.json scripts
+            // (e.g. "build": "vite build" means vite is used even without source imports).
+            if scripts_reference_dependency(&workspace.manifest, dependency) {
+                continue;
+            }
+
             let evidence = vec![Evidence {
                 kind: "dependency".to_string(),
                 file: Some(manifest_path.clone()),
@@ -197,4 +203,90 @@ fn declared_dependencies<'a>(
     dependencies.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(right.1)));
     dependencies.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
     dependencies
+}
+
+/// Check if any package.json script directly references a dependency by name.
+///
+/// Handles common patterns:
+/// - `<pkg> <args>` (binary at start of script value)
+/// - `pnpm exec <pkg>`, `npx <pkg>`, `yarn exec <pkg>`
+/// - `node_modules/.bin/<pkg>`
+fn scripts_reference_dependency(
+    manifest: &pruneguard_manifest::PackageManifest,
+    dependency: &str,
+) -> bool {
+    let Some(scripts) = &manifest.scripts else {
+        return false;
+    };
+
+    // For scoped packages like `@scope/name`, the binary name is typically `name`.
+    let bin_name = if let Some(rest) = dependency.strip_prefix('@') {
+        rest.split('/').nth(1).unwrap_or(dependency)
+    } else {
+        dependency
+    };
+
+    for script_value in scripts.values() {
+        if script_references_bin(script_value, bin_name) {
+            return true;
+        }
+        // Also check the full dependency name for scoped packages used directly.
+        if bin_name != dependency && script_references_bin(script_value, dependency) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a single script command string references a binary name.
+fn script_references_bin(script: &str, bin_name: &str) -> bool {
+    // Split on common shell operators to handle chained commands.
+    for segment in script.split(&['&', '|', ';'][..]) {
+        let segment = segment.trim();
+        // Handle `node_modules/.bin/<pkg>` anywhere in the segment.
+        if segment.contains(&format!("node_modules/.bin/{bin_name}")) {
+            return true;
+        }
+
+        let mut tokens = segment.split_whitespace();
+        let Some(first) = tokens.next() else {
+            continue;
+        };
+
+        // Direct invocation: `<pkg> build`, `<pkg> --flag`
+        if first == bin_name {
+            return true;
+        }
+
+        // Runner patterns: `pnpm exec <pkg>`, `npx <pkg>`, `yarn exec <pkg>`,
+        //                   `pnpm <pkg>`, `yarn <pkg>`, `bunx <pkg>`
+        match first {
+            "npx" | "bunx" => {
+                // npx/bunx may have flags before the package name.
+                for token in tokens {
+                    if token.starts_with('-') {
+                        continue;
+                    }
+                    return token == bin_name;
+                }
+            }
+            "pnpm" | "yarn" => {
+                if let Some(second) = tokens.next() {
+                    if second == "exec" || second == "run" || second == "dlx" {
+                        // Next non-flag token is the package/binary name.
+                        for token in tokens {
+                            if token.starts_with('-') {
+                                continue;
+                            }
+                            return token == bin_name;
+                        }
+                    } else if second == bin_name {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }

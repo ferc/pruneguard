@@ -10,7 +10,7 @@
     "test": "pnpm -r run test",
     "generate-schemas": "cargo run -p pruneguard --bin generate_schemas",
     "schemas:check": "cargo run -p pruneguard --bin generate_schemas && git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json",
-    "pack-smoke": "mkdir -p /tmp/pruneguard-pack && npm_config_cache=/tmp/pruneguard-npm-cache npm pack --prefix npm/pruneguard --pack-destination /tmp/pruneguard-pack",
+    "stage-release": "node scripts/stage_npm_release.mjs",
     "smoke:repos": "cargo test -p pruneguard --test parity_smoke -- --ignored --nocapture",
     "parity": "cargo test -p pruneguard --test parity_smoke -- --ignored --nocapture"
   },

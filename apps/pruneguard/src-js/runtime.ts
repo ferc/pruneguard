@@ -1,11 +1,20 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export type ResolutionSource = "env" | "platform-package" | "dev" | "path";
+
+export type ResolutionInfo = {
+  binaryPath: string;
+  source: ResolutionSource;
+  platformPackage?: string;
+  schemaPath?: string;
+};
 
 export type CommandResult = {
   args: string[];
@@ -59,7 +68,7 @@ function exeName(): string {
   return process.platform === "win32" ? "pruneguard.exe" : "pruneguard";
 }
 
-function findPlatformBinary(): string | undefined {
+function findPlatformBinary(): { path: string; packageName: string } | undefined {
   const key = `${process.platform}-${process.arch === "arm64" ? "arm64" : "x64"}`;
   const candidates = PLATFORM_PACKAGES[key];
   if (!candidates) return undefined;
@@ -68,7 +77,7 @@ function findPlatformBinary(): string | undefined {
     try {
       const pkgJsonPath = require.resolve(`${pkg}/package.json`);
       const binPath = join(dirname(pkgJsonPath), "bin", exeName());
-      if (existsSync(binPath)) return binPath;
+      if (existsSync(binPath)) return { path: binPath, packageName: pkg };
     } catch {
       continue;
     }
@@ -103,6 +112,26 @@ function findPathBinary(): string | undefined {
 }
 
 let cachedBinaryPath: string | undefined;
+let cachedResolutionSource: ResolutionSource | undefined;
+let cachedPlatformPackage: string | undefined;
+
+function validateExecutable(binPath: string, source: ResolutionSource): void {
+  if (!existsSync(binPath)) {
+    throw new PruneguardExecutionError(
+      "PRUNEGUARD_BINARY_NOT_FOUND",
+      `[${source}] Binary does not exist: ${binPath}`,
+      { binaryPath: binPath },
+    );
+  }
+  if (process.platform !== "win32") {
+    try {
+      accessSync(binPath, constants.X_OK);
+    } catch {
+      // Non-fatal: file exists but is not executable. This may still work
+      // if the OS allows execution via other means, so we only warn.
+    }
+  }
+}
 
 export function binaryPath(options?: { allowPathFallback?: boolean }): string {
   if (cachedBinaryPath) return cachedBinaryPath;
@@ -110,28 +139,28 @@ export function binaryPath(options?: { allowPathFallback?: boolean }): string {
   // 1. Environment variable
   const envPath = process.env.PRUNEGUARD_BINARY;
   if (envPath) {
-    if (!existsSync(envPath)) {
-      throw new PruneguardExecutionError(
-        "PRUNEGUARD_BINARY_NOT_FOUND",
-        `PRUNEGUARD_BINARY points to ${envPath} but the file does not exist`,
-        { binaryPath: envPath },
-      );
-    }
+    validateExecutable(envPath, "env");
     cachedBinaryPath = envPath;
+    cachedResolutionSource = "env";
     return envPath;
   }
 
   // 2. Installed platform package
   const platformBin = findPlatformBinary();
   if (platformBin) {
-    cachedBinaryPath = platformBin;
-    return platformBin;
+    validateExecutable(platformBin.path, "platform-package");
+    cachedBinaryPath = platformBin.path;
+    cachedResolutionSource = "platform-package";
+    cachedPlatformPackage = platformBin.packageName;
+    return platformBin.path;
   }
 
   // 3. Development fallback (cargo-built binary)
   const devBin = findDevBinary();
   if (devBin) {
+    validateExecutable(devBin, "dev");
     cachedBinaryPath = devBin;
+    cachedResolutionSource = "dev";
     return devBin;
   }
 
@@ -139,15 +168,33 @@ export function binaryPath(options?: { allowPathFallback?: boolean }): string {
   if (options?.allowPathFallback) {
     const pathBin = findPathBinary();
     if (pathBin) {
+      validateExecutable(pathBin, "path");
       cachedBinaryPath = pathBin;
+      cachedResolutionSource = "path";
       return pathBin;
     }
   }
 
+  const key = `${process.platform}-${process.arch === "arm64" ? "arm64" : "x64"}`;
+  const expectedPkgs = PLATFORM_PACKAGES[key];
+  const pkgHint = expectedPkgs?.length
+    ? ` Expected platform package: ${expectedPkgs.join(" or ")}.`
+    : "";
+
   throw new PruneguardExecutionError(
     "PRUNEGUARD_BINARY_NOT_FOUND",
-    "Could not find the pruneguard binary. Install a platform-specific package or set PRUNEGUARD_BINARY.",
+    `Could not find the pruneguard binary. Tried: env, platform-package, dev${options?.allowPathFallback ? ", path" : ""}.${pkgHint} Set PRUNEGUARD_BINARY or install a platform-specific package.`,
   );
+}
+
+export function resolutionInfo(): ResolutionInfo {
+  const bin = binaryPath();
+  return {
+    binaryPath: bin,
+    source: cachedResolutionSource!,
+    ...(cachedPlatformPackage ? { platformPackage: cachedPlatformPackage } : {}),
+    schemaPath: join(dirname(fileURLToPath(import.meta.url)), "..", "configuration_schema.json"),
+  };
 }
 
 export function run(args: string[], options?: { cwd?: string }): Promise<CommandResult> {

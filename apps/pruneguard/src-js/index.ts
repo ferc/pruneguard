@@ -3,11 +3,14 @@ import { fileURLToPath } from "node:url";
 import {
   PruneguardExecutionError,
   binaryPath as resolveBinaryPath,
+  resolutionInfo as resolveResolutionInfo,
   run as runBinary,
   type CommandResult,
+  type ResolutionInfo,
+  type ResolutionSource,
 } from "./runtime.js";
 
-export { PruneguardExecutionError, type CommandResult };
+export { PruneguardExecutionError, type CommandResult, type ResolutionInfo, type ResolutionSource };
 
 export type Profile = "production" | "development" | "all";
 
@@ -247,7 +250,6 @@ export async function scan(options: ScanOptions = {}): Promise<AnalysisReport> {
   return parseJson<AnalysisReport>(result);
 }
 
-/** @experimental */
 export async function scanDot(options: ScanOptions = {}): Promise<string> {
   const args = ["--format", "dot", "--severity", "info"];
   pushGlobalFlags(args, options);
@@ -306,6 +308,10 @@ export function binaryPath(): string {
   return resolveBinaryPath();
 }
 
+export function resolutionInfo(): ResolutionInfo {
+  return resolveResolutionInfo();
+}
+
 export function run(args: string[], options?: { cwd?: string }): Promise<CommandResult> {
   return runBinary(args, options);
 }
@@ -333,7 +339,6 @@ export async function debugEntrypoints(
   return result.stdout.trimEnd().split("\n").filter(Boolean);
 }
 
-/** @experimental */
 export async function migrateKnip(options: {
   cwd?: string;
   file?: string;
@@ -346,7 +351,6 @@ export async function migrateKnip(options: {
   return parseJson<MigrationOutput>(result);
 }
 
-/** @experimental */
 export async function migrateDepcruise(options: {
   cwd?: string;
   file?: string;

@@ -46,9 +46,14 @@ pub fn analyze(
             description: "No active entrypoint reaches this file.".to_string(),
         }];
         let unresolved_count = count_unresolved_specifiers(extracted_file);
-        let confidence = if has_zero_incoming_edges(build, file_id) && unresolved_count == 0 {
+        let confidence = if unresolved_count >= 5 {
+            // Many unresolved specifiers — high chance of false positive.
+            FindingConfidence::Low
+        } else if has_zero_incoming_edges(build, file_id) && unresolved_count == 0 {
+            // Zero incoming edges and zero unresolved specifiers — truly unreachable.
             FindingConfidence::High
         } else {
+            // Some unresolved specifiers (< 5) or has some incoming edges.
             FindingConfidence::Medium
         };
         if unresolved_count > 5 {
