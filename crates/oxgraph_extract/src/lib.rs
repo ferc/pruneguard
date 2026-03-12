@@ -4,9 +4,10 @@ use compact_str::CompactString;
 use oxgraph_fs::FileRecord;
 use oxgraph_resolver::ResolvedEdge;
 use rustc_hash::FxHashSet;
+use serde::{Deserialize, Serialize};
 
 /// Extracted facts from a single JS/TS file.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileFacts {
     /// Named exports (export name).
     pub exports: Vec<ExportInfo>,
@@ -23,7 +24,7 @@ pub struct FileFacts {
 }
 
 /// An export from a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportInfo {
     /// The exported name (or "default").
     pub name: CompactString,
@@ -34,7 +35,7 @@ pub struct ExportInfo {
 }
 
 /// An import into a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportInfo {
     /// The module specifier.
     pub specifier: CompactString,
@@ -49,7 +50,7 @@ pub struct ImportInfo {
 }
 
 /// A single imported name binding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportedName {
     /// The name as imported (or "default", or "*").
     pub imported: CompactString,
@@ -58,7 +59,7 @@ pub struct ImportedName {
 }
 
 /// A re-export statement.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReexportInfo {
     /// The module specifier.
     pub specifier: CompactString,
@@ -73,7 +74,7 @@ pub struct ReexportInfo {
 }
 
 /// A single re-exported name.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReexportedName {
     /// Original name in the source module.
     pub original: CompactString,
@@ -82,7 +83,7 @@ pub struct ReexportedName {
 }
 
 /// A dynamic `import()` expression.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicImportInfo {
     /// The specifier, if it's a string literal.
     pub specifier: Option<CompactString>,
@@ -91,7 +92,7 @@ pub struct DynamicImportInfo {
 }
 
 /// A `require()` call.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequireInfo {
     /// The specifier, if it's a string literal.
     pub specifier: Option<CompactString>,
@@ -100,7 +101,7 @@ pub struct RequireInfo {
 }
 
 /// Extracted and resolved facts for a tracked repository file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedFile {
     pub file: FileRecord,
     pub facts: Option<FileFacts>,

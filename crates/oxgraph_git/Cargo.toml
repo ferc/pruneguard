@@ -1,5 +1,5 @@
 [package]
-name = "oxgraph_resolver"
+name = "oxgraph_git"
 version = "0.1.0"
 authors.workspace = true
 categories.workspace = true
@@ -9,18 +9,13 @@ keywords.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Module resolution for oxgraph built on oxc_resolver"
+description = "Git-aware change scoping for oxgraph"
 publish = true
 
 [lints]
 workspace = true
 
 [dependencies]
-oxgraph_config = { workspace = true }
-
-oxc_resolver = { workspace = true }
 miette = { workspace = true }
-thiserror = { workspace = true }
-rustc-hash = { workspace = true }
-tracing = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }

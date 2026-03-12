@@ -4,11 +4,14 @@ const require = createRequire(import.meta.url);
 
 type NativeBinding = {
   scan_json(options: unknown): string;
+  scan_dot_text(options: unknown): string;
   impact_json(options: unknown): string;
   explain_json(options: unknown): string;
   load_config_json(cwd?: string, config?: string): string;
   debug_resolve_text(options: unknown): string;
   debug_entrypoints_json(options: unknown): string;
+  migrate_knip_json(options: unknown): string;
+  migrate_depcruise_json(options: unknown): string;
 };
 
 function loadNative(): NativeBinding {

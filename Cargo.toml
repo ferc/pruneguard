@@ -50,6 +50,7 @@ oxgraph_analyzers = { path = "crates/oxgraph_analyzers" }
 oxgraph_rules = { path = "crates/oxgraph_rules" }
 oxgraph_report = { path = "crates/oxgraph_report" }
 oxgraph_cache = { path = "crates/oxgraph_cache" }
+oxgraph_git = { path = "crates/oxgraph_git" }
 
 # Oxc crates
 oxc_parser = "0.117.0"

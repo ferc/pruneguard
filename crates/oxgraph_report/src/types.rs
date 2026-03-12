@@ -254,6 +254,19 @@ pub struct Stats {
     pub entrypoints_detected: usize,
     pub graph_nodes: usize,
     pub graph_edges: usize,
+    pub changed_files: usize,
+    pub affected_files: usize,
+    pub affected_packages: usize,
+    pub affected_entrypoints: usize,
+    pub baseline_applied: bool,
+    pub baseline_profile_mismatch: bool,
+    pub suppressed_findings: usize,
+    pub new_findings: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub cache_entries_read: usize,
+    pub cache_entries_written: usize,
+    pub affected_scope_incomplete: bool,
 }
 
 impl AnalysisReport {

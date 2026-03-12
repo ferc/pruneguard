@@ -1104,6 +1104,7 @@ dependencies = [
  "oxgraph_extract",
  "oxgraph_frameworks",
  "oxgraph_fs",
+ "oxgraph_git",
  "oxgraph_graph",
  "oxgraph_manifest",
  "oxgraph_report",
@@ -1208,6 +1209,7 @@ dependencies = [
  "oxgraph_fs",
  "oxgraph_resolver",
  "rustc-hash",
+ "serde",
  "thiserror",
  "tracing",
 ]
@@ -1230,7 +1232,17 @@ dependencies = [
  "globset",
  "ignore",
  "rustc-hash",
+ "serde",
  "walkdir",
+]
+
+[[package]]
+name = "oxgraph_git"
+version = "0.1.0"
+dependencies = [
+ "miette",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -1241,6 +1253,7 @@ dependencies = [
  "globset",
  "insta",
  "miette",
+ "oxgraph_cache",
  "oxgraph_config",
  "oxgraph_discovery",
  "oxgraph_entrypoints",
@@ -1253,6 +1266,7 @@ dependencies = [
  "petgraph",
  "rustc-hash",
  "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -1286,6 +1300,7 @@ dependencies = [
  "oxc_resolver",
  "oxgraph_config",
  "rustc-hash",
+ "serde",
  "thiserror",
  "tracing",
 ]

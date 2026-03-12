@@ -3,9 +3,10 @@
 use std::process::ExitCode;
 
 use oxgraph_entrypoints::EntrypointProfile;
-use oxgraph_report::{AnalysisReport, Finding, FindingSeverity};
+use oxgraph_report::{Finding, FindingSeverity};
 
 mod cli;
+mod migrate;
 
 fn main() -> ExitCode {
     let options = cli::options().run();
@@ -36,11 +37,24 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                 if path.is_absolute() { path.clone() } else { cwd.join(path) }
             });
             let config = load_config_or_default(&config_cwd, options.config.as_deref())?;
-            let report = oxgraph::scan(&cwd, &config, &paths, profile)?;
-            handle_scan_report(report, &options.global)
+            let scan = oxgraph::scan_with_options(
+                &cwd,
+                &config,
+                &paths,
+                profile,
+                &oxgraph::ScanOptions {
+                    config_dir: Some(config_cwd),
+                    changed_since: options.global.changed_since.clone(),
+                    no_cache: options.global.no_cache,
+                },
+            )?;
+            handle_scan_report(scan, &options.global)
         }
         cli::Command::Impact { target } => {
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            if matches!(options.global.format, cli::OutputFormat::Dot) {
+                miette::bail!("dot output is only supported for scan in this phase");
+            }
             let report =
                 oxgraph::impact(&cwd, &config, &target, profile)?;
             print_report(&report, options.global.format)?;
@@ -48,6 +62,9 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
         }
         cli::Command::Explain { query } => {
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            if matches!(options.global.format, cli::OutputFormat::Dot) {
+                miette::bail!("dot output is only supported for scan in this phase");
+            }
             let report =
                 oxgraph::explain(&cwd, &config, &query, profile)?;
             print_report(&report, options.global.format)?;
@@ -69,7 +86,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             run_debug(debug_cmd, &config, profile)
         }
-        cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd),
+        cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd, options.global.format),
     }
 }
 
@@ -96,13 +113,22 @@ fn run_debug(
     }
 }
 
-fn run_migrate(cmd: &cli::MigrateCommand) -> miette::Result<ExitCode> {
+fn run_migrate(cmd: &cli::MigrateCommand, format: cli::OutputFormat) -> miette::Result<ExitCode> {
+    let cwd = std::env::current_dir().expect("failed to get current directory");
+    if matches!(format, cli::OutputFormat::Sarif | cli::OutputFormat::Dot) {
+        miette::bail!("sarif and dot output are not supported for migration commands");
+    }
+
     match cmd {
-        cli::MigrateCommand::Knip { .. } => {
-            miette::bail!("migrate knip is not yet implemented");
+        cli::MigrateCommand::Knip { file } => {
+            let output = migrate::migrate_knip(&cwd, file.as_deref())?;
+            print_migration_output(&output, format)?;
+            Ok(ExitCode::SUCCESS)
         }
-        cli::MigrateCommand::Depcruise { .. } => {
-            miette::bail!("migrate depcruise is not yet implemented");
+        cli::MigrateCommand::Depcruise { file, node } => {
+            let output = migrate::migrate_depcruise(&cwd, file.as_deref(), *node)?;
+            print_migration_output(&output, format)?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
@@ -119,9 +145,10 @@ fn load_config_or_default(
 }
 
 fn handle_scan_report(
-    mut report: AnalysisReport,
+    mut scan: oxgraph::ScanExecution,
     flags: &cli::GlobalFlags,
 ) -> miette::Result<ExitCode> {
+    let report = &mut scan.report;
     report.findings = filtered_findings(&report.findings, flags.severity, flags.max_findings);
     let (errors, warnings, infos) = summarize_findings(&report.findings);
     report.summary.total_findings = report.findings.len();
@@ -129,7 +156,11 @@ fn handle_scan_report(
     report.summary.warnings = warnings;
     report.summary.infos = infos;
 
-    print_report(&report, flags.format)?;
+    if matches!(flags.format, cli::OutputFormat::Dot) {
+        println!("{}", oxgraph::render_module_graph_dot(&scan.build, &report.findings));
+    } else {
+        print_report(&report, flags.format)?;
+    }
 
     let exit = if report.findings.is_empty() {
         ExitCode::SUCCESS
@@ -196,7 +227,34 @@ fn print_report<T: serde::Serialize>(
             println!("{}", render_sarif(report)?);
         }
         cli::OutputFormat::Dot => {
-            miette::bail!("dot output is not yet implemented");
+            miette::bail!("dot output requires a scan execution");
+        }
+    }
+    Ok(())
+}
+
+fn print_migration_output(
+    output: &migrate::MigrationOutput,
+    format: cli::OutputFormat,
+) -> miette::Result<()> {
+    match format {
+        cli::OutputFormat::Text => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output.config).expect("serialize migration config")
+            );
+            for warning in &output.warnings {
+                eprintln!("warning: {warning}");
+            }
+        }
+        cli::OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(output).expect("serialize migration output")
+            );
+        }
+        cli::OutputFormat::Sarif | cli::OutputFormat::Dot => {
+            miette::bail!("sarif and dot output are not supported for migration commands");
         }
     }
     Ok(())

@@ -10,7 +10,10 @@ import {
   explain,
   impact,
   loadConfig,
+  migrateDepcruise,
+  migrateKnip,
   scan,
+  scanDot,
 } from "./index.js";
 
 type OutputFormat = "text" | "json" | "sarif" | "dot";
@@ -21,7 +24,9 @@ type Parsed = {
   config?: string;
   format: OutputFormat;
   profile: Profile;
+  changedSince?: string;
   severity: Severity;
+  noCache: boolean;
   maxFindings?: number;
   command: string[];
 };
@@ -41,11 +46,26 @@ function run(parsed: Parsed): void {
   const [command = "scan", ...rest] = parsed.command;
   switch (command) {
     case "scan": {
+      if (parsed.format === "dot") {
+        console.log(
+          scanDot({
+            cwd: process.cwd(),
+            config: parsed.config,
+            paths: rest,
+            profile: parsed.profile,
+            changedSince: parsed.changedSince,
+            noCache: parsed.noCache,
+          }),
+        );
+        return;
+      }
       const report = scan({
         cwd: process.cwd(),
         config: parsed.config,
         paths: rest,
         profile: parsed.profile,
+        changedSince: parsed.changedSince,
+        noCache: parsed.noCache,
       });
       const findings = filterFindings(report.findings, parsed.severity, parsed.maxFindings);
       render(
@@ -66,6 +86,9 @@ function run(parsed: Parsed): void {
       return;
     }
     case "impact": {
+      if (parsed.format === "dot") {
+        throw new Error("dot output is only supported for scan in this phase");
+      }
       const target = rest[0];
       if (!target) {
         throw new Error("impact requires a target");
@@ -77,6 +100,9 @@ function run(parsed: Parsed): void {
       return;
     }
     case "explain": {
+      if (parsed.format === "dot") {
+        throw new Error("dot output is only supported for scan in this phase");
+      }
       const query = rest[0];
       if (!query) {
         throw new Error("explain requires a query");
@@ -123,8 +149,32 @@ function run(parsed: Parsed): void {
       }
       throw new Error("debug requires `resolve` or `entrypoints`");
     }
-    case "migrate":
-      throw new Error("migration commands are not implemented yet");
+    case "migrate": {
+      const [tool, ...migrateArgs] = rest;
+      if (parsed.format === "sarif" || parsed.format === "dot") {
+        throw new Error("sarif and dot output are not supported for migration commands");
+      }
+      if (tool === "knip") {
+        const report = migrateKnip({
+          cwd: process.cwd(),
+          file: migrateArgs[0],
+        });
+        renderMigration(report, parsed.format);
+        return;
+      }
+      if (tool === "depcruise") {
+        const nodeIndex = migrateArgs.indexOf("--node");
+        const file = migrateArgs.find((arg, index) => !(arg === "--node" || index === nodeIndex));
+        const report = migrateDepcruise({
+          cwd: process.cwd(),
+          file,
+          node: nodeIndex !== -1,
+        });
+        renderMigration(report, parsed.format);
+        return;
+      }
+      throw new Error("migrate requires `knip` or `depcruise`");
+    }
     case "--help":
     case "-h":
     case "help":
@@ -136,6 +186,8 @@ function run(parsed: Parsed): void {
         config: parsed.config,
         paths: [command, ...rest],
         profile: parsed.profile,
+        changedSince: parsed.changedSince,
+        noCache: parsed.noCache,
       });
       render(report, parsed.format);
       process.exitCode = report.findings.length > 0 ? 1 : 0;
@@ -147,7 +199,9 @@ function parseArgs(argv: string[]): Parsed {
   let config: string | undefined;
   let format: OutputFormat = "text";
   let profile: Profile = "all";
+  let changedSince: string | undefined;
   let severity: Severity = "warn";
+  let noCache = false;
   let maxFindings: number | undefined;
   const command: string[] = [];
 
@@ -168,9 +222,18 @@ function parseArgs(argv: string[]): Parsed {
       index += 1;
       continue;
     }
+    if (value === "--changed-since") {
+      changedSince = argv[index + 1];
+      index += 1;
+      continue;
+    }
     if (value === "--severity") {
       severity = (argv[index + 1] as Severity | undefined) ?? "warn";
       index += 1;
+      continue;
+    }
+    if (value === "--no-cache") {
+      noCache = true;
       continue;
     }
     if (value === "--max-findings") {
@@ -179,12 +242,12 @@ function parseArgs(argv: string[]): Parsed {
       continue;
     }
     if (value === "--help" || value === "-h") {
-      return { config, format, profile, severity, maxFindings, command: ["help"] };
+      return { config, format, profile, changedSince, severity, noCache, maxFindings, command: ["help"] };
     }
     command.push(value);
   }
 
-  return { config, format, profile, severity, maxFindings, command };
+  return { config, format, profile, changedSince, severity, noCache, maxFindings, command };
 }
 
 function filterFindings<T extends { severity: Severity }>(
@@ -243,10 +306,6 @@ function render(report: unknown, format: OutputFormat): void {
     return;
   }
 
-  if (format === "dot") {
-    throw new Error("dot output is not implemented yet");
-  }
-
   const asRecord = report as Record<string, unknown>;
   if ("summary" in asRecord && "findings" in asRecord) {
     const summary = asRecord.summary as Record<string, number>;
@@ -269,6 +328,19 @@ function render(report: unknown, format: OutputFormat): void {
   }
 
   console.log(JSON.stringify(report, null, 2));
+}
+
+function renderMigration(report: Record<string, unknown>, format: OutputFormat): void {
+  if (format === "json") {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  console.log(JSON.stringify(report.config ?? {}, null, 2));
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  for (const warning of warnings) {
+    console.error(`warning: ${String(warning)}`);
+  }
 }
 
 function defaultConfig(): Record<string, unknown> {

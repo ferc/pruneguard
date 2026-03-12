@@ -20,3 +20,4 @@ ignore = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }
 rustc-hash = { workspace = true }
+serde = { workspace = true }

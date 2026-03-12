@@ -9,6 +9,8 @@ export type ScanOptions = {
   config?: string;
   paths?: string[];
   profile?: Profile;
+  changedSince?: string;
+  noCache?: boolean;
 };
 
 export type ImpactOptions = {
@@ -103,7 +105,26 @@ export type AnalysisReport = {
     entrypointsDetected: number;
     graphNodes: number;
     graphEdges: number;
+    changedFiles: number;
+    affectedFiles: number;
+    affectedPackages: number;
+    affectedEntrypoints: number;
+    baselineApplied: boolean;
+    baselineProfileMismatch: boolean;
+    suppressedFindings: number;
+    newFindings: number;
+    cacheHits: number;
+    cacheMisses: number;
+    cacheEntriesRead: number;
+    cacheEntriesWritten: number;
+    affectedScopeIncomplete: boolean;
   };
+};
+
+export type MigrationOutput = {
+  source: string;
+  config: OxgraphConfig;
+  warnings: string[];
 };
 
 export type ImpactReport = {
@@ -125,6 +146,10 @@ export type OxgraphConfig = Record<string, unknown>;
 
 export function scan(options: ScanOptions = {}): AnalysisReport {
   return JSON.parse(native.scan_json(options)) as AnalysisReport;
+}
+
+export function scanDot(options: ScanOptions = {}): string {
+  return native.scan_dot_text(options);
 }
 
 export function impact(options: ImpactOptions): ImpactReport {
@@ -151,4 +176,19 @@ export function debugEntrypoints(
   options: DebugEntrypointsOptions = {},
 ): string[] {
   return JSON.parse(native.debug_entrypoints_json(options)) as string[];
+}
+
+export function migrateKnip(options: {
+  cwd?: string;
+  file?: string;
+} = {}): MigrationOutput {
+  return JSON.parse(native.migrate_knip_json(options)) as MigrationOutput;
+}
+
+export function migrateDepcruise(options: {
+  cwd?: string;
+  file?: string;
+  node?: boolean;
+} = {}): MigrationOutput {
+  return JSON.parse(native.migrate_depcruise_json(options)) as MigrationOutput;
 }

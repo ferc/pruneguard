@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde::{Deserialize, Serialize};
 
 /// Classification for a tracked repository file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileKind {
     Source,
     Test,
@@ -15,7 +16,7 @@ pub enum FileKind {
 }
 
 /// Finer-grained classification used for entrypoint and analyzer semantics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileRole {
     Source,
     Test,
@@ -84,7 +85,7 @@ impl FileRole {
 }
 
 /// A tracked file in the repository inventory.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRecord {
     pub path: PathBuf,
     pub relative_path: PathBuf,

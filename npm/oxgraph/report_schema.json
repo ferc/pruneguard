@@ -356,6 +356,17 @@
       "description": "Performance statistics.",
       "type": "object",
       "required": [
+        "affectedEntrypoints",
+        "affectedFiles",
+        "affectedPackages",
+        "affectedScopeIncomplete",
+        "baselineApplied",
+        "baselineProfileMismatch",
+        "cacheEntriesRead",
+        "cacheEntriesWritten",
+        "cacheHits",
+        "cacheMisses",
+        "changedFiles",
         "durationMs",
         "entrypointsDetected",
         "filesCached",
@@ -364,9 +375,60 @@
         "filesResolved",
         "graphEdges",
         "graphNodes",
+        "newFindings",
+        "suppressedFindings",
         "unresolvedSpecifiers"
       ],
       "properties": {
+        "affectedEntrypoints": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "affectedFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "affectedPackages": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "affectedScopeIncomplete": {
+          "type": "boolean"
+        },
+        "baselineApplied": {
+          "type": "boolean"
+        },
+        "baselineProfileMismatch": {
+          "type": "boolean"
+        },
+        "cacheEntriesRead": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "cacheEntriesWritten": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "cacheHits": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "cacheMisses": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "changedFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "durationMs": {
           "type": "integer",
           "format": "uint64",
@@ -403,6 +465,16 @@
           "minimum": 0.0
         },
         "graphNodes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "newFindings": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "suppressedFindings": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0

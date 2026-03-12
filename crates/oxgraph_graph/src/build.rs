@@ -1,9 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
 use compact_str::CompactString;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use miette::{IntoDiagnostic, Result};
+use oxgraph_cache::{
+    AnalysisCache, CacheCounters, CachedFileFacts, CachedManifest, CachedResolutions,
+    PathIndexEntry,
+};
 use oxgraph_config::{EntrypointsConfig, OxgraphConfig};
 use oxgraph_discovery::{DiscoveryResult, discover};
 use oxgraph_entrypoints::{EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, detect_entrypoints};
@@ -34,6 +39,11 @@ pub struct GraphBuildResult {
     pub stats: Stats,
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct BuildOptions<'a> {
+    pub cache: Option<&'a AnalysisCache>,
+}
+
 impl GraphBuildResult {
     /// Find a tracked file by absolute path, relative path, or suffix.
     pub fn find_file(&self, query: &str) -> Option<&ExtractedFile> {
@@ -57,6 +67,17 @@ pub fn build_graph(
     scan_paths: &[PathBuf],
     profile: EntrypointProfile,
 ) -> Result<GraphBuildResult> {
+    build_graph_with_options(cwd, config, scan_paths, profile, BuildOptions::default())
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn build_graph_with_options(
+    cwd: &Path,
+    config: &OxgraphConfig,
+    scan_paths: &[PathBuf],
+    profile: EntrypointProfile,
+    options: BuildOptions<'_>,
+) -> Result<GraphBuildResult> {
     let started = Instant::now();
     let scan_roots = normalize_scan_roots(cwd, scan_paths);
     let discovery_cwd = scan_roots.first().map_or_else(|| cwd.to_path_buf(), Clone::clone);
@@ -69,14 +90,68 @@ pub fn build_graph(
     }
 
     let resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
+    let config_hash = hash_json(config);
+    let resolver_hash = hash_json(&config.resolver);
+    let tsconfig_hash = compute_tsconfig_hash(&discovery.project_root, &files);
+    let manifest_hashes = discovery
+        .workspaces
+        .iter()
+        .map(|(name, workspace)| (name.clone(), hash_json(&workspace.manifest)))
+        .collect::<FxHashMap<_, _>>();
+    let mut cache_counters = CacheCounters::default();
     let mut extracted_files = files.into_iter().map(ExtractedFile::new).collect::<Vec<_>>();
     let repo_files = extracted_files
         .iter()
         .map(|file| file.file.path.clone())
         .collect::<FxHashSet<_>>();
 
+    if let Some(cache) = options.cache {
+        for (workspace_name, workspace) in &discovery.workspaces {
+            let _ = cache.put_manifest(&CachedManifest {
+                workspace: workspace_name.clone(),
+                manifest_hash: *manifest_hashes.get(workspace_name).unwrap_or(&0),
+                package_name: workspace.manifest.name.clone(),
+                scripts_json: serde_json::to_vec(&workspace.manifest.scripts)
+                    .unwrap_or_default(),
+            });
+        }
+    }
+
     for extracted_file in &mut extracted_files {
-        populate_extracted_file(extracted_file, &resolver, &repo_files)?;
+        if let Some(cache) = options.cache {
+            let manifest_hash = extracted_file
+                .file
+                .workspace
+                .as_ref()
+                .and_then(|workspace| manifest_hashes.get(workspace))
+                .copied()
+                .unwrap_or(0);
+            let _ = cache.record_path_index(&PathIndexEntry {
+                relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
+                absolute_path: extracted_file.file.path.to_string_lossy().to_string(),
+                workspace: extracted_file.file.workspace.clone(),
+                package: extracted_file.file.package.clone(),
+                manifest_hash,
+            });
+        }
+
+        populate_extracted_file(
+            extracted_file,
+            &resolver,
+            &repo_files,
+            options.cache,
+            &mut cache_counters,
+            config_hash,
+            resolver_hash,
+            tsconfig_hash,
+            extracted_file
+                .file
+                .workspace
+                .as_ref()
+                .and_then(|workspace| manifest_hashes.get(workspace))
+                .copied()
+                .unwrap_or(0),
+        )?;
     }
 
     let packs = built_in_packs();
@@ -174,13 +249,26 @@ pub fn build_graph(
     let stats = Stats {
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         files_parsed: extracted_files.iter().filter(|file| file.facts.is_some()).count(),
-        files_cached: 0,
+        files_cached: cache_counters.hits,
         files_discovered: extracted_files.len(),
         files_resolved,
         unresolved_specifiers,
         entrypoints_detected: entrypoint_seeds.len(),
         graph_nodes: module_graph.node_count(),
         graph_edges: module_graph.edge_count(),
+        changed_files: 0,
+        affected_files: 0,
+        affected_packages: 0,
+        affected_entrypoints: 0,
+        baseline_applied: false,
+        baseline_profile_mismatch: false,
+        suppressed_findings: 0,
+        new_findings: 0,
+        cache_hits: cache_counters.hits,
+        cache_misses: cache_counters.misses,
+        cache_entries_read: cache_counters.entries_read,
+        cache_entries_written: cache_counters.entries_written,
+        affected_scope_incomplete: false,
     };
 
     Ok(GraphBuildResult {
@@ -195,16 +283,40 @@ pub fn build_graph(
     })
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn populate_extracted_file(
     extracted_file: &mut ExtractedFile,
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
+    cache: Option<&AnalysisCache>,
+    cache_counters: &mut CacheCounters,
+    config_hash: u64,
+    resolver_hash: u64,
+    tsconfig_hash: u64,
+    manifest_hash: u64,
 ) -> Result<()> {
     if !has_js_ts_extension(&extracted_file.file.path) {
         return Ok(());
     }
 
-    let source = std::fs::read_to_string(&extracted_file.file.path).into_diagnostic()?;
+    let source_bytes = std::fs::read(&extracted_file.file.path).into_diagnostic()?;
+    let file_hash = hash_bytes(&source_bytes);
+    if let Some(cache) = cache
+        && hydrate_from_cache(
+            extracted_file,
+            cache,
+            cache_counters,
+            file_hash,
+            config_hash,
+            resolver_hash,
+            manifest_hash,
+            tsconfig_hash,
+        )?
+    {
+        return Ok(());
+    }
+
+    let source = String::from_utf8(source_bytes).into_diagnostic()?;
     match extract_file_facts(&extracted_file.file.path, &source) {
         Ok(facts) => {
             extracted_file.external_dependencies.clear();
@@ -285,6 +397,19 @@ fn populate_extracted_file(
         }
     }
 
+    if let Some(cache) = cache {
+        persist_to_cache(
+            extracted_file,
+            cache,
+            cache_counters,
+            file_hash,
+            config_hash,
+            resolver_hash,
+            manifest_hash,
+            tsconfig_hash,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -335,6 +460,98 @@ fn resolve_edge(
             line: Some(line),
         },
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hydrate_from_cache(
+    extracted_file: &mut ExtractedFile,
+    cache: &AnalysisCache,
+    counters: &mut CacheCounters,
+    file_hash: u64,
+    config_hash: u64,
+    resolver_hash: u64,
+    manifest_hash: u64,
+    tsconfig_hash: u64,
+) -> Result<bool> {
+    counters.entries_read += 1;
+    let Some(cached_file) = cache
+        .get_file_facts(&extracted_file.file.path)
+        .map_err(|err| miette::miette!("{err}"))?
+    else {
+        counters.misses += 1;
+        return Ok(false);
+    };
+    counters.entries_read += 1;
+    let Some(cached_resolutions) = cache
+        .get_resolutions(&extracted_file.file.path)
+        .map_err(|err| miette::miette!("{err}"))?
+    else {
+        counters.misses += 1;
+        return Ok(false);
+    };
+
+    if cached_file.file_hash != file_hash
+        || cached_file.config_hash != config_hash
+        || cached_file.resolver_hash != resolver_hash
+        || cached_file.manifest_hash != manifest_hash
+        || cached_file.tsconfig_hash != tsconfig_hash
+    {
+        counters.misses += 1;
+        return Ok(false);
+    }
+
+    extracted_file.facts = serde_json::from_slice(&cached_file.facts_json)
+        .map_err(|err| miette::miette!("{err}"))?;
+    extracted_file.parse_diagnostics = cached_file.parse_diagnostics;
+    extracted_file.external_dependencies = cached_file.external_dependencies;
+    extracted_file.resolved_imports = serde_json::from_slice(&cached_resolutions.resolved_imports_json)
+        .map_err(|err| miette::miette!("{err}"))?;
+    extracted_file.resolved_reexports =
+        serde_json::from_slice(&cached_resolutions.resolved_reexports_json)
+            .map_err(|err| miette::miette!("{err}"))?;
+    counters.hits += 1;
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_to_cache(
+    extracted_file: &ExtractedFile,
+    cache: &AnalysisCache,
+    counters: &mut CacheCounters,
+    file_hash: u64,
+    config_hash: u64,
+    resolver_hash: u64,
+    manifest_hash: u64,
+    tsconfig_hash: u64,
+) -> Result<()> {
+    cache
+        .put_file_facts(&CachedFileFacts {
+            path: extracted_file.file.path.to_string_lossy().to_string(),
+            relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
+            file_hash,
+            config_hash,
+            resolver_hash,
+            manifest_hash,
+            tsconfig_hash,
+            facts_json: serde_json::to_vec(&extracted_file.facts)
+                .map_err(|err| miette::miette!("{err}"))?,
+            parse_diagnostics: extracted_file.parse_diagnostics.clone(),
+            external_dependencies: extracted_file.external_dependencies.clone(),
+        })
+        .map_err(|err| miette::miette!("{err}"))?;
+    counters.entries_written += 1;
+    cache
+        .put_resolutions(&CachedResolutions {
+            path: extracted_file.file.path.to_string_lossy().to_string(),
+            resolved_imports_json: serde_json::to_vec(&extracted_file.resolved_imports)
+                .map_err(|err| miette::miette!("{err}"))?,
+            resolved_reexports_json: serde_json::to_vec(&extracted_file.resolved_reexports)
+                .map_err(|err| miette::miette!("{err}"))?,
+        })
+        .map_err(|err| miette::miette!("{err}"))?;
+    counters.entries_written += 1;
+    counters.misses += 1;
+    Ok(())
 }
 
 fn detect_all_entrypoints(
@@ -692,4 +909,45 @@ fn relative_to_project(project_root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .to_string()
+}
+
+fn compute_tsconfig_hash(project_root: &Path, files: &[oxgraph_fs::FileRecord]) -> u64 {
+    let mut tsconfig_paths = files
+        .iter()
+        .map(|file| &file.relative_path)
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("tsconfig")
+                        && Path::new(name)
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    tsconfig_paths.sort();
+
+    let mut hasher = DefaultHasher::new();
+    for relative_path in tsconfig_paths {
+        hasher.write(relative_path.to_string_lossy().as_bytes());
+        if let Ok(bytes) = std::fs::read(project_root.join(&relative_path)) {
+            hasher.write(&bytes);
+        }
+    }
+    hasher.finish()
+}
+
+fn hash_json<T: serde::Serialize>(value: &T) -> u64 {
+    match serde_json::to_vec(value) {
+        Ok(bytes) => hash_bytes(&bytes),
+        Err(_) => 0,
+    }
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }

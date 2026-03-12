@@ -25,6 +25,7 @@ oxgraph_frameworks = { workspace = true }
 oxgraph_manifest = { workspace = true }
 oxgraph_report = { workspace = true }
 oxgraph_resolver = { workspace = true }
+oxgraph_cache = { workspace = true }
 
 globset = { workspace = true }
 miette = { workspace = true }
@@ -32,6 +33,7 @@ petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 compact_str = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

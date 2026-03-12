@@ -40,6 +40,7 @@ oxgraph_analyzers = { workspace = true }
 oxgraph_rules = { workspace = true }
 oxgraph_report = { workspace = true }
 oxgraph_cache = { workspace = true }
+oxgraph_git = { workspace = true }
 
 bpaf = { workspace = true }
 miette = { workspace = true }

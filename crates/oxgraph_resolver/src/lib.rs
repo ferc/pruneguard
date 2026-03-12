@@ -5,9 +5,10 @@ use oxc_resolver::{
 };
 use oxgraph_config::ResolverConfig;
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 /// Result of resolving a module specifier.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedModule {
     /// The resolved file path.
     pub path: PathBuf,
@@ -16,7 +17,7 @@ pub struct ResolvedModule {
 }
 
 /// Graph-facing kind of a resolved dependency edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResolvedEdgeKind {
     StaticImportValue,
     StaticImportType,
@@ -28,7 +29,7 @@ pub enum ResolvedEdgeKind {
 }
 
 /// A resolved edge emitted while extracting a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedEdge {
     pub from: PathBuf,
     pub specifier: String,
@@ -41,14 +42,14 @@ pub struct ResolvedEdge {
     pub line: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResolutionOutcome {
     ResolvedToFile,
     ResolvedToDependency,
     Unresolved,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnresolvedReason {
     MissingFile,
     UnsupportedSpecifier,
