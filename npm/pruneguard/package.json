@@ -12,13 +12,13 @@
     "dependency-graph",
     "architecture"
   ],
-  "homepage": "https://github.com/user/pruneguard",
-  "bugs": "https://github.com/user/pruneguard/issues",
+  "homepage": "https://github.com/ferc/pruneguard",
+  "bugs": "https://github.com/ferc/pruneguard/issues",
   "license": "MIT",
   "author": "pruneguard contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/user/pruneguard",
+    "url": "git+https://github.com/ferc/pruneguard",
     "directory": "npm/pruneguard"
   },
   "bin": {

@@ -6,10 +6,10 @@ members = ["apps/*", "crates/*"]
 authors = ["pruneguard contributors"]
 categories = ["development-tools"]
 edition = "2024"
-homepage = "https://github.com/user/pruneguard"
+homepage = "https://github.com/ferc/pruneguard"
 keywords = ["javascript", "typescript", "monorepo", "graph", "unused-code"]
 license = "MIT"
-repository = "https://github.com/user/pruneguard"
+repository = "https://github.com/ferc/pruneguard"
 rust-version = "1.92.0"
 description = "Repo truth engine for JS/TS monorepos"
 
