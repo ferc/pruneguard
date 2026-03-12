@@ -141,7 +141,7 @@ pack-smoke: _pack-smoke-build
     export function neverCalled() { return "dead code"; }
     FIXTURE_UNUSED
     echo "  -> CLI scan"
-    CLI_OUT=$(cd "$SMOKE_DIR/fixture" && npx pruneguard --format json --no-cache --no-baseline scan)
+    CLI_OUT=$(cd "$SMOKE_DIR/fixture" && npx pruneguard --format json --no-cache --no-baseline scan) || [ $? -eq 1 ]
     echo "$CLI_OUT" | node -e "
       let buf=''; process.stdin.on('data',c=>buf+=c); process.stdin.on('end',()=>{
         const j=JSON.parse(buf);

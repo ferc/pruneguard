@@ -104,7 +104,7 @@ pub enum FindingCategory {
     Impact,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FindingConfidence {
     High,
@@ -327,8 +327,92 @@ pub struct UnresolvedByReasonStats {
     pub externalized: usize,
 }
 
+/// Branch review report for CI/agent branch gating.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewReport {
+    /// Base ref used for comparison.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_ref: Option<String>,
+    /// Files changed on this branch.
+    pub changed_files: Vec<String>,
+    /// All new findings introduced on this branch.
+    pub new_findings: Vec<Finding>,
+    /// Findings that should block merge (high confidence errors/warnings).
+    pub blocking_findings: Vec<Finding>,
+    /// Findings that are advisory (medium/low confidence, or info severity).
+    pub advisory_findings: Vec<Finding>,
+    /// Trust summary for this review.
+    pub trust: ReviewTrust,
+    /// Concise recommendations for the branch author.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommendations: Vec<String>,
+}
+
+/// Trust summary within a review report.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewTrust {
+    /// Whether full-scope analysis was performed.
+    pub full_scope: bool,
+    /// Whether a baseline was applied.
+    pub baseline_applied: bool,
+    /// Unresolved specifier pressure ratio.
+    pub unresolved_pressure: f64,
+    /// Confidence counts for new findings.
+    pub confidence_counts: ConfidenceCounts,
+}
+
+/// Safe-delete report for deletion approval workflows.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeDeleteReport {
+    /// Targets that were evaluated.
+    pub targets: Vec<String>,
+    /// Targets safe to delete.
+    pub safe: Vec<SafeDeleteCandidate>,
+    /// Targets that need manual review before deletion.
+    pub needs_review: Vec<SafeDeleteCandidate>,
+    /// Targets that should not be deleted.
+    pub blocked: Vec<SafeDeleteCandidate>,
+    /// Recommended deletion order (safe targets only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deletion_order: Vec<String>,
+    /// Supporting evidence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
+}
+
+/// A candidate in a safe-delete evaluation.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeDeleteCandidate {
+    /// The target file or export.
+    pub target: String,
+    /// Confidence in the safety assessment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<FindingConfidence>,
+    /// Reasons for the classification.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+}
+
 impl AnalysisReport {
     /// Generate the JSON Schema for the report format.
+    pub fn json_schema() -> schemars::schema::RootSchema {
+        schemars::schema_for!(Self)
+    }
+}
+
+impl ReviewReport {
+    /// Generate the JSON Schema for the review report format.
+    pub fn json_schema() -> schemars::schema::RootSchema {
+        schemars::schema_for!(Self)
+    }
+}
+
+impl SafeDeleteReport {
+    /// Generate the JSON Schema for the safe-delete report format.
     pub fn json_schema() -> schemars::schema::RootSchema {
         schemars::schema_for!(Self)
     }

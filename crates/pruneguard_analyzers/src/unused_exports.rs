@@ -119,7 +119,7 @@ pub fn analyze(
             line: None,
             description: "No reachable import or re-export demand reaches this export.".to_string(),
         }];
-        if unresolved_count > 5 {
+        if unresolved_count >= 5 {
             evidence.push(Evidence {
                 kind: "unresolved-pressure".to_string(),
                 file: Some(relative_path.clone()),

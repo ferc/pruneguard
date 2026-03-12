@@ -183,6 +183,47 @@ export type ExplainReport = {
 
 export type PruneguardConfig = Record<string, unknown>;
 
+export type ReviewOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+  baseRef?: string;
+  noCache?: boolean;
+  noBaseline?: boolean;
+};
+
+export type ReviewReport = {
+  baseRef?: string;
+  changedFiles: string[];
+  newFindings: AnalysisReport["findings"];
+  blockingFindings: AnalysisReport["findings"];
+  advisoryFindings: AnalysisReport["findings"];
+  trust: {
+    fullScope: boolean;
+    baselineApplied: boolean;
+    unresolvedPressure: number;
+    confidenceCounts: { high: number; medium: number; low: number };
+  };
+  recommendations: string[];
+};
+
+export type SafeDeleteOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+  targets: string[];
+  noCache?: boolean;
+};
+
+export type SafeDeleteReport = {
+  targets: string[];
+  safe: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
+  needsReview: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
+  blocked: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
+  deletionOrder: string[];
+  evidence: Array<{ kind: string; file?: string; line?: number; description: string }>;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -337,6 +378,34 @@ export async function debugEntrypoints(
   const result = await runBinary(args, { cwd: options.cwd });
   requireSuccess(result);
   return result.stdout.trimEnd().split("\n").filter(Boolean);
+}
+
+export async function review(options: ReviewOptions = {}): Promise<ReviewReport> {
+  const args = ["--format", "json", "--severity", "info"];
+  pushGlobalFlags(args, options);
+  if (options.baseRef) args.push("--changed-since", options.baseRef);
+  if (options.noCache) args.push("--no-cache");
+  if (options.noBaseline) args.push("--no-baseline");
+  args.push("review");
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    requireSuccess(result);
+  }
+  return parseJson<ReviewReport>(result);
+}
+
+export async function safeDelete(options: SafeDeleteOptions): Promise<SafeDeleteReport> {
+  const args = ["--format", "json"];
+  pushGlobalFlags(args, options);
+  if (options.noCache) args.push("--no-cache");
+  args.push("safe-delete", ...options.targets);
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    requireSuccess(result);
+  }
+  return parseJson<SafeDeleteReport>(result);
 }
 
 export async function migrateKnip(options: {

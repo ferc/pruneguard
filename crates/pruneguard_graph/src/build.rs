@@ -181,7 +181,11 @@ pub fn build_graph_with_options(
         .collect::<FxHashMap<_, _>>();
     entrypoint_seeds.retain(|seed| {
         let Some(role) = file_roles.get(&seed.path).copied() else {
-            return false;
+            // Framework-contributed entrypoints (e.g. story files discovered by
+            // StorybookPack) may not appear in the file walker's inventory because
+            // the walker and the framework pack traverse directories independently.
+            // Keep them so they can still seed the graph.
+            return seed.kind == SeedKind::FrameworkPack;
         };
         should_keep_entrypoint_seed(seed, role, config)
     });
@@ -692,7 +696,8 @@ fn should_keep_entrypoint_seed(
     role: FileRole,
     config: &PruneguardConfig,
 ) -> bool {
-    if seed.kind == SeedKind::ExplicitConfig {
+    // Explicit config and framework-contributed entrypoints are always kept.
+    if seed.kind == SeedKind::ExplicitConfig || seed.kind == SeedKind::FrameworkPack {
         return true;
     }
 

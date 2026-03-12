@@ -56,7 +56,7 @@ pub fn analyze(
             // Some unresolved specifiers (< 5) or has some incoming edges.
             FindingConfidence::Medium
         };
-        if unresolved_count > 5 {
+        if unresolved_count >= 5 {
             evidence.push(Evidence {
                 kind: "unresolved-pressure".to_string(),
                 file: Some(extracted_file.file.relative_path.to_string_lossy().to_string()),

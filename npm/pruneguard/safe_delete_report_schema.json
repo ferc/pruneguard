@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SafeDeleteReport",
+  "description": "Safe-delete report for deletion approval workflows.",
+  "type": "object",
+  "required": [
+    "blocked",
+    "needsReview",
+    "safe",
+    "targets"
+  ],
+  "properties": {
+    "blocked": {
+      "description": "Targets that should not be deleted.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SafeDeleteCandidate"
+      }
+    },
+    "deletionOrder": {
+      "description": "Recommended deletion order (safe targets only).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "description": "Supporting evidence.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Evidence"
+      }
+    },
+    "needsReview": {
+      "description": "Targets that need manual review before deletion.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SafeDeleteCandidate"
+      }
+    },
+    "safe": {
+      "description": "Targets safe to delete.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SafeDeleteCandidate"
+      }
+    },
+    "targets": {
+      "description": "Targets that were evaluated.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "Evidence": {
+      "description": "Evidence supporting a finding.",
+      "type": "object",
+      "required": [
+        "description",
+        "kind"
+      ],
+      "properties": {
+        "description": {
+          "description": "Description of this evidence.",
+          "type": "string"
+        },
+        "file": {
+          "description": "File path involved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Type of evidence.",
+          "type": "string"
+        },
+        "line": {
+          "description": "Line number, if applicable.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "FindingConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "SafeDeleteCandidate": {
+      "description": "A candidate in a safe-delete evaluation.",
+      "type": "object",
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "confidence": {
+          "description": "Confidence in the safety assessment.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FindingConfidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasons": {
+          "description": "Reasons for the classification.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "target": {
+          "description": "The target file or export.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

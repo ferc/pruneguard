@@ -14,6 +14,8 @@ export type ResolutionInfo = {
   source: ResolutionSource;
   platformPackage?: string;
   schemaPath?: string;
+  version?: string;
+  platform?: string;
 };
 
 export type CommandResult = {
@@ -32,6 +34,7 @@ export class PruneguardExecutionError extends Error {
   stderr?: string;
   binaryPath?: string;
   args?: string[];
+  resolutionSource?: ResolutionSource;
 
   constructor(
     code: PruneguardExecutionError["code"],
@@ -42,6 +45,7 @@ export class PruneguardExecutionError extends Error {
       stderr?: string;
       binaryPath?: string;
       args?: string[];
+      resolutionSource?: ResolutionSource;
     },
   ) {
     super(message);
@@ -52,6 +56,7 @@ export class PruneguardExecutionError extends Error {
     this.stderr = details?.stderr;
     this.binaryPath = details?.binaryPath;
     this.args = details?.args;
+    this.resolutionSource = details?.resolutionSource;
   }
 }
 
@@ -119,16 +124,19 @@ function validateExecutable(binPath: string, source: ResolutionSource): void {
   if (!existsSync(binPath)) {
     throw new PruneguardExecutionError(
       "PRUNEGUARD_BINARY_NOT_FOUND",
-      `[${source}] Binary does not exist: ${binPath}`,
-      { binaryPath: binPath },
+      `[${source}] Binary does not exist: ${binPath}. Run "pruneguard debug runtime" for diagnostics.`,
+      { binaryPath: binPath, resolutionSource: source },
     );
   }
   if (process.platform !== "win32") {
     try {
       accessSync(binPath, constants.X_OK);
     } catch {
-      // Non-fatal: file exists but is not executable. This may still work
-      // if the OS allows execution via other means, so we only warn.
+      throw new PruneguardExecutionError(
+        "PRUNEGUARD_BINARY_NOT_FOUND",
+        `[${source}] Binary exists but is not executable: ${binPath}. Try: chmod +x "${binPath}"`,
+        { binaryPath: binPath, resolutionSource: source },
+      );
     }
   }
 }
@@ -177,13 +185,16 @@ export function binaryPath(options?: { allowPathFallback?: boolean }): string {
 
   const key = `${process.platform}-${process.arch === "arm64" ? "arm64" : "x64"}`;
   const expectedPkgs = PLATFORM_PACKAGES[key];
+  const tried = ["env(PRUNEGUARD_BINARY)", "platform-package", "dev(cargo build)"];
+  if (options?.allowPathFallback) tried.push("PATH");
   const pkgHint = expectedPkgs?.length
-    ? ` Expected platform package: ${expectedPkgs.join(" or ")}.`
+    ? `\n  Expected platform package: ${expectedPkgs.join(" or ")}`
     : "";
+  const platform = `${process.platform}-${process.arch}`;
 
   throw new PruneguardExecutionError(
     "PRUNEGUARD_BINARY_NOT_FOUND",
-    `Could not find the pruneguard binary. Tried: env, platform-package, dev${options?.allowPathFallback ? ", path" : ""}.${pkgHint} Set PRUNEGUARD_BINARY or install a platform-specific package.`,
+    `Could not find the pruneguard binary for ${platform}.\n  Tried: ${tried.join(", ")}${pkgHint}\n  Fix: npm install pruneguard (or set PRUNEGUARD_BINARY)\n  Debug: npx pruneguard debug runtime`,
   );
 }
 
@@ -194,6 +205,7 @@ export function resolutionInfo(): ResolutionInfo {
     source: cachedResolutionSource!,
     ...(cachedPlatformPackage ? { platformPackage: cachedPlatformPackage } : {}),
     schemaPath: join(dirname(fileURLToPath(import.meta.url)), "..", "configuration_schema.json"),
+    platform: `${process.platform}-${process.arch}`,
   };
 }
 
@@ -222,6 +234,7 @@ export function run(args: string[], options?: { cwd?: string }): Promise<Command
         new PruneguardExecutionError("PRUNEGUARD_EXECUTION_FAILED", `Failed to spawn pruneguard: ${err.message}`, {
           binaryPath: binary,
           args,
+          resolutionSource: cachedResolutionSource,
         }),
       );
     });

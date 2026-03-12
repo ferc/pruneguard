@@ -7,6 +7,7 @@ fn fixture_root(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../fixtures/cases/{name}"))
 }
 
+#[allow(clippy::similar_names)]
 fn run_pruneguard(root: &std::path::Path, args: &[&str]) -> Value {
     let mut argv = vec!["--no-cache"];
     argv.extend_from_slice(args);
@@ -17,6 +18,21 @@ fn run_pruneguard(root: &std::path::Path, args: &[&str]) -> Value {
         .expect("pruneguard should run");
 
     serde_json::from_slice(&output.stdout).expect("command should emit valid json")
+}
+
+#[allow(clippy::similar_names)]
+fn run_pruneguard_with_exit(root: &std::path::Path, args: &[&str]) -> (Value, i32) {
+    let mut argv = vec!["--no-cache"];
+    argv.extend_from_slice(args);
+    let output = Command::new(env!("CARGO_BIN_EXE_pruneguard"))
+        .current_dir(root)
+        .args(&argv)
+        .output()
+        .expect("pruneguard should run");
+
+    let exit_code = output.status.code().unwrap_or(-1);
+    let json = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
+    (json, exit_code)
 }
 
 #[test]
@@ -596,4 +612,63 @@ fn package_exports_conditions_resolve_correctly() {
             .any(|f| { f["code"] == "unused-file" && f["subject"] == "src/internal.mjs" }),
         "src/internal.mjs is not exposed via package exports and should be unused"
     );
+}
+
+#[test]
+fn review_produces_blocking_and_advisory_findings() {
+    let root = fixture_root("unused-file-basic");
+    let (report, exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "--no-baseline", "review"]);
+
+    assert!(report["trust"]["fullScope"].as_bool().unwrap_or(false), "review should be full-scope");
+    assert!(
+        report["newFindings"].as_array().is_some_and(|arr| !arr.is_empty()),
+        "review should find issues"
+    );
+    // High-confidence unused-file should be blocking
+    assert!(
+        report["blockingFindings"]
+            .as_array()
+            .is_some_and(|arr| arr.iter().any(|f| f["code"] == "unused-file")),
+        "high-confidence unused-file should be blocking"
+    );
+    assert!(report["recommendations"].as_array().is_some_and(|arr| !arr.is_empty()));
+    assert_eq!(exit_code, 1, "review with blocking findings should exit 1");
+}
+
+#[test]
+fn safe_delete_marks_unused_file_as_safe() {
+    let root = fixture_root("unused-file-basic");
+    let (report, exit_code) = run_pruneguard_with_exit(
+        &root,
+        &["--format", "json", "--no-baseline", "safe-delete", "src/unused.ts"],
+    );
+
+    assert_eq!(report["targets"].as_array().unwrap().len(), 1);
+    assert!(
+        report["safe"].as_array().is_some_and(|arr| arr
+            .iter()
+            .any(|c| c["target"] == "src/unused.ts" && c["confidence"] == "high")),
+        "unused file should be safe to delete with high confidence"
+    );
+    assert!(report["blocked"].as_array().unwrap().is_empty());
+    assert_eq!(exit_code, 0, "safe-delete with only safe targets should exit 0");
+}
+
+#[test]
+fn safe_delete_blocks_live_file() {
+    let root = fixture_root("unused-file-basic");
+    let (report, exit_code) = run_pruneguard_with_exit(
+        &root,
+        &["--format", "json", "--no-baseline", "safe-delete", "src/used.ts"],
+    );
+
+    assert!(
+        report["blocked"]
+            .as_array()
+            .is_some_and(|arr| arr.iter().any(|c| c["target"] == "src/used.ts")),
+        "live file should be blocked from deletion"
+    );
+    assert!(report["safe"].as_array().unwrap().is_empty());
+    assert_eq!(exit_code, 1, "safe-delete with blocked targets should exit 1");
 }

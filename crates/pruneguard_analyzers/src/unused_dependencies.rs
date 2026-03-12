@@ -87,6 +87,12 @@ pub fn analyze(
                 continue;
             }
 
+            // Skip build-tool dependencies that are used by the toolchain rather
+            // than imported in source code.
+            if is_build_tool_dependency(dependency) {
+                continue;
+            }
+
             // Skip dependencies that are referenced directly in package.json scripts
             // (e.g. "build": "vite build" means vite is used even without source imports).
             if scripts_reference_dependency(&workspace.manifest, dependency) {
@@ -205,6 +211,47 @@ fn declared_dependencies<'a>(
     dependencies
 }
 
+/// Dependencies that are consumed by the build toolchain or runtime environment
+/// rather than imported in source code.  These will never resolve through the
+/// module graph, so flagging them as unused is a false positive.
+fn is_build_tool_dependency(dep: &str) -> bool {
+    // @types/* packages are consumed by the TypeScript compiler, not imported.
+    if dep.starts_with("@types/") {
+        return true;
+    }
+
+    matches!(
+        dep,
+        // Language / compiler
+        "typescript"
+            // CSS toolchain
+            | "postcss"
+            | "autoprefixer"
+            | "tailwindcss"
+            | "@tailwindcss/typography"
+            | "@tailwindcss/forms"
+            | "@tailwindcss/container-queries"
+            | "@tailwindcss/vite"
+            | "cssnano"
+            | "sass"
+            | "less"
+            // Bundler plugins (loaded by config, not imported)
+            | "@vitejs/plugin-react"
+            | "@vitejs/plugin-react-swc"
+            | "@vitejs/plugin-vue"
+            | "vite-tsconfig-paths"
+            | "@tanstack/router-plugin"
+            | "@tanstack/router-vite-plugin"
+            | "@content-collections/core"
+            | "@content-collections/vite"
+            | "@content-collections/next"
+            // Script runners (invoked via scripts, not imported)
+            | "tsx"
+            | "ts-node"
+            | "tsm"
+    )
+}
+
 /// Check if any package.json script directly references a dependency by name.
 ///
 /// Handles common patterns:
@@ -259,10 +306,11 @@ fn script_references_bin(script: &str, bin_name: &str) -> bool {
         }
 
         // Runner patterns: `pnpm exec <pkg>`, `npx <pkg>`, `yarn exec <pkg>`,
-        //                   `pnpm <pkg>`, `yarn <pkg>`, `bunx <pkg>`
+        //                   `pnpm <pkg>`, `yarn <pkg>`, `bunx <pkg>`,
+        //                   `tsx <file>`, `ts-node <file>`, `npm exec <pkg>`
         match first {
-            "npx" | "bunx" => {
-                // npx/bunx may have flags before the package name.
+            "npx" | "bunx" | "tsx" | "ts-node" | "tsm" => {
+                // npx/bunx/tsx/ts-node may have flags before the package name.
                 for token in tokens {
                     if token.starts_with('-') {
                         continue;
@@ -270,7 +318,7 @@ fn script_references_bin(script: &str, bin_name: &str) -> bool {
                     return token == bin_name;
                 }
             }
-            "pnpm" | "yarn" => {
+            "pnpm" | "yarn" | "npm" => {
                 if let Some(second) = tokens.next() {
                     if second == "exec" || second == "run" || second == "dlx" {
                         // Next non-flag token is the package/binary name.

@@ -53,6 +53,12 @@ pruneguard debug resolve ./utils --from src/index.ts
 
 # Debug runtime/install info
 pruneguard debug runtime
+
+# Branch review (CI/agent gate)
+pruneguard --changed-since origin/main review
+
+# Safe-delete check
+pruneguard safe-delete src/utils/old-helper.ts src/legacy/widget.ts
 ```
 
 ## JS API
@@ -82,8 +88,16 @@ console.log(binaryPath());
 // Load resolved config
 const config = await loadConfig();
 
+// Branch review (blocking vs advisory findings)
+const reviewResult = await review({ baseRef: "origin/main" });
+console.log(reviewResult.blockingFindings);
+
+// Safe-delete check
+const deleteCheck = await safeDelete({ targets: ["src/old.ts"] });
+console.log(deleteCheck.safe, deleteCheck.blocked);
+
 // Additional helpers
-import { scanDot, migrateKnip, migrateDepcruise } from "pruneguard";
+import { scanDot, review, safeDelete, migrateKnip, migrateDepcruise } from "pruneguard";
 
 const dot = await scanDot();                    // Graphviz DOT output
 const knipMigration = await migrateKnip();      // Migrate from knip config
@@ -108,7 +122,25 @@ pruneguard --no-baseline --no-cache --format json scan
 
 Deterministic, no prior-state influence. Use exit code to gate merges.
 
-### Safe deletion review
+### Branch review for CI/agents
+
+```sh
+pruneguard --changed-since origin/main review
+```
+
+Runs a full-scope scan, classifies new findings as blocking (high confidence + error/warn)
+or advisory, and produces a trust summary. Exit 0 = no blockers, exit 1 = blocking findings.
+
+### Safe-delete check
+
+```sh
+pruneguard safe-delete src/utils/old-helper.ts src/legacy/widget.ts
+```
+
+Evaluates each target for safe deletion. Classifies targets as `safe`, `needsReview`, or
+`blocked` with confidence levels and reasons. Returns a recommended deletion order.
+
+### Manual deletion workflow
 
 ```sh
 # 1. Scan for unused code

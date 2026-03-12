@@ -54,6 +54,8 @@ pub enum Command {
     Scan { paths: Vec<PathBuf> },
     Impact { target: String },
     Explain { query: String },
+    Review,
+    SafeDelete { targets: Vec<String> },
     Init,
     PrintConfig,
     Debug(DebugCommand),
@@ -163,6 +165,17 @@ fn explain_command() -> impl Parser<Command> {
     construct!(Command::Explain { query })
 }
 
+fn review_command() -> impl Parser<Command> {
+    pure(Command::Review)
+}
+
+fn safe_delete_command() -> impl Parser<Command> {
+    let targets = positional::<String>("TARGETS")
+        .help("Files or exports to evaluate for safe deletion")
+        .many();
+    construct!(Command::SafeDelete { targets })
+}
+
 fn init_command() -> impl Parser<Command> {
     pure(Command::Init)
 }
@@ -233,6 +246,12 @@ fn command_parser() -> impl Parser<Command> {
         impact_command().to_options().descr("Compute blast radius for a target").command("impact");
     let explain =
         explain_command().to_options().descr("Explain a finding or path").command("explain");
+    let review =
+        review_command().to_options().descr("Review branch for CI/agent gating").command("review");
+    let safe_delete = safe_delete_command()
+        .to_options()
+        .descr("Evaluate targets for safe deletion")
+        .command("safe-delete");
     let init =
         init_command().to_options().descr("Generate an pruneguard.json config").command("init");
     let print_config = print_config_command()
@@ -249,7 +268,18 @@ fn command_parser() -> impl Parser<Command> {
     // Default to scan when no subcommand is given
     let default_scan = scan_command();
 
-    construct!([scan, impact, explain, init, print_config, debug, migrate, default_scan])
+    construct!([
+        scan,
+        impact,
+        explain,
+        review,
+        safe_delete,
+        init,
+        print_config,
+        debug,
+        migrate,
+        default_scan
+    ])
 }
 
 pub fn options() -> OptionParser<Options> {

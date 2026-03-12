@@ -12,6 +12,11 @@ try {
     process.on(sig, () => child.kill(sig));
   }
 
+  child.on("error", (err) => {
+    console.error(`pruneguard: failed to execute binary: ${err.message}`);
+    process.exitCode = 2;
+  });
+
   child.on("close", (code, signal) => {
     if (signal) {
       process.kill(process.pid, signal);

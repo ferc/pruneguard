@@ -27,6 +27,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run(options: cli::Options) -> miette::Result<ExitCode> {
     let cwd = std::env::current_dir().expect("failed to get current directory");
     let profile = to_entrypoint_profile(options.global.profile);
@@ -94,6 +95,50 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        cli::Command::Review => {
+            let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            let report = pruneguard::review(
+                &cwd,
+                &config,
+                profile,
+                &pruneguard::ReviewOptions {
+                    config_dir: Some(cwd.clone()),
+                    base_ref: options.global.changed_since.clone(),
+                    no_cache: options.global.no_cache,
+                    no_baseline: options.global.no_baseline,
+                },
+            )?;
+            print_report(&report, options.global.format)?;
+            let exit = if report.blocking_findings.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            };
+            Ok(exit)
+        }
+        cli::Command::SafeDelete { targets } => {
+            let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            if targets.is_empty() {
+                miette::bail!("safe-delete requires at least one target");
+            }
+            let report = pruneguard::safe_delete(
+                &cwd,
+                &config,
+                &targets,
+                profile,
+                &pruneguard::SafeDeleteOptions {
+                    config_dir: Some(cwd.clone()),
+                    no_cache: options.global.no_cache,
+                },
+            )?;
+            print_report(&report, options.global.format)?;
+            let exit = if report.blocked.is_empty() && report.needs_review.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            };
+            Ok(exit)
+        }
         cli::Command::Init => {
             pruneguard_config::PruneguardConfig::init()?;
             eprintln!("Created pruneguard.json");
@@ -141,11 +186,21 @@ fn run_debug(
                 .ok()
                 .and_then(|p| p.parent().map(|dir| dir.join("configuration_schema.json")))
                 .map_or_else(|| "unknown".to_string(), |p| p.display().to_string());
+            let schema_exists = std::path::Path::new(&schema_path).exists();
+            let config_status = match pruneguard_config::PruneguardConfig::load(&cwd, None) {
+                Ok(_) => "found".to_string(),
+                Err(pruneguard_config::ConfigError::NotFound) => {
+                    "not found (using defaults)".to_string()
+                }
+                Err(err) => format!("error: {err}"),
+            };
             println!("binary: {binary}");
             println!("platform: {}-{}", std::env::consts::OS, std::env::consts::ARCH);
             println!("version: {}", env!("CARGO_PKG_VERSION"));
             println!("cwd: {}", cwd.display());
             println!("schema_path: {schema_path}");
+            println!("schema_exists: {schema_exists}");
+            println!("config: {config_status}");
             println!("resolution_source: binary");
             Ok(ExitCode::SUCCESS)
         }

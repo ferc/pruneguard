@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReviewReport",
+  "description": "Branch review report for CI/agent branch gating.",
+  "type": "object",
+  "required": [
+    "advisoryFindings",
+    "blockingFindings",
+    "changedFiles",
+    "newFindings",
+    "trust"
+  ],
+  "properties": {
+    "advisoryFindings": {
+      "description": "Findings that are advisory (medium/low confidence, or info severity).",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "baseRef": {
+      "description": "Base ref used for comparison.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "blockingFindings": {
+      "description": "Findings that should block merge (high confidence errors/warnings).",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "changedFiles": {
+      "description": "Files changed on this branch.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "newFindings": {
+      "description": "All new findings introduced on this branch.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "recommendations": {
+      "description": "Concise recommendations for the branch author.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "trust": {
+      "description": "Trust summary for this review.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewTrust"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ConfidenceCounts": {
+      "type": "object",
+      "required": [
+        "high",
+        "low",
+        "medium"
+      ],
+      "properties": {
+        "high": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "low": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "medium": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Evidence": {
+      "description": "Evidence supporting a finding.",
+      "type": "object",
+      "required": [
+        "description",
+        "kind"
+      ],
+      "properties": {
+        "description": {
+          "description": "Description of this evidence.",
+          "type": "string"
+        },
+        "file": {
+          "description": "File path involved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Type of evidence.",
+          "type": "string"
+        },
+        "line": {
+          "description": "Line number, if applicable.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Finding": {
+      "description": "A single finding from analysis.",
+      "type": "object",
+      "required": [
+        "category",
+        "code",
+        "confidence",
+        "id",
+        "message",
+        "severity",
+        "subject"
+      ],
+      "properties": {
+        "category": {
+          "description": "Category of the finding.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingCategory"
+            }
+          ]
+        },
+        "code": {
+          "description": "Machine-readable code (e.g. `unused-export`, `cycle`, `boundary-violation`).",
+          "type": "string"
+        },
+        "confidence": {
+          "description": "Confidence level for this finding.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingConfidence"
+            }
+          ]
+        },
+        "evidence": {
+          "description": "Evidence supporting the finding.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Evidence"
+          }
+        },
+        "id": {
+          "description": "Stable deterministic ID for this finding.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable message.",
+          "type": "string"
+        },
+        "package": {
+          "description": "Package this finding belongs to, if applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ruleName": {
+          "description": "Name of the rule that produced this finding, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "description": "Severity level.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingSeverity"
+            }
+          ]
+        },
+        "subject": {
+          "description": "The subject of the finding (file path, export name, etc.).",
+          "type": "string"
+        },
+        "suggestion": {
+          "description": "Suggested fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "description": "Workspace this finding belongs to, if applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "FindingCategory": {
+      "type": "string",
+      "enum": [
+        "unused-export",
+        "unused-file",
+        "unused-package",
+        "unused-dependency",
+        "cycle",
+        "boundary-violation",
+        "ownership-violation",
+        "impact"
+      ]
+    },
+    "FindingConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "FindingSeverity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn",
+        "info"
+      ]
+    },
+    "ReviewTrust": {
+      "description": "Trust summary within a review report.",
+      "type": "object",
+      "required": [
+        "baselineApplied",
+        "confidenceCounts",
+        "fullScope",
+        "unresolvedPressure"
+      ],
+      "properties": {
+        "baselineApplied": {
+          "description": "Whether a baseline was applied.",
+          "type": "boolean"
+        },
+        "confidenceCounts": {
+          "description": "Confidence counts for new findings.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConfidenceCounts"
+            }
+          ]
+        },
+        "fullScope": {
+          "description": "Whether full-scope analysis was performed.",
+          "type": "boolean"
+        },
+        "unresolvedPressure": {
+          "description": "Unresolved specifier pressure ratio.",
+          "type": "number",
+          "format": "double"
+        }
+      }
+    }
+  }
+}

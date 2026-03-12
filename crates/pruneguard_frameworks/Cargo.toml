@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 pruneguard_config = { workspace = true }
+pruneguard_fs = { workspace = true }
 pruneguard_manifest = { workspace = true }
 
 globset = { workspace = true }

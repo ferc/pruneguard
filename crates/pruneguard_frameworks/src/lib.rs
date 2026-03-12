@@ -37,6 +37,8 @@ pub fn built_in_packs() -> Vec<Box<dyn FrameworkPack>> {
         Box::new(VitestPack),
         Box::new(JestPack),
         Box::new(StorybookPack),
+        Box::new(FileBasedRoutingPack),
+        Box::new(RootConfigPack),
     ]
 }
 
@@ -59,24 +61,20 @@ impl FrameworkPack for NextPack {
 
     fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
         let mut entries = Vec::new();
-        // App router pages
-        for ext in &["ts", "tsx", "js", "jsx"] {
-            let page = workspace_root.join(format!("app/page.{ext}"));
-            if page.exists() {
-                entries.push(page);
-            }
-            let layout = workspace_root.join(format!("app/layout.{ext}"));
-            if layout.exists() {
-                entries.push(layout);
-            }
+
+        // App Router: ALL files under app/ are framework entrypoints
+        // (page.tsx, layout.tsx, route.ts, loading.tsx, error.tsx, template.tsx, etc.)
+        let app_dir = workspace_root.join("app");
+        if app_dir.exists() {
+            collect_files_recursive(&app_dir, &mut entries);
         }
-        // Pages router
-        for ext in &["ts", "tsx", "js", "jsx"] {
-            let index = workspace_root.join(format!("pages/index.{ext}"));
-            if index.exists() {
-                entries.push(index);
-            }
+
+        // Pages Router: ALL files under pages/ are framework entrypoints
+        let pages_dir = workspace_root.join("pages");
+        if pages_dir.exists() {
+            collect_files_recursive(&pages_dir, &mut entries);
         }
+
         // next.config
         for name in &["next.config.js", "next.config.mjs", "next.config.ts"] {
             let path = workspace_root.join(name);
@@ -84,6 +82,7 @@ impl FrameworkPack for NextPack {
                 entries.push(path);
             }
         }
+
         entries
     }
 
@@ -222,13 +221,27 @@ impl FrameworkPack for StorybookPack {
         let mut entries = Vec::new();
         let storybook_dir = workspace_root.join(".storybook");
         if storybook_dir.exists() {
-            for name in &["main.ts", "main.js", "preview.ts", "preview.js"] {
+            for name in &[
+                "main.ts",
+                "main.tsx",
+                "main.js",
+                "main.jsx",
+                "preview.ts",
+                "preview.tsx",
+                "preview.js",
+                "preview.jsx",
+            ] {
                 let path = storybook_dir.join(name);
                 if path.exists() {
                     entries.push(path);
                 }
             }
         }
+
+        // Story files are auto-discovered by Storybook via its glob config.
+        // Each story file is an independent entrypoint.
+        collect_story_files(workspace_root, &mut entries);
+
         entries
     }
 
@@ -241,5 +254,215 @@ impl FrameworkPack for StorybookPack {
             ("**/*.stories.*".to_string(), FileClassification::Story),
             ("**/*.story.*".to_string(), FileClassification::Story),
         ]
+    }
+}
+
+/// Collect `*.stories.*` and `*.story.*` files recursively.
+fn collect_story_files(dir: &Path, entries: &mut Vec<PathBuf>) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            // Skip common non-source directories
+            if matches!(
+                name,
+                "node_modules" | ".git" | "dist" | ".next" | ".storybook" | "storybook-static"
+            ) {
+                continue;
+            }
+            collect_story_files(&path, entries);
+        } else if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
+            (name.contains(".stories.") || name.contains(".story."))
+                && pruneguard_fs::has_js_ts_extension(&path)
+        }) {
+            entries.push(path);
+        }
+    }
+}
+
+/// Generic file-based routing pack.
+/// Detects any framework that uses file-system routing conventions
+/// (`TanStack` Router, Remix, Expo Router, `SvelteKit`, Solid Start, etc.).
+struct FileBasedRoutingPack;
+
+/// Known file-based router dependencies.
+const FILE_ROUTER_DEPS: &[&str] = &[
+    "@tanstack/react-router",
+    "@tanstack/react-start",
+    "@tanstack/solid-router",
+    "@remix-run/react",
+    "@remix-run/node",
+    "remix",
+    "expo-router",
+    "@solidjs/start",
+];
+
+impl FrameworkPack for FileBasedRoutingPack {
+    fn name(&self) -> &'static str {
+        "file-routing"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        let has_router = manifest_has_any_dep(manifest, FILE_ROUTER_DEPS);
+
+        // Also detect by convention if routes/ directory exists alongside a router
+        has_router
+            || (workspace_root.join("src/routes").exists()
+                || workspace_root.join("app/routes").exists())
+                && manifest_has_any_dep(
+                    manifest,
+                    &["react-router", "react-router-dom", "vue-router"],
+                )
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // Collect all files under routes/ directories
+        for routes_dir in &["src/routes", "app/routes"] {
+            let dir = workspace_root.join(routes_dir);
+            if dir.exists() {
+                collect_files_recursive(&dir, &mut entries);
+            }
+        }
+
+        // Generated route tree (TanStack Router convention)
+        for name in &["src/routeTree.gen.ts", "src/routeTree.gen.tsx"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        // Router config files
+        for name in &[
+            "src/router.ts",
+            "src/router.tsx",
+            "src/router.js",
+            "app/client.tsx",
+            "app/server.tsx",
+            "app/router.tsx",
+            "app/ssr.tsx",
+            "app/entry.client.tsx",
+            "app/entry.server.tsx",
+            "app/root.tsx",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        vec![("**/routeTree.gen.*".to_string(), FileClassification::Generated)]
+    }
+}
+
+/// Generic root config file pack.
+/// Picks up common config files that are consumed by build tools / plugins
+/// but never explicitly imported in source code.
+struct RootConfigPack;
+
+impl FrameworkPack for RootConfigPack {
+    fn name(&self) -> &'static str {
+        "root-config"
+    }
+
+    fn detect(&self, _workspace_root: &Path, _manifest: &PackageManifest) -> bool {
+        // Always active — config files are common to all JS/TS projects.
+        true
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // Well-known config files that are consumed by tooling, not imported
+        let config_files = [
+            "content-collections.ts",
+            "content-collections.js",
+            "tailwind.config.ts",
+            "tailwind.config.js",
+            "tailwind.config.mjs",
+            "postcss.config.ts",
+            "postcss.config.js",
+            "postcss.config.cjs",
+            "postcss.config.mjs",
+            "drizzle.config.ts",
+            "drizzle.config.js",
+            "knexfile.ts",
+            "knexfile.js",
+            "tsup.config.ts",
+            "tsup.config.js",
+            "rollup.config.ts",
+            "rollup.config.js",
+            "rollup.config.mjs",
+            "esbuild.config.ts",
+            "esbuild.config.js",
+            "webpack.config.ts",
+            "webpack.config.js",
+            "babel.config.ts",
+            "babel.config.js",
+            "release.config.ts",
+            "release.config.js",
+            "release.config.mts",
+            "commitlint.config.ts",
+            "commitlint.config.js",
+            ".lintstagedrc.ts",
+            ".lintstagedrc.js",
+            "playwright.config.ts",
+            "playwright.config.js",
+            "cypress.config.ts",
+            "cypress.config.js",
+            "wrangler.config.ts",
+        ];
+
+        for name in &config_files {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec![".content-collections/**".to_string()]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        Vec::new()
+    }
+}
+
+fn manifest_has_any_dep(manifest: &PackageManifest, deps: &[&str]) -> bool {
+    let check =
+        |d: &rustc_hash::FxHashMap<String, String>| deps.iter().any(|dep| d.contains_key(*dep));
+    manifest.dependencies.as_ref().is_some_and(check)
+        || manifest.dev_dependencies.as_ref().is_some_and(check)
+}
+
+/// Recursively collect JS/TS files from a directory.
+fn collect_files_recursive(dir: &Path, entries: &mut Vec<PathBuf>) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files_recursive(&path, entries);
+        } else if pruneguard_fs::has_js_ts_extension(&path) {
+            entries.push(path);
+        }
     }
 }

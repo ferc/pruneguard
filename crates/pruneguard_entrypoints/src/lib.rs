@@ -104,7 +104,15 @@ pub fn detect_entrypoints(
 
     if config.auto {
         for file in manifest.entrypoint_files() {
-            let path = workspace_root.join(&file);
+            // Prefer source files over dist files.  If the entrypoint points to
+            // a build-output directory (dist/, build/, etc.) try to find the
+            // corresponding source file first.
+            let path = resolve_dist_to_source(workspace_root, &file)
+                .or_else(|| {
+                    let p = workspace_root.join(&file);
+                    p.exists().then_some(p)
+                })
+                .unwrap_or_else(|| workspace_root.join(&file));
             if !path.exists() {
                 continue;
             }
@@ -238,7 +246,7 @@ fn framework_enabled(
         "vitest" => frameworks.vitest,
         "jest" => frameworks.jest,
         "storybook" => frameworks.storybook,
-        _ => None,
+        _ => None, // generic packs (file-routing, root-config) are auto-detect only
     });
 
     match toggle {
@@ -327,4 +335,40 @@ fn looks_like_script_path(token: &str, path: &Path) -> bool {
         || token.starts_with("scripts/")
         || token.starts_with("bin/")
         || token.starts_with("app/")
+}
+
+/// When a bin/main/exports entry points to a build output (e.g. `./dist/bin.js`),
+/// try to find the corresponding source file in `src/`.
+fn resolve_dist_to_source(workspace_root: &Path, file: &str) -> Option<PathBuf> {
+    // Strip leading "./"
+    let file = file.strip_prefix("./").unwrap_or(file);
+
+    // Only attempt for common build output directories.
+    let stem = file
+        .strip_prefix("dist/")
+        .or_else(|| file.strip_prefix("build/"))
+        .or_else(|| file.strip_prefix("out/"))
+        .or_else(|| file.strip_prefix("lib/"))?;
+
+    // Remove the JS extension to get the bare stem
+    let bare = Path::new(stem);
+    let bare_stem = bare.with_extension("");
+
+    // Try source extensions under src/
+    for ext in &["ts", "tsx", "js", "jsx", "mts", "cts"] {
+        let candidate = workspace_root.join("src").join(bare_stem.with_extension(ext));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // Also try the exact same relative path under src/ (e.g. dist/index.js -> src/index.ts)
+    for ext in &["ts", "tsx", "js", "jsx"] {
+        let candidate = workspace_root.join(bare_stem.with_extension(ext));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }

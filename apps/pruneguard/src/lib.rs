@@ -12,7 +12,8 @@ use pruneguard_graph::{
 };
 use pruneguard_report::{
     AnalysisReport, ConfidenceCounts, ExplainQueryKind, ExplainReport, Finding, FindingConfidence,
-    ImpactReport, ProofNode, Summary,
+    FindingSeverity, ImpactReport, ProofNode, ReviewReport, ReviewTrust, SafeDeleteCandidate,
+    SafeDeleteReport, Summary,
 };
 
 #[cfg(feature = "napi")]
@@ -277,6 +278,279 @@ pub fn debug_entrypoints(
 ) -> miette::Result<Vec<String>> {
     let build = build_graph(cwd, config, &[], profile)?;
     Ok(build.entrypoint_seeds.iter().map(ToString::to_string).collect())
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReviewOptions {
+    pub config_dir: Option<PathBuf>,
+    pub base_ref: Option<String>,
+    pub no_cache: bool,
+    pub no_baseline: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeDeleteOptions {
+    pub config_dir: Option<PathBuf>,
+    pub no_cache: bool,
+}
+
+/// Review a branch for CI/agent gating.
+///
+/// Combines full-scope scan, `--changed-since`, baseline, and trust summary
+/// into a single report with blocking vs advisory findings.
+#[allow(clippy::cast_precision_loss)]
+pub fn review(
+    cwd: &Path,
+    config: &PruneguardConfig,
+    profile: EntrypointProfile,
+    options: &ReviewOptions,
+) -> miette::Result<ReviewReport> {
+    let scan_options = ScanOptions {
+        config_dir: options.config_dir.clone(),
+        changed_since: options.base_ref.clone(),
+        no_cache: options.no_cache,
+        no_baseline: options.no_baseline,
+        require_full_scope: false,
+        ..ScanOptions::default()
+    };
+    let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
+    let report = &execution.report;
+
+    let changed_files = if options.base_ref.is_some() {
+        let scope = collect_changed_scope(
+            &execution.build.discovery.project_root,
+            options.base_ref.as_deref().unwrap_or("HEAD~1"),
+            &[],
+        )?;
+        scope.changed_paths().iter().map(|path| path.to_string_lossy().to_string()).collect()
+    } else {
+        Vec::new()
+    };
+
+    let new_findings = report.findings.clone();
+    let blocking_findings = new_findings
+        .iter()
+        .filter(|f| {
+            f.confidence == FindingConfidence::High
+                && matches!(f.severity, FindingSeverity::Error | FindingSeverity::Warn)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let advisory_findings = new_findings
+        .iter()
+        .filter(|f| {
+            f.confidence != FindingConfidence::High || matches!(f.severity, FindingSeverity::Info)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let unresolved_pressure = if report.stats.files_resolved > 0 {
+        report.stats.unresolved_specifiers as f64
+            / (report.stats.files_resolved + report.stats.unresolved_specifiers) as f64
+    } else {
+        0.0
+    };
+
+    let mut recommendations = Vec::new();
+    if !blocking_findings.is_empty() {
+        recommendations.push(format!(
+            "{} blocking finding(s) should be resolved before merge.",
+            blocking_findings.len()
+        ));
+    }
+    if unresolved_pressure > 0.05 {
+        recommendations.push(format!(
+            "Unresolved pressure is {:.1}% — findings may be less accurate. Consider configuring resolver paths.",
+            unresolved_pressure * 100.0
+        ));
+    }
+    if report.stats.partial_scope {
+        recommendations.push(
+            "Partial-scope analysis was used. Dead-code findings are advisory only.".to_string(),
+        );
+    }
+    if blocking_findings.is_empty() && advisory_findings.is_empty() {
+        recommendations.push("No new findings. Branch is clean.".to_string());
+    }
+
+    Ok(ReviewReport {
+        base_ref: options.base_ref.clone(),
+        changed_files,
+        new_findings,
+        blocking_findings,
+        advisory_findings,
+        trust: ReviewTrust {
+            full_scope: !report.stats.partial_scope,
+            baseline_applied: report.stats.baseline_applied,
+            unresolved_pressure,
+            confidence_counts: report.stats.confidence_counts.clone(),
+        },
+        recommendations,
+    })
+}
+
+/// Evaluate targets for safe deletion.
+///
+/// Conservative by design: only marks targets as "safe" when trust is high
+/// and reverse impact is empty or explicitly ignorable.
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
+pub fn safe_delete(
+    cwd: &Path,
+    config: &PruneguardConfig,
+    targets: &[String],
+    profile: EntrypointProfile,
+    options: &SafeDeleteOptions,
+) -> miette::Result<SafeDeleteReport> {
+    let scan_options = ScanOptions {
+        config_dir: options.config_dir.clone(),
+        no_cache: options.no_cache,
+        no_baseline: true,
+        require_full_scope: false,
+        ..ScanOptions::default()
+    };
+    let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
+    let report = &execution.report;
+
+    if report.stats.partial_scope {
+        return Ok(SafeDeleteReport {
+            targets: targets.to_vec(),
+            safe: Vec::new(),
+            needs_review: Vec::new(),
+            blocked: targets
+                .iter()
+                .map(|target| SafeDeleteCandidate {
+                    target: target.clone(),
+                    confidence: None,
+                    reasons: vec![
+                        "Partial-scope analysis was used. Full-scope is required for safe-delete."
+                            .to_string(),
+                    ],
+                })
+                .collect(),
+            deletion_order: Vec::new(),
+            evidence: Vec::new(),
+        });
+    }
+
+    let unresolved_pressure = if report.stats.files_resolved > 0 {
+        report.stats.unresolved_specifiers as f64
+            / (report.stats.files_resolved + report.stats.unresolved_specifiers) as f64
+    } else {
+        0.0
+    };
+    let high_pressure = unresolved_pressure > 0.05;
+
+    let finding_subjects: BTreeSet<String> =
+        report.findings.iter().map(|f| f.subject.clone()).collect();
+
+    let mut safe = Vec::new();
+    let mut needs_review = Vec::new();
+    let mut blocked = Vec::new();
+    let mut deletion_order = Vec::new();
+    let mut all_evidence = Vec::new();
+
+    for target in targets {
+        let is_finding = finding_subjects.contains(target)
+            || report.findings.iter().any(|f| {
+                f.subject.starts_with(target) || f.subject.split('#').next() == Some(target)
+            });
+
+        if !is_finding {
+            blocked.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: None,
+                reasons: vec![format!("`{target}` was not flagged as unused by the analysis.")],
+            });
+            continue;
+        }
+
+        let related_findings: Vec<&Finding> = report
+            .findings
+            .iter()
+            .filter(|f| {
+                f.subject == *target
+                    || f.subject.starts_with(target)
+                    || f.subject.split('#').next() == Some(target.as_str())
+            })
+            .collect();
+
+        let impact_result =
+            impact_with_options(cwd, config, target, profile, &ImpactOptions::default());
+
+        let has_reverse_impact = match &impact_result {
+            Ok(ir) => {
+                // Exclude the target itself from affected-files check.
+                let other_affected = ir
+                    .affected_files
+                    .iter()
+                    .any(|f| f != target && !f.ends_with(target) && !target.ends_with(f));
+                !ir.affected_entrypoints.is_empty() || other_affected
+            }
+            Err(_) => false,
+        };
+
+        if has_reverse_impact {
+            blocked.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: None,
+                reasons: vec![format!(
+                    "`{target}` has reverse impact — other files or entrypoints depend on it."
+                )],
+            });
+            if let Ok(ir) = &impact_result {
+                all_evidence.push(pruneguard_report::Evidence {
+                    kind: "impact".to_string(),
+                    file: Some(target.clone()),
+                    line: None,
+                    description: format!(
+                        "{} affected entrypoints, {} affected files",
+                        ir.affected_entrypoints.len(),
+                        ir.affected_files.len()
+                    ),
+                });
+            }
+            continue;
+        }
+
+        let all_high_confidence =
+            related_findings.iter().all(|f| f.confidence == FindingConfidence::High);
+
+        if high_pressure {
+            needs_review.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: Some(FindingConfidence::Medium),
+                reasons: vec![format!(
+                    "Unresolved pressure is {:.1}% — cannot guarantee safety.",
+                    unresolved_pressure * 100.0
+                )],
+            });
+        } else if all_high_confidence {
+            safe.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: Some(FindingConfidence::High),
+                reasons: Vec::new(),
+            });
+            deletion_order.push(target.clone());
+        } else {
+            needs_review.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: Some(FindingConfidence::Medium),
+                reasons: vec![
+                    "Finding confidence is not uniformly high — manual review recommended."
+                        .to_string(),
+                ],
+            });
+        }
+    }
+
+    Ok(SafeDeleteReport {
+        targets: targets.to_vec(),
+        safe,
+        needs_review,
+        blocked,
+        deletion_order,
+        evidence: all_evidence,
+    })
 }
 
 /// Debug: resolve a specifier from a file.
