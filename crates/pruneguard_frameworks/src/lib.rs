@@ -83,6 +83,22 @@ impl FrameworkPack for NextPack {
             }
         }
 
+        // Next.js instrumentation hooks (auto-loaded by the framework)
+        for name in &["instrumentation.ts", "instrumentation.js", "instrumentation-client.ts", "instrumentation-client.js", "src/instrumentation.ts", "src/instrumentation.js"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        // Next.js middleware
+        for name in &["middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
         entries
     }
 
@@ -424,6 +440,31 @@ impl FrameworkPack for RootConfigPack {
             "cypress.config.ts",
             "cypress.config.js",
             "wrangler.config.ts",
+            "wrangler.toml",
+            // ESLint config files (flat config and legacy)
+            "eslint.config.ts",
+            "eslint.config.js",
+            "eslint.config.mjs",
+            "eslint.config.cjs",
+            ".eslintrc.js",
+            ".eslintrc.cjs",
+            ".eslintrc.mjs",
+            // Prettier config
+            "prettier.config.ts",
+            "prettier.config.js",
+            "prettier.config.mjs",
+            ".prettierrc.js",
+            ".prettierrc.cjs",
+            ".prettierrc.mjs",
+            // Next.js i18n (next-intl/next-i18next)
+            "i18n/request.ts",
+            "i18n/request.js",
+            // Sentry
+            "sentry.client.config.ts",
+            "sentry.server.config.ts",
+            "sentry.edge.config.ts",
+            "sentry.client.config.js",
+            "sentry.server.config.js",
         ];
 
         for name in &config_files {

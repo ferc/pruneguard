@@ -113,6 +113,7 @@ pub fn build_graph_with_options(
         })
         .collect();
     resolver.set_workspace_roots(workspace_roots);
+
     let config_hash = hash_json(config);
     let resolver_hash = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -340,6 +341,12 @@ pub fn build_graph_with_options(
         cache_entries_read: cache_counters.entries_read,
         cache_entries_written: cache_counters.entries_written,
         affected_scope_incomplete: false,
+        execution_mode: None,
+        index_warm: None,
+        index_age_ms: None,
+        reused_graph_nodes: None,
+        reused_graph_edges: None,
+        watcher_lag_ms: None,
     };
 
     Ok(GraphBuildResult {

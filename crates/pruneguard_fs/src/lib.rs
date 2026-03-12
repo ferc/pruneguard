@@ -275,7 +275,10 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -
         return FileRole::BuildOutput;
     }
 
-    if path.starts_with("fixtures/") || path.contains("/fixtures/") {
+    if path.starts_with("fixtures/")
+        || path.contains("/fixtures/")
+        || path.contains("/test-fixtures/")
+    {
         return FileRole::Fixture;
     }
 
@@ -294,8 +297,12 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -
     if path.contains("/__tests__/")
         || path.starts_with("test/")
         || path.starts_with("tests/")
+        || path.starts_with("e2e/")
+        || path.contains("/e2e/")
+        || path.contains("/__mocks__/")
         || file_name.contains(".test.")
         || file_name.contains(".spec.")
+        || file_name.contains(".test-utils.")
     {
         return FileRole::Test;
     }
