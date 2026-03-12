@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           targets: ${{ matrix.target }}
 
@@ -134,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.10.0
