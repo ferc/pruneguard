@@ -1,0 +1,16 @@
+{
+  "name": "oxgraph-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.10.0",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "generate-schemas": "cargo run --release -p oxgraph -- print-config > /dev/null && echo 'Schemas up to date'"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.5.1",
+    "tsdown": "0.21.2",
+    "vitest": "4.0.18"
+  }
+}

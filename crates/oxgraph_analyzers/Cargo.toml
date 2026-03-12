@@ -1,0 +1,27 @@
+[package]
+name = "oxgraph_analyzers"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Analysis passes for unused code, cycles, boundaries, and impact"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oxgraph_graph = { workspace = true }
+oxgraph_config = { workspace = true }
+oxgraph_report = { workspace = true }
+
+rustc-hash = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

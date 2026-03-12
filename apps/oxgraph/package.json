@@ -1,0 +1,17 @@
+{
+  "name": "oxgraph-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build-napi": "napi build --platform --cargo-cwd ../../ -p oxgraph --js false",
+    "build-napi-release": "napi build --platform --cargo-cwd ../../ -p oxgraph --release --js false",
+    "build-js": "tsdown src-js/index.ts src-js/cli.ts --format esm --dts",
+    "build": "pnpm build-napi && pnpm build-js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "catalog:",
+    "tsdown": "catalog:",
+    "vitest": "catalog:"
+  }
+}

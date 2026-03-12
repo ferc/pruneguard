@@ -1,0 +1,26 @@
+[package]
+name = "oxgraph_entrypoints"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Entrypoint detection and profile classification for oxgraph"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oxgraph_config = { workspace = true }
+oxgraph_manifest = { workspace = true }
+oxgraph_frameworks = { workspace = true }
+
+glob = { workspace = true }
+globset = { workspace = true }
+rustc-hash = { workspace = true }
+tracing = { workspace = true }

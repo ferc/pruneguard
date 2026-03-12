@@ -1,0 +1,25 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node
+node_modules/
+npm/*/node_modules/
+
+# Build output
+dist/
+*.wasm
+
+# Cache
+.oxgraph-cache/
+
+# OS
+.DS_Store
+
+# IDE (add to your global .gitignore instead)
+# .vscode/
+# .idea/
+
+# Claude Code
+.claude/*
+!.claude/commands/

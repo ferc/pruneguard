@@ -1,0 +1,23 @@
+[package]
+name = "oxgraph_manifest"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Package manifest parsing for oxgraph"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rustc-hash = { workspace = true }
+compact_str = { workspace = true }

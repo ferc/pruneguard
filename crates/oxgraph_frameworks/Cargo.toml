@@ -1,0 +1,24 @@
+[package]
+name = "oxgraph_frameworks"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Built-in framework detection packs for oxgraph"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oxgraph_config = { workspace = true }
+oxgraph_manifest = { workspace = true }
+
+globset = { workspace = true }
+serde = { workspace = true }
+rustc-hash = { workspace = true }

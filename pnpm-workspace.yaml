@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - npm/*
+
+catalog:
+  "@napi-rs/cli": 3.5.1
+  tsdown: 0.21.2
+  vitest: 4.0.18

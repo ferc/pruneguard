@@ -1,0 +1,122 @@
+[workspace]
+resolver = "3"
+members = ["apps/*", "crates/*"]
+
+[workspace.package]
+authors = ["oxgraph contributors"]
+categories = ["development-tools"]
+edition = "2024"
+homepage = "https://github.com/user/oxgraph"
+keywords = ["javascript", "typescript", "monorepo", "graph", "unused-code"]
+license = "MIT"
+repository = "https://github.com/user/oxgraph"
+rust-version = "1.92.0"
+description = "Repo truth engine for JS/TS monorepos"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+absolute_paths_not_starting_with_crate = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow common pedantic false-positives
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+significant_drop_tightening = "allow"
+# Require
+dbg_macro = "warn"
+todo = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+
+[workspace.dependencies]
+# Internal crates
+oxgraph_config = { path = "crates/oxgraph_config" }
+oxgraph_fs = { path = "crates/oxgraph_fs" }
+oxgraph_manifest = { path = "crates/oxgraph_manifest" }
+oxgraph_discovery = { path = "crates/oxgraph_discovery" }
+oxgraph_resolver = { path = "crates/oxgraph_resolver" }
+oxgraph_extract = { path = "crates/oxgraph_extract" }
+oxgraph_graph = { path = "crates/oxgraph_graph" }
+oxgraph_entrypoints = { path = "crates/oxgraph_entrypoints" }
+oxgraph_frameworks = { path = "crates/oxgraph_frameworks" }
+oxgraph_analyzers = { path = "crates/oxgraph_analyzers" }
+oxgraph_rules = { path = "crates/oxgraph_rules" }
+oxgraph_report = { path = "crates/oxgraph_report" }
+oxgraph_cache = { path = "crates/oxgraph_cache" }
+
+# Oxc crates
+oxc_parser = "0.117.0"
+oxc_semantic = "0.117.0"
+oxc_traverse = "0.117.0"
+oxc_resolver = "11.1.0"
+oxc_span = "0.117.0"
+oxc_ast = "0.117.0"
+oxc_allocator = "0.117.0"
+oxc_diagnostics = "0.117.0"
+oxc_syntax = "0.117.0"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+
+# CLI
+bpaf = { version = "0.9", features = ["autocomplete", "bright-color", "derive"] }
+
+# Performance
+rayon = "1"
+rustc-hash = "2"
+dashmap = "6"
+
+# File system
+ignore = { version = "0.4", features = ["simd-accel"] }
+glob = "0.3"
+globset = "0.4"
+walkdir = "2"
+
+# Graph
+petgraph = "0.7"
+
+# Cache
+redb = "2"
+
+# Error handling
+miette = { version = "7", features = ["fancy"] }
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+cow-utils = "0.1"
+compact_str = { version = "0.8", features = ["serde"] }
+
+# NAPI
+napi = { version = "2", default-features = false, features = ["napi9"] }
+napi-derive = "2"
+napi-build = "2"
+
+# Testing
+insta = { version = "1", features = ["json", "redactions"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.dev]
+debug = false
+
+[profile.dev.package.insta]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
