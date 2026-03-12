@@ -5,7 +5,7 @@ use oxgraph_config::AnalysisSeverity;
 use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_fs::is_docs_path;
 use oxgraph_graph::{FileId, GraphBuildResult, ModuleNode};
-use oxgraph_report::{Evidence, Finding, FindingCategory};
+use oxgraph_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
 use crate::{make_finding, severity};
 
@@ -100,10 +100,16 @@ pub fn analyze(
         }
 
         let subject = format!("{relative_path}#{}", export.name);
+        let confidence = if file_has_unresolved_neighbors(build, export.file) {
+            FindingConfidence::Medium
+        } else {
+            FindingConfidence::High
+        };
         findings.push(make_finding(
             "unused-export",
             finding_severity,
             FindingCategory::UnusedExport,
+            confidence,
             &subject,
             workspace.clone(),
             package.clone(),
@@ -121,6 +127,20 @@ pub fn analyze(
     }
 
     findings
+}
+
+fn file_has_unresolved_neighbors(build: &GraphBuildResult, file_id: FileId) -> bool {
+    let Some((_, ModuleNode::File { path, .. })) = build.module_graph.file_node_by_id(file_id) else {
+        return true;
+    };
+    let Some(file) = build.find_file(path) else {
+        return true;
+    };
+
+    file.resolved_imports
+        .iter()
+        .chain(&file.resolved_reexports)
+        .any(|edge| matches!(edge.outcome, oxgraph_resolver::ResolutionOutcome::Unresolved))
 }
 
 fn active_entrypoint_files(

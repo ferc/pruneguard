@@ -11,7 +11,9 @@ use oxgraph_graph::{
     BuildOptions, GraphBuildResult, ModuleEdge, ModuleNode, build_graph,
     build_graph_with_options,
 };
-use oxgraph_report::{AnalysisReport, ExplainReport, Finding, ImpactReport, ProofNode, Summary};
+use oxgraph_report::{
+    AnalysisReport, ExplainQueryKind, ExplainReport, Finding, ImpactReport, ProofNode, Summary,
+};
 
 #[cfg(feature = "napi")]
 use napi_derive::napi;
@@ -174,6 +176,7 @@ pub fn impact_with_options(
                 description: format!("One entrypoint path to the target: {}", proofs.join(" -> ")),
             }]
         },
+        focus_filtered: false,
     };
 
     if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
@@ -202,6 +205,7 @@ pub fn explain_with_options(
 ) -> miette::Result<ExplainReport> {
     let build = build_graph(cwd, config, &[], profile)?;
     let findings = oxgraph_analyzers::run_analyzers(&build, config, profile);
+    let matched_finding_id = findings.iter().any(|finding| finding.id == query);
     let related_findings = findings
         .iter()
         .filter(|finding| finding.id == query || finding.subject == query)
@@ -220,6 +224,13 @@ pub fn explain_with_options(
     let matched_node = matched_file
         .map(|file| file.file.relative_path.to_string_lossy().to_string())
         .or_else(|| related_findings.first().map(|finding| finding.subject.clone()));
+    let query_kind = if matched_finding_id {
+        ExplainQueryKind::Finding
+    } else if target_query.contains('#') {
+        ExplainQueryKind::Export
+    } else {
+        ExplainQueryKind::File
+    };
 
     let proofs = matched_file
         .and_then(|file| {
@@ -234,8 +245,14 @@ pub fn explain_with_options(
         .into_iter()
         .collect::<Vec<_>>();
 
-    let mut report =
-        ExplainReport { query: query.to_string(), matched_node, proofs, related_findings };
+    let mut report = ExplainReport {
+        query: query.to_string(),
+        matched_node,
+        query_kind,
+        proofs,
+        related_findings,
+        focus_filtered: false,
+    };
 
     if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
         apply_focus_to_explain_report(&mut report, &build, &focus);
@@ -326,6 +343,10 @@ fn apply_baseline(report: &mut AnalysisReport, baseline: &BaselineSet) {
     report.stats.new_findings = report.findings.len();
 
     if report.stats.baseline_profile_mismatch {
+        report.stats.parity_warnings.push(format!(
+            "baseline profile `{}` differs from current profile `{}`",
+            baseline.profile, report.profile
+        ));
         report.findings.sort_by(|left, right| left.id.cmp(&right.id));
         if let Some(first) = report.findings.first_mut() {
             first.evidence.push(oxgraph_report::Evidence {
@@ -387,6 +408,10 @@ fn apply_focus_to_impact_report(
     build: &GraphBuildResult,
     focus: &FocusFilter,
 ) {
+    let original_files = report.affected_files.len();
+    let original_packages = report.affected_packages.len();
+    let original_entrypoints = report.affected_entrypoints.len();
+    let original_evidence = report.evidence.len();
     report.affected_files.retain(|path| focus_matches_path(focus, path));
 
     let focused_packages = report
@@ -420,6 +445,11 @@ fn apply_focus_to_impact_report(
                 .split(" -> ")
                 .any(|segment| focus_matches_path(focus, &normalize_focus_token(segment)))
     });
+
+    report.focus_filtered = report.affected_files.len() != original_files
+        || report.affected_packages.len() != original_packages
+        || report.affected_entrypoints.len() != original_entrypoints
+        || report.evidence.len() != original_evidence;
 }
 
 fn apply_focus_to_explain_report(
@@ -427,6 +457,12 @@ fn apply_focus_to_explain_report(
     build: &GraphBuildResult,
     focus: &FocusFilter,
 ) {
+    let original_findings = report.related_findings.len();
+    let original_proofs = report.proofs.len();
+    let matched_outside_focus = report
+        .matched_node
+        .as_deref()
+        .is_some_and(|node| !focus_matches_path(focus, &normalize_subject_token(node)));
     report
         .related_findings
         .retain(|finding| finding_matches_focus(focus, finding, build));
@@ -435,6 +471,9 @@ fn apply_focus_to_explain_report(
         .iter()
         .filter_map(|proof| filter_proof_node(proof, focus))
         .collect();
+    report.focus_filtered = report.related_findings.len() != original_findings
+        || report.proofs.len() != original_proofs
+        || matched_outside_focus;
 }
 
 fn compute_affected_scope(

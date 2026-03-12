@@ -4,7 +4,7 @@ use oxgraph_config::AnalysisSeverity;
 use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_fs::is_docs_path;
 use oxgraph_graph::GraphBuildResult;
-use oxgraph_report::{Evidence, Finding, FindingCategory};
+use oxgraph_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
 use crate::{make_finding, severity};
 
@@ -82,6 +82,7 @@ pub fn analyze(
             "unused-package",
             finding_severity,
             FindingCategory::UnusedPackage,
+            FindingConfidence::Medium,
             &package_name,
             Some(workspace.name.clone()),
             Some(package_name.clone()),

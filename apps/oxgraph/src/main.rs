@@ -283,6 +283,7 @@ fn print_migration_output(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
     let value = serde_json::to_value(report).map_err(|err| miette::miette!("{err}"))?;
     match value {
@@ -325,6 +326,19 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     .get("focusApplied")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
+                let partial_scope = stats
+                    .get("partialScope")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                if partial_scope {
+                    let reason = stats
+                        .get("partialScopeReason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("scan paths narrowed analysis to a partial scope.");
+                    println!();
+                    println!("advisory");
+                    println!("{reason}");
+                }
                 if focus_applied {
                     let focused_files = stats
                         .get("focusedFiles")
@@ -352,6 +366,10 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                         .get("code")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("finding");
+                    let confidence = finding
+                        .get("confidence")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("medium");
                     let subject = finding
                         .get("subject")
                         .and_then(serde_json::Value::as_str)
@@ -360,7 +378,7 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                         .get("message")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("");
-                    println!("[{severity}] {code} {subject}");
+                    println!("[{severity}] {code} {subject} ({confidence})");
                     println!("  {message}");
                     if let Some(evidence) =
                         finding.get("evidence").and_then(serde_json::Value::as_array)
@@ -390,7 +408,14 @@ fn print_impact_text(report: &oxgraph_report::ImpactReport, focus: Option<&str>)
     println!("affected files: {}", report.affected_files.len());
     if let Some(focus) = focus {
         println!("focus: {focus}");
-        println!("returned items were filtered after full-graph impact analysis.");
+        println!(
+            "{}",
+            if report.focus_filtered {
+                "returned items were filtered after full-graph impact analysis."
+            } else {
+                "focus did not remove any affected nodes."
+            }
+        );
     }
     if !report.affected_files.is_empty() {
         println!();
@@ -401,10 +426,11 @@ fn print_impact_text(report: &oxgraph_report::ImpactReport, focus: Option<&str>)
 }
 
 fn print_explain_text(report: &oxgraph_report::ExplainReport, focus: Option<&str>) {
-    let match_kind = report
-        .matched_node
-        .as_deref()
-        .map_or("finding-id", |node| if node.contains('#') { "export" } else { "file" });
+    let match_kind = match report.query_kind {
+        oxgraph_report::ExplainQueryKind::Finding => "finding",
+        oxgraph_report::ExplainQueryKind::File => "file",
+        oxgraph_report::ExplainQueryKind::Export => "export",
+    };
     println!("query: {} ({match_kind})", report.query);
     if let Some(node) = &report.matched_node {
         println!("matched node: {node}");
@@ -412,10 +438,9 @@ fn print_explain_text(report: &oxgraph_report::ExplainReport, focus: Option<&str
         println!("matched node: none");
     }
     if let Some(focus) = focus {
-        let filtered = report.proofs.is_empty() || report.related_findings.is_empty();
         println!(
             "focus: {focus} ({})",
-            if filtered {
+            if report.focus_filtered {
                 "related findings or proofs were filtered"
             } else {
                 "related findings and proofs are within focus"

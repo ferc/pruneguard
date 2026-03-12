@@ -1134,6 +1134,7 @@ dependencies = [
  "oxgraph_graph",
  "oxgraph_manifest",
  "oxgraph_report",
+ "oxgraph_resolver",
  "oxgraph_rules",
  "petgraph",
  "rustc-hash",

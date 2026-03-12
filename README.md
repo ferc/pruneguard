@@ -21,6 +21,12 @@ oxgraph scan
 # Focus findings to a slice of the repo
 oxgraph --focus "src/**" scan
 
+# Changed-since review for CI/agents
+oxgraph --changed-since origin/main scan
+
+# Partial-scope scan (advisory for dead-code findings)
+oxgraph scan src/components/Button.tsx src/lib/utils.ts
+
 # With config
 oxgraph --config oxgraph.json scan
 
@@ -36,6 +42,13 @@ oxgraph init
 # Debug resolution
 oxgraph debug resolve ./utils --from src/index.ts
 ```
+
+Dead-code trust model:
+
+- full-repo `scan` is the trustworthy mode for deletion decisions
+- `--focus` filters reported findings after full analysis
+- positional `scan <paths...>` narrows the analyzed file set and is reported as partial-scope/advisory in the output
+- use `impact` and `explain` before removing code on unresolved-specifier-heavy repos
 
 ## Configuration
 
@@ -65,6 +78,9 @@ Requires: Rust (stable), Node.js, pnpm, just
 just ready    # fmt + check + test + lint
 just build    # release binary
 just run scan # run against current directory
+just schemas  # regenerate shipped schemas
+just benchmark ../../claude-attack
+just benchmark-repos
 just parity   # opt-in real-repo smoke
 ```
 

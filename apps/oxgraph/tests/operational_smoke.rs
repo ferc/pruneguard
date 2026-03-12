@@ -169,6 +169,21 @@ fn warm_cache_reuses_file_facts() {
 }
 
 #[test]
+fn impact_focus_can_filter_all_returned_nodes_without_error() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--focus", "src/unused.ts", "impact", "src/used.ts"],
+    );
+
+    assert_eq!(report["focusFiltered"].as_bool(), Some(true));
+    assert_eq!(
+        report["affectedFiles"].as_array().map_or(usize::MAX, Vec::len),
+        0
+    );
+}
+
+#[test]
 fn baseline_profile_mismatch_is_reported() {
     let root = temp_dir("baseline-mismatch");
     copy_tree(&fixture_root("unused-dependency-prod-dev"), &root);

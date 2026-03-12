@@ -6,7 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use oxgraph_config::{AnalysisSeverity, OwnershipConfig};
 use oxgraph_fs::is_docs_path;
 use oxgraph_graph::GraphBuildResult;
-use oxgraph_report::{Evidence, Finding, FindingCategory, FindingSeverity};
+use oxgraph_report::{
+    Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity,
+};
 
 use crate::{make_finding, severity};
 
@@ -53,6 +55,7 @@ pub fn analyze(
                 "ownership-unowned",
                 finding_severity,
                 FindingCategory::OwnershipViolation,
+                FindingConfidence::High,
                 relative_path.as_ref(),
                 extracted_file.file.workspace.clone(),
                 extracted_file.file.package.clone(),
@@ -126,6 +129,7 @@ pub fn analyze(
                 "ownership-cross-owner",
                 finding_severity,
                 FindingCategory::OwnershipViolation,
+                FindingConfidence::High,
                 format!(
                     "{} -> {}",
                     extracted_file.file.relative_path.to_string_lossy(),
@@ -169,6 +173,7 @@ pub fn analyze(
             "ownership-hotspot",
             FindingSeverity::Info,
             FindingCategory::OwnershipViolation,
+            FindingConfidence::High,
             &relative_path,
             workspace,
             package,

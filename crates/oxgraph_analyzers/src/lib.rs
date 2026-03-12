@@ -12,7 +12,9 @@ use std::hash::{Hash, Hasher};
 use oxgraph_config::{AnalysisSeverity, OxgraphConfig};
 use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_graph::GraphBuildResult;
-use oxgraph_report::{Evidence, Finding, FindingCategory, FindingSeverity};
+use oxgraph_report::{
+    Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity,
+};
 use oxgraph_rules::CompiledRules;
 
 /// Run all enabled analyzers and collect findings.
@@ -68,6 +70,7 @@ pub(crate) fn make_finding(
     code: &str,
     severity: FindingSeverity,
     category: FindingCategory,
+    confidence: FindingConfidence,
     subject: impl Into<String>,
     workspace: Option<String>,
     package: Option<String>,
@@ -93,6 +96,7 @@ pub(crate) fn make_finding(
         code: code.to_string(),
         severity,
         category,
+        confidence,
         subject,
         workspace,
         package,

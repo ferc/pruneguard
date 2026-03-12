@@ -82,6 +82,7 @@ export type AnalysisReport = {
     id: string;
     code: string;
     severity: "error" | "warn" | "info";
+    confidence: "high" | "medium" | "low";
     category: string;
     subject: string;
     workspace?: string;
@@ -105,6 +106,14 @@ export type AnalysisReport = {
     filesDiscovered: number;
     filesResolved: number;
     unresolvedSpecifiers: number;
+    unresolvedByReason: {
+      missingFile: number;
+      unsupportedSpecifier: number;
+      tsconfigPathMiss: number;
+      exportsConditionMiss: number;
+      externalized: number;
+    };
+    resolvedViaExports: number;
     entrypointsDetected: number;
     graphNodes: number;
     graphEdges: number;
@@ -119,6 +128,8 @@ export type AnalysisReport = {
     focusApplied: boolean;
     focusedFiles: number;
     focusedFindings: number;
+    partialScope: boolean;
+    partialScopeReason?: string;
     parityWarnings: string[];
     cacheHits: number;
     cacheMisses: number;
@@ -140,13 +151,16 @@ export type ImpactReport = {
   affectedPackages: string[];
   affectedFiles: string[];
   evidence: Array<{ kind: string; file?: string; line?: number; description: string }>;
+  focusFiltered: boolean;
 };
 
 export type ExplainReport = {
   query: string;
   matchedNode?: string;
+  queryKind: "finding" | "file" | "export";
   proofs: Array<{ node: string; relationship: string; children: ExplainReport["proofs"] }>;
   relatedFindings: AnalysisReport["findings"];
+  focusFiltered: boolean;
 };
 
 export type OxgraphConfig = Record<string, unknown>;

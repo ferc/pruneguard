@@ -17,7 +17,7 @@ use oxgraph_frameworks::built_in_packs;
 use oxgraph_fs::{FileKind, FileRole, has_js_ts_extension};
 use oxgraph_report::{
     EntrypointInfo, FileInfo, FileRole as ReportFileRole, Inventories, PackageInfo, Stats,
-    WorkspaceInfo,
+    UnresolvedByReasonStats, WorkspaceInfo,
 };
 use oxgraph_resolver::{
     ModuleResolver, ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind, dependency_name,
@@ -85,9 +85,18 @@ pub fn build_graph_with_options(
     let exclude_matcher = compile_globset(&config.entrypoints.exclude);
 
     let mut files = discovery.collect_files(config);
+    let total_discovered_files = files.len();
     if !scan_roots.is_empty() {
         files.retain(|file| scan_roots.iter().any(|root| file.path.starts_with(root)));
     }
+    let partial_scope = !scan_roots.is_empty() && files.len() < total_discovered_files;
+    let partial_scope_reason = partial_scope.then(|| {
+        format!(
+            "scan paths narrowed analysis to {} of {} discovered files; dead-code findings are advisory for partial-scope scans",
+            files.len(),
+            total_discovered_files
+        )
+    });
 
     let resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
     let config_hash = hash_json(config);
@@ -235,16 +244,43 @@ pub fn build_graph_with_options(
     let entrypoints = build_entrypoints(&mut module_graph, &entrypoint_seeds, &file_nodes, &package_nodes);
     seed_public_exports(&mut symbol_graph, &entrypoint_seeds, &file_nodes);
 
-    let files_resolved = extracted_files
+    let mut files_resolved = 0;
+    let mut unresolved_specifiers = 0;
+    let mut resolved_via_exports = 0;
+    let mut unresolved_by_reason = UnresolvedByReasonStats::default();
+    for edge in extracted_files
         .iter()
         .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
-        .filter(|edge| !matches!(edge.outcome, ResolutionOutcome::Unresolved))
-        .count();
-    let unresolved_specifiers = extracted_files
-        .iter()
-        .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
-        .filter(|edge| matches!(edge.outcome, ResolutionOutcome::Unresolved))
-        .count();
+    {
+        match edge.outcome {
+            ResolutionOutcome::ResolvedToFile | ResolutionOutcome::ResolvedToDependency => {
+                files_resolved += 1;
+                if edge.via_exports {
+                    resolved_via_exports += 1;
+                }
+            }
+            ResolutionOutcome::Unresolved => {
+                unresolved_specifiers += 1;
+                match edge.unresolved_reason {
+                    Some(oxgraph_resolver::UnresolvedReason::UnsupportedSpecifier) => {
+                        unresolved_by_reason.unsupported_specifier += 1;
+                    }
+                    Some(oxgraph_resolver::UnresolvedReason::TsconfigPathMiss) => {
+                        unresolved_by_reason.tsconfig_path_miss += 1;
+                    }
+                    Some(oxgraph_resolver::UnresolvedReason::ExportsConditionMiss) => {
+                        unresolved_by_reason.exports_condition_miss += 1;
+                    }
+                    Some(oxgraph_resolver::UnresolvedReason::Externalized) => {
+                        unresolved_by_reason.externalized += 1;
+                    }
+                    Some(oxgraph_resolver::UnresolvedReason::MissingFile) | None => {
+                        unresolved_by_reason.missing_file += 1;
+                    }
+                }
+            }
+        }
+    }
 
     let stats = Stats {
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -253,6 +289,8 @@ pub fn build_graph_with_options(
         files_discovered: extracted_files.len(),
         files_resolved,
         unresolved_specifiers,
+        unresolved_by_reason,
+        resolved_via_exports,
         entrypoints_detected: entrypoint_seeds.len(),
         graph_nodes: module_graph.node_count(),
         graph_edges: module_graph.edge_count(),
@@ -267,6 +305,8 @@ pub fn build_graph_with_options(
         focus_applied: false,
         focused_files: 0,
         focused_findings: 0,
+        partial_scope,
+        partial_scope_reason,
         parity_warnings: Vec::new(),
         cache_hits: cache_counters.hits,
         cache_misses: cache_counters.misses,

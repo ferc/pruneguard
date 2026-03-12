@@ -4,11 +4,12 @@ use oxgraph_config::AnalysisSeverity;
 use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_fs::is_docs_path;
 use oxgraph_graph::GraphBuildResult;
-use oxgraph_report::{Evidence, Finding, FindingCategory};
+use oxgraph_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
 use crate::{make_finding, severity};
 
 /// Find declared package dependencies that are never referenced by reachable files.
+#[allow(clippy::too_many_lines)]
 pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,
@@ -75,6 +76,8 @@ pub fn analyze(
             .name
             .clone()
             .unwrap_or_else(|| workspace_name.clone());
+        let unresolved_count = workspace_unresolved_specifiers(build, &workspace_name);
+        let only_script_entrypoints = workspace_has_only_script_entrypoints(build, &workspace_name);
         let used_prod = used_prod_by_workspace.get(&workspace_name);
         let used_dev = used_dev_by_workspace.get(&workspace_name);
 
@@ -101,11 +104,17 @@ pub fn analyze(
                     "No reachable file in the active profile resolved to this {dependency_kind}."
                 ),
             }];
+            let confidence = if unresolved_count > 8 || only_script_entrypoints {
+                FindingConfidence::Low
+            } else {
+                FindingConfidence::Medium
+            };
 
             findings.push(make_finding(
                 "unused-dependency",
                 finding_severity,
                 FindingCategory::UnusedDependency,
+                confidence,
                 dependency,
                 Some(workspace_name.clone()),
                 Some(package_name.clone()),
@@ -120,6 +129,30 @@ pub fn analyze(
     }
 
     findings
+}
+
+fn workspace_unresolved_specifiers(build: &GraphBuildResult, workspace_name: &str) -> usize {
+    build.files
+        .iter()
+        .filter(|file| file.file.workspace.as_deref() == Some(workspace_name))
+        .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
+        .filter(|edge| matches!(edge.outcome, oxgraph_resolver::ResolutionOutcome::Unresolved))
+        .count()
+}
+
+fn workspace_has_only_script_entrypoints(build: &GraphBuildResult, workspace_name: &str) -> bool {
+    let mut saw_entrypoint = false;
+    for seed in &build.entrypoint_seeds {
+        if seed.workspace.as_deref() != Some(workspace_name) {
+            continue;
+        }
+        saw_entrypoint = true;
+        if seed.kind != oxgraph_entrypoints::EntrypointKind::PackageScript {
+            return false;
+        }
+    }
+
+    saw_entrypoint
 }
 
 fn declared_dependencies<'a>(

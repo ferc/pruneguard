@@ -1,10 +1,11 @@
 # Parity Notes
 
-`oxgraph` tracks parity against three local reference corpora:
+`oxgraph` tracks parity against local reference corpora:
 
 - `knip`
 - `dependency-cruiser`
 - `oxc`
+- `claude-attack`
 
 This harness is smoke-oriented today, not exact-output parity. The current goals are:
 
@@ -20,6 +21,8 @@ Known intentional differences:
 - `oxgraph` separates value and type liveness in unused-export reporting
 - `oxgraph` treats `baseline.json` as a prior `AnalysisReport`, not as a dedicated baseline schema
 - `oxgraph` currently supports a subset of the long-term rule filter model
+- partial-scope positional scans are explicitly advisory for dead-code findings; parity runs use full-repo scans
+- findings now carry `confidence`, so parity review should consider both the finding count and whether high-confidence findings look plausible
 
 Run the current real-repo harness with:
 

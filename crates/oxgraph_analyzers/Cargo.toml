@@ -24,6 +24,7 @@ oxgraph_fs = { workspace = true }
 oxgraph_extract = { workspace = true }
 oxgraph_manifest = { workspace = true }
 oxgraph_report = { workspace = true }
+oxgraph_resolver = { workspace = true }
 oxgraph_rules = { workspace = true }
 
 compact_str = { workspace = true }

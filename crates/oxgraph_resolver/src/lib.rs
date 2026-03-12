@@ -126,10 +126,13 @@ impl ModuleResolver {
     pub fn resolve(&self, specifier: &str, from: &Path) -> Result<ResolvedModule, ResolveError> {
         let directory = from.parent().unwrap_or(from);
         match self.inner.resolve(directory, specifier) {
-            Ok(resolution) => Ok(ResolvedModule {
-                path: resolution.into_path_buf(),
-                via_exports: false, // TODO: detect this
-            }),
+            Ok(resolution) => {
+                let via_exports = resolved_via_package_exports(specifier, &resolution);
+                Ok(ResolvedModule {
+                    path: resolution.into_path_buf(),
+                    via_exports,
+                })
+            }
             Err(err) => Err(ResolveError::NotFound {
                 specifier: specifier.to_string(),
                 from: from.to_path_buf(),
@@ -227,4 +230,21 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
     }
 
     UnresolvedReason::MissingFile
+}
+
+fn resolved_via_package_exports(specifier: &str, resolution: &oxc_resolver::Resolution) -> bool {
+    let Some(package_name) = dependency_name(specifier) else {
+        return false;
+    };
+    let Some(package_json) = resolution.package_json() else {
+        return false;
+    };
+    if package_json.exports().is_none() {
+        return false;
+    }
+
+    match package_json.name() {
+        Some(name) if name == package_name => true,
+        _ => resolution.path().starts_with(package_json.directory()),
+    }
 }

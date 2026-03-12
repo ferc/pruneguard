@@ -201,6 +201,7 @@
       "required": [
         "category",
         "code",
+        "confidence",
         "id",
         "message",
         "severity",
@@ -218,6 +219,14 @@
         "code": {
           "description": "Machine-readable code (e.g. `unused-export`, `cycle`, `boundary-violation`).",
           "type": "string"
+        },
+        "confidence": {
+          "description": "Confidence level for this finding.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingConfidence"
+            }
+          ]
         },
         "evidence": {
           "description": "Evidence supporting the finding.",
@@ -287,6 +296,14 @@
         "boundary-violation",
         "ownership-violation",
         "impact"
+      ]
+    },
+    "FindingConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
       ]
     },
     "FindingSeverity": {
@@ -379,7 +396,10 @@
         "graphEdges",
         "graphNodes",
         "newFindings",
+        "partialScope",
+        "resolvedViaExports",
         "suppressedFindings",
+        "unresolvedByReason",
         "unresolvedSpecifiers"
       ],
       "properties": {
@@ -496,10 +516,27 @@
             "type": "string"
           }
         },
+        "partialScope": {
+          "type": "boolean"
+        },
+        "partialScopeReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedViaExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "suppressedFindings": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "unresolvedByReason": {
+          "$ref": "#/definitions/UnresolvedByReasonStats"
         },
         "unresolvedSpecifiers": {
           "type": "integer",
@@ -558,6 +595,43 @@
           "minimum": 0.0
         },
         "warnings": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "UnresolvedByReasonStats": {
+      "type": "object",
+      "required": [
+        "exportsConditionMiss",
+        "externalized",
+        "missingFile",
+        "tsconfigPathMiss",
+        "unsupportedSpecifier"
+      ],
+      "properties": {
+        "exportsConditionMiss": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "externalized": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "missingFile": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "tsconfigPathMiss": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "unsupportedSpecifier": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0

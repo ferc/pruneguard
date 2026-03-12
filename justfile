@@ -30,16 +30,23 @@ run *args:
 
 # Generate JSON schemas
 schemas:
-    cargo run -p oxgraph -- print-config > /dev/null
-    @echo "Schemas generated"
+    cargo run -p oxgraph --bin generate_schemas
 
 # Watch for changes and re-check
 watch cmd="check":
     cargo watch -x "{{cmd}}"
 
-# Run benchmarks
-benchmark:
+# Run microbenchmarks
+benchmark-workspace:
     cargo bench --workspace
+
+# Run one named corpus scan in release mode
+benchmark CASE:
+    cargo run --release -p oxgraph --bin oxgraph -- --format json scan {{CASE}}
+
+# Run configured corpus scans in release mode
+benchmark-repos:
+    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
 
 # Run one fixture scan smoke
 fixture CASE:

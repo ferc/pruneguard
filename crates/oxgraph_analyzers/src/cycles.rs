@@ -3,7 +3,7 @@ use oxgraph_graph::{GraphBuildResult, ModuleNode};
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use rustc_hash::FxHashSet;
-use oxgraph_report::{Evidence, Finding, FindingCategory};
+use oxgraph_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
 use crate::{make_finding, severity};
 
@@ -41,6 +41,7 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
             "cycle",
             finding_severity,
             FindingCategory::Cycle,
+            FindingConfidence::High,
             &subject,
             None,
             None,

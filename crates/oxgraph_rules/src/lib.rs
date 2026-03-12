@@ -5,7 +5,9 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use oxgraph_config::{AnalysisSeverity, Rule, RuleFilter, RulesConfig};
 use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_graph::{FileId, GraphBuildResult, ModuleNode};
-use oxgraph_report::{Evidence, Finding, FindingCategory, FindingSeverity};
+use oxgraph_report::{
+    Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity,
+};
 use oxgraph_resolver::{ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind};
 use petgraph::visit::EdgeRef;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -125,6 +127,7 @@ impl CompiledRules {
                         code: "boundary-violation".to_string(),
                         severity,
                         category: FindingCategory::BoundaryViolation,
+                        confidence: FindingConfidence::High,
                         subject: format!("{from_path} -> {subject}"),
                         workspace: extracted_file.file.workspace.clone(),
                         package: extracted_file.file.package.clone(),

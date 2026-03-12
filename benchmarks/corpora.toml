@@ -24,3 +24,12 @@ scan_paths = ["."]
 min_files = 1000
 min_packages = 5
 representative_targets = ["apps/oxlint/src/main.rs"]
+
+[[corpus]]
+name = "claude-attack"
+path = "/Users/fcarril/projects/side-projects/claude-attack"
+expected_commit = "local-reference"
+scan_paths = ["."]
+min_files = 50
+min_packages = 3
+representative_targets = ["packages/ui/src/components/index.ts"]

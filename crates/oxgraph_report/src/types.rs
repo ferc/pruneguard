@@ -79,6 +79,8 @@ pub struct Finding {
     /// Name of the rule that produced this finding, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_name: Option<String>,
+    /// Confidence level for this finding.
+    pub confidence: FindingConfidence,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -100,6 +102,14 @@ pub enum FindingCategory {
     BoundaryViolation,
     OwnershipViolation,
     Impact,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FindingConfidence {
+    High,
+    Medium,
+    Low,
 }
 
 /// Evidence supporting a finding.
@@ -133,6 +143,9 @@ pub struct ImpactReport {
     /// Evidence chain.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+    /// Whether focus filtering removed any affected nodes or proof edges.
+    #[serde(default)]
+    pub focus_filtered: bool,
 }
 
 /// Explain report for proof output.
@@ -144,12 +157,26 @@ pub struct ExplainReport {
     /// The matched graph node, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_node: Option<String>,
+    /// How the query was interpreted.
+    pub query_kind: ExplainQueryKind,
     /// Proof trees showing why-used or why-unused.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proofs: Vec<ProofNode>,
     /// Related findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related_findings: Vec<Finding>,
+    /// Whether focus filtering removed any related findings or proof edges.
+    #[serde(default)]
+    pub focus_filtered: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExplainQueryKind {
+    Finding,
+    #[default]
+    File,
+    Export,
 }
 
 /// A node in a proof tree.
@@ -252,6 +279,8 @@ pub struct Stats {
     pub files_discovered: usize,
     pub files_resolved: usize,
     pub unresolved_specifiers: usize,
+    pub unresolved_by_reason: UnresolvedByReasonStats,
+    pub resolved_via_exports: usize,
     pub entrypoints_detected: usize,
     pub graph_nodes: usize,
     pub graph_edges: usize,
@@ -266,6 +295,9 @@ pub struct Stats {
     pub focus_applied: bool,
     pub focused_files: usize,
     pub focused_findings: usize,
+    pub partial_scope: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_scope_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parity_warnings: Vec<String>,
     pub cache_hits: usize,
@@ -273,6 +305,16 @@ pub struct Stats {
     pub cache_entries_read: usize,
     pub cache_entries_written: usize,
     pub affected_scope_incomplete: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnresolvedByReasonStats {
+    pub missing_file: usize,
+    pub unsupported_specifier: usize,
+    pub tsconfig_path_miss: usize,
+    pub exports_condition_miss: usize,
+    pub externalized: usize,
 }
 
 impl AnalysisReport {

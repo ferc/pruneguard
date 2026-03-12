@@ -31,6 +31,30 @@ fn scan_reports_unused_file_from_fixture() {
 }
 
 #[test]
+fn partial_scope_scans_are_marked_advisory() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_oxgraph(&root, &["--format", "json", "scan", "src/used.ts"]);
+
+    assert_eq!(report["stats"]["partialScope"].as_bool(), Some(true));
+    assert!(report["stats"]["partialScopeReason"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("partial-scope")));
+}
+
+#[test]
+fn dead_code_findings_include_confidence() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-file"
+            && finding["subject"] == "src/unused.ts"
+            && finding["confidence"] == "high"
+    }));
+}
+
+#[test]
 fn impact_reports_entrypoint_from_fixture() {
     let root = fixture_root("unused-file-basic");
     let report = run_oxgraph(&root, &["--format", "json", "impact", "src/used.ts"]);
@@ -51,6 +75,7 @@ fn explain_returns_proof_for_reachable_file() {
     let report = run_oxgraph(&root, &["--format", "json", "explain", "src/used.ts"]);
 
     assert_eq!(report["matchedNode"].as_str(), Some("src/used.ts"));
+    assert_eq!(report["queryKind"].as_str(), Some("file"));
     assert!(report["proofs"].as_array().is_some_and(|proofs| !proofs.is_empty()));
 }
 
@@ -142,6 +167,19 @@ fn focus_filters_findings_without_changing_inventory() {
     assert!(!findings.iter().any(|finding| {
         finding["subject"] == "src/unused.ts"
     }));
+}
+
+#[test]
+fn explain_focus_reports_filtered_related_output() {
+    let root = fixture_root("focus-filtering");
+    let report = run_oxgraph(
+        &root,
+        &["--format", "json", "--focus", "src/used.ts", "explain", "src/unused.ts"],
+    );
+
+    assert_eq!(report["matchedNode"].as_str(), Some("src/unused.ts"));
+    assert_eq!(report["queryKind"].as_str(), Some("file"));
+    assert_eq!(report["focusFiltered"].as_bool(), Some(true));
 }
 
 #[test]
