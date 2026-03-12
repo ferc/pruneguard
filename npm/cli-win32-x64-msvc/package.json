@@ -3,7 +3,17 @@
   "version": "0.2.0",
   "description": "pruneguard platform binary for Windows x64",
   "license": "MIT",
-  "os": ["win32"],
-  "cpu": ["x64"],
-  "files": ["bin/pruneguard.exe"]
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/pruneguard.exe"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ferc/pruneguard"
+  }
 }

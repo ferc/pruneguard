@@ -3,8 +3,20 @@
   "version": "0.2.0",
   "description": "pruneguard platform binary for Linux x64 (glibc)",
   "license": "MIT",
-  "os": ["linux"],
-  "cpu": ["x64"],
-  "libc": ["glibc"],
-  "files": ["bin/pruneguard"]
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin/pruneguard"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ferc/pruneguard"
+  }
 }

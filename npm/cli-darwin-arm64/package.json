@@ -3,7 +3,17 @@
   "version": "0.2.0",
   "description": "pruneguard platform binary for macOS ARM64",
   "license": "MIT",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": ["bin/pruneguard"]
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/pruneguard"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ferc/pruneguard"
+  }
 }
