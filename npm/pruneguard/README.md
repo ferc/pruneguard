@@ -60,9 +60,6 @@ Commands:
   debug entrypoints           List detected entrypoints
   debug runtime               Print runtime diagnostics
   daemon start|stop|status    Manage the background daemon
-  migrate knip                Convert knip config to pruneguard
-  migrate depcruise           Convert dependency-cruiser config to pruneguard
-
 Options:
   -c, --config <FILE>          Config file path [default: pruneguard.json]
       --format <FORMAT>        Output format: text, json, sarif, dot
@@ -127,8 +124,6 @@ import {
   loadConfig,
   schemaPath,
   scanDot,
-  migrateKnip,
-  migrateDepcruise,
 } from "pruneguard";
 ```
 
@@ -204,8 +199,6 @@ const config = await loadConfig();
 const schema = schemaPath();
 const dot = await scanDot();
 const rules = await suggestRules();
-const knip = await migrateKnip();
-const dc = await migrateDepcruise();
 ```
 
 ### Error handling
@@ -371,17 +364,6 @@ jobs:
             console.log('No new findings.');
           "
 ```
-
----
-
-## Migrating from other tools
-
-```sh
-pruneguard migrate knip           # reads knip.json or package.json#knip
-pruneguard migrate depcruise      # reads .dependency-cruiser.* files
-```
-
-Both commands emit an equivalent `pruneguard.json` with migration notes.
 
 ---
 

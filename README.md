@@ -72,9 +72,6 @@ pruneguard debug runtime                        # Print binary/platform info
 # Daemon
 pruneguard daemon start|stop|status      # Manage the background daemon
 
-# Migration
-pruneguard migrate knip [file]           # Convert knip config
-pruneguard migrate depcruise [file]      # Convert dependency-cruiser config
 ```
 
 ### Global flags
@@ -254,8 +251,6 @@ import {
   loadConfig,
   schemaPath,
   scanDot,
-  migrateKnip,
-  migrateDepcruise,
   resolutionInfo,
   debugResolve,
   debugEntrypoints,
@@ -282,14 +277,6 @@ console.log(schemaPath());
 // Graphviz DOT output
 const dot = await scanDot();
 
-// Migrate from knip
-const knipMigration = await migrateKnip();
-console.log(knipMigration.config, knipMigration.warnings);
-
-// Migrate from dependency-cruiser
-const dcMigration = await migrateDepcruise();
-console.log(dcMigration.config, dcMigration.warnings);
-
 // Binary resolution diagnostics
 const info = resolutionInfo();
 console.log(info.source, info.platform);
@@ -311,8 +298,6 @@ console.log(info.source, info.platform);
 | `binaryPath` | `() => string` | Path to the resolved native binary |
 | `run` | `(args, options?) => Promise<CommandResult>` | Run arbitrary CLI args |
 | `scanDot` | `(options?) => Promise<string>` | Graphviz DOT output |
-| `migrateKnip` | `(options?) => Promise<MigrationOutput>` | Migrate from knip config |
-| `migrateDepcruise` | `(options?) => Promise<MigrationOutput>` | Migrate from dependency-cruiser config |
 
 ### Error handling
 
