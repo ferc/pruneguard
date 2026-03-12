@@ -220,6 +220,39 @@ fn is_build_tool_dependency(dep: &str) -> bool {
         return true;
     }
 
+    // ESLint plugins and configs are loaded by the ESLint runner, not imported.
+    if dep.starts_with("@eslint/")
+        || dep.starts_with("eslint-plugin-")
+        || dep.starts_with("eslint-config-")
+        || dep.starts_with("@next/eslint-plugin-")
+        || dep.starts_with("@typescript-eslint/")
+    {
+        return true;
+    }
+
+    // Prettier plugins are loaded by the Prettier runner.
+    if dep.starts_with("prettier-plugin-") {
+        return true;
+    }
+
+    // Storybook addons and builders are loaded by .storybook/main config.
+    if dep.starts_with("@storybook/") {
+        return true;
+    }
+
+    // OpenTelemetry instrumentation packages are loaded by runtime config.
+    if dep.starts_with("@opentelemetry/") {
+        return true;
+    }
+
+    // Babel plugins and presets.
+    if dep.starts_with("babel-plugin-")
+        || dep.starts_with("@babel/plugin-")
+        || dep.starts_with("@babel/preset-")
+    {
+        return true;
+    }
+
     matches!(
         dep,
         // Language / compiler
@@ -245,10 +278,24 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "@content-collections/core"
             | "@content-collections/vite"
             | "@content-collections/next"
+            | "@next/bundle-analyzer"
+            | "@sentry/esbuild-plugin"
+            | "@sentry/nextjs"
+            // Test runners & frameworks (invoked by config, not imported in source)
+            | "@playwright/test"
+            | "playwright"
+            | "cypress"
+            // Linting / formatting (invoked by scripts or config, not imported)
+            | "eslint"
+            | "prettier"
+            | "stylelint"
             // Script runners (invoked via scripts, not imported)
             | "tsx"
             | "ts-node"
             | "tsm"
+            | "nodemon"
+            | "concurrently"
+            | "wait-on"
     )
 }
 
