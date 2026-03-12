@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build-napi": "napi build --platform --cargo-cwd ../../ -p oxgraph --js false",
-    "build-napi-release": "napi build --platform --cargo-cwd ../../ -p oxgraph --release --js false",
-    "build-js": "tsdown src-js/index.ts src-js/cli.ts --format esm --dts",
-    "build": "pnpm build-napi && pnpm build-js"
+    "build-napi": "napi build --platform --cargo-cwd ../../ -p oxgraph --features napi --js false",
+    "build-napi-release": "napi build --platform --cargo-cwd ../../ -p oxgraph --release --features napi --js false",
+    "build-js": "tsdown src-js/index.ts src-js/cli.ts --format esm --dts --out-dir ../../npm/oxgraph/dist",
+    "build": "pnpm build-napi && pnpm build-js && cargo run --bin generate_schemas"
   },
   "devDependencies": {
     "@napi-rs/cli": "catalog:",

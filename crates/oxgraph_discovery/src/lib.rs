@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use oxgraph_config::{OxgraphConfig, PackageManager};
+use oxgraph_fs::{FileCollectionOptions, FileKind, FileRecord, collect_file_records};
 use oxgraph_manifest::PackageManifest;
 use rustc_hash::FxHashMap;
 
@@ -28,6 +29,50 @@ pub struct DiscoveryResult {
     pub codeowners: Option<Codeowners>,
 }
 
+impl DiscoveryResult {
+    /// Return workspace roots keyed by workspace name.
+    pub fn workspace_roots(&self) -> FxHashMap<String, PathBuf> {
+        self.workspaces
+            .iter()
+            .map(|(name, workspace)| (name.clone(), workspace.root.clone()))
+            .collect()
+    }
+
+    /// Return package names keyed by workspace name.
+    pub fn package_names(&self) -> FxHashMap<String, String> {
+        self.workspaces
+            .iter()
+            .map(|(name, workspace)| {
+                (
+                    name.clone(),
+                    workspace
+                        .manifest
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| name.clone()),
+                )
+            })
+            .collect()
+    }
+
+    /// Collect tracked files under the project root.
+    pub fn collect_files(&self, config: &OxgraphConfig) -> Vec<FileRecord> {
+        let options = FileCollectionOptions {
+            ignore_patterns: config.ignore_patterns.clone(),
+            workspace_roots: self.workspace_roots(),
+            package_names: self.package_names(),
+            extra_classifications: vec![
+                ("**/*.stories.*".to_string(), FileKind::Story),
+                ("**/*.test.*".to_string(), FileKind::Test),
+                ("**/*.spec.*".to_string(), FileKind::Test),
+                ("**/__tests__/**".to_string(), FileKind::Test),
+            ],
+        };
+
+        collect_file_records(&self.project_root, &options)
+    }
+}
+
 /// Parsed CODEOWNERS file.
 #[derive(Debug, Clone, Default)]
 pub struct Codeowners {
@@ -51,6 +96,19 @@ pub fn discover(cwd: &Path, config: &OxgraphConfig) -> miette::Result<DiscoveryR
     if root_manifest_path.exists() {
         let root_manifest =
             PackageManifest::load(&root_manifest_path).map_err(|e| miette::miette!("{e}"))?;
+        let root_name = root_manifest.name.clone().unwrap_or_else(|| {
+            project_root
+                .file_name()
+                .map_or_else(|| "root".to_string(), |name| name.to_string_lossy().to_string())
+        });
+        result.workspaces.insert(
+            root_name.clone(),
+            Workspace {
+                name: root_name,
+                root: project_root.clone(),
+                manifest: root_manifest.clone(),
+            },
+        );
 
         // Detect workspace globs from config or package.json
         let workspace_globs = if let Some(ws_config) = &config.workspaces {
@@ -78,9 +136,11 @@ pub fn discover(cwd: &Path, config: &OxgraphConfig) -> miette::Result<DiscoveryR
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_default()
                         });
-                        result
-                            .workspaces
-                            .insert(name.clone(), Workspace { name, root: entry, manifest });
+                        result.workspaces.entry(name.clone()).or_insert_with(|| Workspace {
+                            name,
+                            root: entry,
+                            manifest,
+                        });
                     }
                 }
             }
@@ -113,19 +173,39 @@ pub fn discover(cwd: &Path, config: &OxgraphConfig) -> miette::Result<DiscoveryR
 
 /// Find the project root by searching for a root package.json or git root.
 fn find_project_root(cwd: &Path) -> PathBuf {
+    if cwd.join("package.json").exists() {
+        return cwd.to_path_buf();
+    }
+
     let mut current = cwd;
+    let mut package_fallback = None;
     loop {
         if current.join("pnpm-workspace.yaml").exists()
             || current.join("lerna.json").exists()
-            || current.join(".git").exists()
         {
             return current.to_path_buf();
         }
+        let package_json = current.join("package.json");
+        if package_json.exists() {
+            package_fallback.get_or_insert_with(|| current.to_path_buf());
+            if package_json_has_workspaces(&package_json) {
+                return current.to_path_buf();
+            }
+        }
+        if current.join(".git").exists() {
+            return package_fallback.unwrap_or_else(|| current.to_path_buf());
+        }
         match current.parent() {
             Some(parent) => current = parent,
-            None => return cwd.to_path_buf(),
+            None => return package_fallback.unwrap_or_else(|| cwd.to_path_buf()),
         }
     }
+}
+
+fn package_json_has_workspaces(package_json: &Path) -> bool {
+    std::fs::read_to_string(package_json)
+        .ok()
+        .is_some_and(|content| content.contains("\"workspaces\""))
 }
 
 /// Extract workspace globs from package manager config files.

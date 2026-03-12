@@ -1,10 +1,79 @@
-//! Analyzer stub.
+use rustc_hash::FxHashSet;
 
-use oxgraph_graph::ModuleGraph;
-use oxgraph_report::Finding;
+use oxgraph_config::AnalysisSeverity;
+use oxgraph_entrypoints::EntrypointProfile;
+use oxgraph_graph::GraphBuildResult;
+use oxgraph_report::{Evidence, Finding, FindingCategory};
 
-/// Run this analyzer against the module graph.
-pub fn analyze(_graph: &ModuleGraph) -> Vec<Finding> {
-    // TODO: implement
-    Vec::new()
+use crate::{make_finding, severity};
+
+/// Find workspace packages with no reachable files.
+pub fn analyze(
+    build: &GraphBuildResult,
+    level: AnalysisSeverity,
+    profile: EntrypointProfile,
+) -> Vec<Finding> {
+    let Some(finding_severity) = severity(level) else {
+        return Vec::new();
+    };
+
+    let reachable = build.module_graph.reachable_file_ids(profile);
+    let mut reachable_workspaces = FxHashSet::default();
+
+    for extracted_file in &build.files {
+        let Some(file_id) = build
+            .module_graph
+            .file_id(&extracted_file.file.path.to_string_lossy())
+        else {
+            continue;
+        };
+
+        if reachable.contains(&file_id)
+            && let Some(workspace) = &extracted_file.file.workspace
+        {
+            reachable_workspaces.insert(workspace.clone());
+        }
+    }
+
+    let mut findings = Vec::new();
+    for workspace in build.discovery.workspaces.values() {
+        if reachable_workspaces.contains(&workspace.name) {
+            continue;
+        }
+
+        let package_name = workspace
+            .manifest
+            .name
+            .clone()
+            .unwrap_or_else(|| workspace.name.clone());
+
+        findings.push(make_finding(
+            "unused-package",
+            finding_severity,
+            FindingCategory::UnusedPackage,
+            &package_name,
+            Some(workspace.name.clone()),
+            Some(package_name.clone()),
+            format!(
+                "Package `{package_name}` has no reachable source files or entrypoints."
+            ),
+            vec![Evidence {
+                kind: "package".to_string(),
+                file: Some(
+                    workspace
+                        .root
+                        .strip_prefix(&build.discovery.project_root)
+                        .unwrap_or(&workspace.root)
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                line: None,
+                description: "No active entrypoint or reachable package edge reaches this workspace package.".to_string(),
+            }],
+            Some("Remove the package or wire it into the reachable graph.".to_string()),
+            None,
+        ));
+    }
+
+    findings
 }

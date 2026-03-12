@@ -16,9 +16,18 @@ publish = true
 workspace = true
 
 [dependencies]
+oxgraph_config = { workspace = true }
+oxgraph_discovery = { workspace = true }
+oxgraph_entrypoints = { workspace = true }
 oxgraph_extract = { workspace = true }
+oxgraph_fs = { workspace = true }
+oxgraph_frameworks = { workspace = true }
 oxgraph_manifest = { workspace = true }
+oxgraph_report = { workspace = true }
+oxgraph_resolver = { workspace = true }
 
+globset = { workspace = true }
+miette = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 compact_str = { workspace = true }

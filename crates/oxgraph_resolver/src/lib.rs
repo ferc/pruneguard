@@ -13,6 +13,30 @@ pub struct ResolvedModule {
     pub via_exports: bool,
 }
 
+/// Graph-facing kind of a resolved dependency edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedEdgeKind {
+    StaticImportValue,
+    StaticImportType,
+    DynamicImport,
+    Require,
+    SideEffectImport,
+    ReExportNamed,
+    ReExportAll,
+}
+
+/// A resolved edge emitted while extracting a file.
+#[derive(Debug, Clone)]
+pub struct ResolvedEdge {
+    pub from: PathBuf,
+    pub specifier: String,
+    pub to_file: Option<PathBuf>,
+    pub to_dependency: Option<String>,
+    pub kind: ResolvedEdgeKind,
+    pub via_exports: bool,
+    pub line: Option<u32>,
+}
+
 /// Module resolver built on `oxc_resolver`.
 pub struct ModuleResolver {
     inner: Resolver,
@@ -79,6 +103,22 @@ pub fn debug_resolve(config: &ResolverConfig, specifier: &str, from: &Path) -> S
             if module.via_exports { " (via exports)" } else { "" }
         ),
         Err(err) => format!("{specifier} -> UNRESOLVED ({err})"),
+    }
+}
+
+/// Infer the dependency package name from a bare module specifier.
+pub fn dependency_name(specifier: &str) -> Option<String> {
+    if specifier.starts_with('.') || specifier.starts_with('/') {
+        return None;
+    }
+
+    let mut parts = specifier.split('/');
+    let first = parts.next()?;
+    if first.starts_with('@') {
+        let second = parts.next()?;
+        Some(format!("{first}/{second}"))
+    } else {
+        Some(first.to_string())
     }
 }
 

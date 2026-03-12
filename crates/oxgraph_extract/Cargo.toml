@@ -16,6 +16,7 @@ publish = true
 workspace = true
 
 [dependencies]
+oxgraph_fs = { workspace = true }
 oxgraph_resolver = { workspace = true }
 
 oxc_parser = { workspace = true }

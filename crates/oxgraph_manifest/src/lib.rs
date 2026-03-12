@@ -107,9 +107,49 @@ impl PackageManifest {
                 BinField::Map(map) => files.extend(map.values().cloned()),
             }
         }
-        // TODO: parse exports map for entrypoint files
+        if let Some(exports) = &self.exports {
+            collect_export_paths(exports, &mut files);
+        }
+        files.sort();
+        files.dedup();
         files
     }
+}
+
+fn collect_export_paths(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(path) => {
+            if looks_like_entrypoint(path) {
+                output.push(path.clone());
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_export_paths(value, output);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_export_paths(value, output);
+            }
+        }
+        serde_json::Value::Bool(_)
+        | serde_json::Value::Null
+        | serde_json::Value::Number(_) => {}
+    }
+}
+
+fn looks_like_entrypoint(value: &str) -> bool {
+    if value.to_ascii_lowercase().ends_with(".d.ts") {
+        return true;
+    }
+
+    Path::new(value).extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+        matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "js" | "mjs" | "cjs" | "ts" | "mts" | "cts" | "tsx" | "jsx"
+        )
+    })
 }
 
 /// Errors that can occur when loading a manifest.

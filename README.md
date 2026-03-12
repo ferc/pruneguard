@@ -31,7 +31,7 @@ oxgraph explain unused-export:packages/core:src/old.ts#deprecatedFn
 oxgraph init
 
 # Debug resolution
-oxgraph debug-resolve ./utils --from src/index.ts
+oxgraph debug resolve ./utils --from src/index.ts
 ```
 
 ## Configuration

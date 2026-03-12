@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/oxgraph/configuration_schema.json",
+  "workspaces": {
+    "roots": [
+      "apps/*",
+      "packages/*"
+    ],
+    "packageManager": "auto"
+  },
+  "resolver": {
+    "respectExports": true,
+    "preserveSymlinks": false
+  },
+  "entrypoints": {
+    "auto": true,
+    "includeTests": false,
+    "includeStories": false
+  },
+  "analysis": {
+    "unusedExports": "warn",
+    "unusedFiles": "warn",
+    "unusedPackages": "warn",
+    "unusedDependencies": "warn",
+    "cycles": "warn",
+    "boundaries": "warn",
+    "ownership": "warn",
+    "impact": "warn"
+  }
+}

@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 use crate::ids::{ExportId, FileId};
 
 /// The symbol-level graph tracking export/import liveness.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SymbolGraph {
     /// All exports, keyed by file + export name.
     pub exports: FxHashMap<(FileId, CompactString), ExportNode>,
@@ -99,6 +99,20 @@ impl SymbolGraph {
         if let Some(node) = self.exports.get_mut(&(file, CompactString::new(name))) {
             node.is_live = true;
         }
+    }
+
+    /// Mark all exports in a file as live.
+    pub fn mark_all_file_exports_live(&mut self, file: FileId, is_type: Option<bool>) {
+        for ((export_file, _), node) in &mut self.exports {
+            if *export_file == file && is_type.is_none_or(|kind| kind == node.is_type) {
+                node.is_live = true;
+            }
+        }
+    }
+
+    /// Return all exports for a specific file.
+    pub fn exports_for_file(&self, file: FileId) -> impl Iterator<Item = &ExportNode> {
+        self.exports.values().filter(move |node| node.file == file)
     }
 
     /// Get all dead (unused) exports.

@@ -1109,7 +1109,9 @@ dependencies = [
  "oxgraph_report",
  "oxgraph_resolver",
  "oxgraph_rules",
+ "petgraph",
  "rayon",
+ "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
@@ -1119,10 +1121,15 @@ dependencies = [
 name = "oxgraph_analyzers"
 version = "0.1.0"
 dependencies = [
+ "globset",
  "insta",
  "oxgraph_config",
+ "oxgraph_discovery",
+ "oxgraph_entrypoints",
+ "oxgraph_fs",
  "oxgraph_graph",
  "oxgraph_report",
+ "oxgraph_rules",
  "rustc-hash",
  "tracing",
 ]
@@ -1194,6 +1201,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "oxc_syntax",
+ "oxgraph_fs",
  "oxgraph_resolver",
  "rustc-hash",
  "thiserror",
@@ -1226,9 +1234,18 @@ name = "oxgraph_graph"
 version = "0.1.0"
 dependencies = [
  "compact_str 0.8.1",
+ "globset",
  "insta",
+ "miette",
+ "oxgraph_config",
+ "oxgraph_discovery",
+ "oxgraph_entrypoints",
  "oxgraph_extract",
+ "oxgraph_frameworks",
+ "oxgraph_fs",
  "oxgraph_manifest",
+ "oxgraph_report",
+ "oxgraph_resolver",
  "petgraph",
  "rustc-hash",
  "serde",

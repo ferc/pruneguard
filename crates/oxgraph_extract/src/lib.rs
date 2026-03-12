@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use compact_str::CompactString;
+use oxgraph_fs::FileRecord;
+use oxgraph_resolver::ResolvedEdge;
 use rustc_hash::FxHashSet;
 
 /// Extracted facts from a single JS/TS file.
@@ -95,6 +97,32 @@ pub struct RequireInfo {
     pub specifier: Option<CompactString>,
     /// Source line (1-indexed).
     pub line: u32,
+}
+
+/// Extracted and resolved facts for a tracked repository file.
+#[derive(Debug, Clone)]
+pub struct ExtractedFile {
+    pub file: FileRecord,
+    pub facts: Option<FileFacts>,
+    pub parse_diagnostics: Vec<String>,
+    pub resolved_imports: Vec<ResolvedEdge>,
+    pub resolved_reexports: Vec<ResolvedEdge>,
+    pub external_dependencies: Vec<String>,
+}
+
+impl ExtractedFile {
+    /// Create an empty extracted record for a tracked file.
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn new(file: FileRecord) -> Self {
+        Self {
+            file,
+            facts: None,
+            parse_diagnostics: Vec::new(),
+            resolved_imports: Vec::new(),
+            resolved_reexports: Vec::new(),
+            external_dependencies: Vec::new(),
+        }
+    }
 }
 
 /// Extract all import/export facts from a single JS/TS file.

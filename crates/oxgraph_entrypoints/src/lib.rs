@@ -1,23 +1,23 @@
 use std::path::{Path, PathBuf};
 
-use oxgraph_config::EntrypointsConfig;
+use oxgraph_config::{EntrypointsConfig, FrameworkToggle, FrameworksConfig};
+use oxgraph_frameworks::FrameworkPack;
 use oxgraph_manifest::PackageManifest;
 use rustc_hash::FxHashSet;
 
-/// A detected entrypoint.
+/// A detected entrypoint seed used to initialize graph reachability.
 #[derive(Debug, Clone)]
-pub struct Entrypoint {
-    /// Path to the entrypoint file.
+pub struct EntrypointSeed {
     pub path: PathBuf,
-    /// How this entrypoint was detected.
-    pub kind: EntrypointSource,
-    /// Which profile this entrypoint belongs to.
+    pub kind: EntrypointKind,
     pub profile: EntrypointProfile,
+    pub workspace: Option<String>,
+    pub source: String,
 }
 
 /// How an entrypoint was discovered.
-#[derive(Debug, Clone, Copy)]
-pub enum EntrypointSource {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntrypointKind {
     PackageMain,
     PackageBin,
     PackageExports,
@@ -27,59 +27,103 @@ pub enum EntrypointSource {
 }
 
 /// Which analysis profile the entrypoint belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntrypointProfile {
     Production,
     Development,
     Both,
 }
 
-impl std::fmt::Display for Entrypoint {
+impl EntrypointProfile {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Production => "production",
+            Self::Development => "development",
+            Self::Both => "all",
+        }
+    }
+}
+
+impl EntrypointKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PackageMain => "package-main",
+            Self::PackageBin => "package-bin",
+            Self::PackageExports => "package-exports",
+            Self::ExplicitConfig => "explicit-config",
+            Self::FrameworkPack => "framework-pack",
+            Self::Convention => "convention",
+        }
+    }
+}
+
+impl std::fmt::Display for EntrypointSeed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({:?}, {:?})", self.path.display(), self.kind, self.profile,)
+        write!(
+            f,
+            "{} ({}, {}, {})",
+            self.path.display(),
+            self.kind.as_str(),
+            self.profile.as_str(),
+            self.source,
+        )
     }
 }
 
 /// Detect entrypoints for a workspace package.
 pub fn detect_entrypoints(
+    workspace_name: Option<&str>,
     workspace_root: &Path,
     manifest: &PackageManifest,
     config: &EntrypointsConfig,
-    framework_entries: &[PathBuf],
-) -> Vec<Entrypoint> {
+    frameworks_config: Option<&FrameworksConfig>,
+    framework_packs: &[Box<dyn FrameworkPack>],
+) -> Vec<EntrypointSeed> {
     let mut entrypoints = Vec::new();
     let mut seen = FxHashSet::default();
 
-    // 1. Explicit config entries
     for pattern in &config.include {
         if let Ok(paths) = glob::glob(&workspace_root.join(pattern).display().to_string()) {
             for path in paths.flatten() {
-                if seen.insert(path.clone()) {
-                    entrypoints.push(Entrypoint {
-                        path,
-                        kind: EntrypointSource::ExplicitConfig,
-                        profile: EntrypointProfile::Both,
-                    });
-                }
+                push_entrypoint(
+                    &mut entrypoints,
+                    &mut seen,
+                    path,
+                    EntrypointKind::ExplicitConfig,
+                    EntrypointProfile::Both,
+                    workspace_name,
+                    format!("config:{pattern}"),
+                );
             }
         }
     }
 
-    // 2. Auto-detect from package.json
     if config.auto {
         for file in manifest.entrypoint_files() {
             let path = workspace_root.join(&file);
-            if path.exists() && seen.insert(path.clone()) {
-                let kind = if file.contains("bin") {
-                    EntrypointSource::PackageBin
-                } else {
-                    EntrypointSource::PackageMain
-                };
-                entrypoints.push(Entrypoint { path, kind, profile: EntrypointProfile::Production });
+            if !path.exists() {
+                continue;
             }
+
+            let (kind, profile) = if is_bin_entry(&file, manifest) {
+                (EntrypointKind::PackageBin, EntrypointProfile::Production)
+            } else if is_exports_entry(&file, manifest) {
+                (EntrypointKind::PackageExports, EntrypointProfile::Production)
+            } else {
+                (EntrypointKind::PackageMain, EntrypointProfile::Production)
+            };
+
+            push_entrypoint(
+                &mut entrypoints,
+                &mut seen,
+                path,
+                kind,
+                profile,
+                workspace_name,
+                format!("package:{file}"),
+            );
         }
 
-        // Convention-based: index files at root
         for candidate in &[
             "src/index.ts",
             "src/index.tsx",
@@ -93,26 +137,104 @@ pub fn detect_entrypoints(
             "index.js",
         ] {
             let path = workspace_root.join(candidate);
-            if path.exists() && seen.insert(path.clone()) {
-                entrypoints.push(Entrypoint {
+            if path.exists() {
+                push_entrypoint(
+                    &mut entrypoints,
+                    &mut seen,
                     path,
-                    kind: EntrypointSource::Convention,
-                    profile: EntrypointProfile::Production,
-                });
+                    EntrypointKind::Convention,
+                    EntrypointProfile::Production,
+                    workspace_name,
+                    format!("convention:{candidate}"),
+                );
             }
         }
     }
 
-    // 3. Framework-detected entries
-    for path in framework_entries {
-        if seen.insert(path.clone()) {
-            entrypoints.push(Entrypoint {
-                path: path.clone(),
-                kind: EntrypointSource::FrameworkPack,
-                profile: EntrypointProfile::Production,
-            });
+    for pack in framework_packs {
+        if !framework_enabled(pack.name(), frameworks_config, workspace_root, manifest, pack.as_ref()) {
+            continue;
+        }
+        let profile = framework_profile(pack.name());
+        for path in pack.entrypoints(workspace_root) {
+            push_entrypoint(
+                &mut entrypoints,
+                &mut seen,
+                path,
+                EntrypointKind::FrameworkPack,
+                profile,
+                workspace_name,
+                format!("framework:{}", pack.name()),
+            );
         }
     }
 
+    entrypoints.sort_by(|a, b| a.path.cmp(&b.path).then(a.source.cmp(&b.source)));
     entrypoints
+}
+
+fn push_entrypoint(
+    entrypoints: &mut Vec<EntrypointSeed>,
+    seen: &mut FxHashSet<PathBuf>,
+    path: PathBuf,
+    kind: EntrypointKind,
+    profile: EntrypointProfile,
+    workspace_name: Option<&str>,
+    source: String,
+) {
+    if seen.insert(path.clone()) {
+        entrypoints.push(EntrypointSeed {
+            path,
+            kind,
+            profile,
+            workspace: workspace_name.map(ToString::to_string),
+            source,
+        });
+    }
+}
+
+fn framework_enabled(
+    name: &str,
+    config: Option<&FrameworksConfig>,
+    workspace_root: &Path,
+    manifest: &PackageManifest,
+    pack: &dyn FrameworkPack,
+) -> bool {
+    let toggle = config.and_then(|frameworks| match name {
+        "next" => frameworks.next,
+        "vite" => frameworks.vite,
+        "vitest" => frameworks.vitest,
+        "jest" => frameworks.jest,
+        "storybook" => frameworks.storybook,
+        _ => None,
+    });
+
+    match toggle {
+        Some(FrameworkToggle::Off) => false,
+        Some(FrameworkToggle::On) => true,
+        Some(FrameworkToggle::Auto) | None => pack.detect(workspace_root, manifest),
+    }
+}
+
+fn framework_profile(name: &str) -> EntrypointProfile {
+    match name {
+        "vitest" | "jest" | "storybook" => EntrypointProfile::Development,
+        _ => EntrypointProfile::Production,
+    }
+}
+
+fn is_bin_entry(path: &str, manifest: &PackageManifest) -> bool {
+    match &manifest.bin {
+        Some(oxgraph_manifest::BinField::Single(bin)) => bin == path,
+        Some(oxgraph_manifest::BinField::Map(map)) => map.values().any(|value| value == path),
+        None => false,
+    }
+}
+
+fn is_exports_entry(path: &str, manifest: &PackageManifest) -> bool {
+    manifest
+        .exports
+        .as_ref()
+        .and_then(|exports| exports.to_string().contains(path).then_some(()))
+        .is_some()
 }

@@ -1,10 +1,27 @@
-//! Analyzer stub.
+use oxgraph_config::AnalysisSeverity;
+use oxgraph_graph::GraphBuildResult;
+use oxgraph_report::{Finding, FindingSeverity};
+use oxgraph_rules::CompiledRules;
 
-use oxgraph_graph::ModuleGraph;
-use oxgraph_report::Finding;
+/// Evaluate compiled forbidden dependency rules.
+pub fn analyze(
+    build: &GraphBuildResult,
+    level: AnalysisSeverity,
+    rules: &CompiledRules,
+) -> Vec<Finding> {
+    rules.evaluate(build)
+        .into_iter()
+        .filter(|finding| severity_at_or_above(level, finding.severity))
+        .collect()
+}
 
-/// Run this analyzer against the module graph.
-pub fn analyze(_graph: &ModuleGraph) -> Vec<Finding> {
-    // TODO: implement
-    Vec::new()
+const fn severity_at_or_above(level: AnalysisSeverity, finding: FindingSeverity) -> bool {
+    match level {
+        AnalysisSeverity::Off => false,
+        AnalysisSeverity::Info => true,
+        AnalysisSeverity::Warn => {
+            matches!(finding, FindingSeverity::Error | FindingSeverity::Warn)
+        }
+        AnalysisSeverity::Error => matches!(finding, FindingSeverity::Error),
+    }
 }

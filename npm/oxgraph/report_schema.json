@@ -1,0 +1,443 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AnalysisReport",
+  "description": "Full analysis report from a scan.",
+  "type": "object",
+  "required": [
+    "cwd",
+    "entrypoints",
+    "findings",
+    "inventories",
+    "profile",
+    "stats",
+    "summary",
+    "toolVersion",
+    "version"
+  ],
+  "properties": {
+    "cwd": {
+      "description": "Working directory the analysis was run from.",
+      "type": "string"
+    },
+    "entrypoints": {
+      "description": "All detected entrypoints.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/EntrypointInfo"
+      }
+    },
+    "findings": {
+      "description": "Detected findings (violations, unused items, etc.).",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "inventories": {
+      "description": "Inventories of discovered entities.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Inventories"
+        }
+      ]
+    },
+    "profile": {
+      "description": "The profile used for this analysis.",
+      "type": "string"
+    },
+    "stats": {
+      "description": "Performance statistics.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Stats"
+        }
+      ]
+    },
+    "summary": {
+      "description": "Summary counts.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Summary"
+        }
+      ]
+    },
+    "toolVersion": {
+      "description": "Version of the oxgraph tool that produced this report.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Schema version for the report format.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "EntrypointInfo": {
+      "description": "Info about an entrypoint.",
+      "type": "object",
+      "required": [
+        "kind",
+        "path",
+        "profile"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Evidence": {
+      "description": "Evidence supporting a finding.",
+      "type": "object",
+      "required": [
+        "description",
+        "kind"
+      ],
+      "properties": {
+        "description": {
+          "description": "Description of this evidence.",
+          "type": "string"
+        },
+        "file": {
+          "description": "File path involved.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Type of evidence.",
+          "type": "string"
+        },
+        "line": {
+          "description": "Line number, if applicable.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "FileInfo": {
+      "description": "Info about a discovered file.",
+      "type": "object",
+      "required": [
+        "kind",
+        "path"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/FileKind"
+        },
+        "path": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "FileKind": {
+      "type": "string",
+      "enum": [
+        "source",
+        "test",
+        "story",
+        "config",
+        "generated",
+        "buildoutput"
+      ]
+    },
+    "Finding": {
+      "description": "A single finding from analysis.",
+      "type": "object",
+      "required": [
+        "category",
+        "code",
+        "id",
+        "message",
+        "severity",
+        "subject"
+      ],
+      "properties": {
+        "category": {
+          "description": "Category of the finding.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingCategory"
+            }
+          ]
+        },
+        "code": {
+          "description": "Machine-readable code (e.g. `unused-export`, `cycle`, `boundary-violation`).",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "Evidence supporting the finding.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Evidence"
+          }
+        },
+        "id": {
+          "description": "Stable deterministic ID for this finding.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable message.",
+          "type": "string"
+        },
+        "package": {
+          "description": "Package this finding belongs to, if applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ruleName": {
+          "description": "Name of the rule that produced this finding, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "description": "Severity level.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingSeverity"
+            }
+          ]
+        },
+        "subject": {
+          "description": "The subject of the finding (file path, export name, etc.).",
+          "type": "string"
+        },
+        "suggestion": {
+          "description": "Suggested fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "description": "Workspace this finding belongs to, if applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "FindingCategory": {
+      "type": "string",
+      "enum": [
+        "unused-export",
+        "unused-file",
+        "unused-package",
+        "unused-dependency",
+        "cycle",
+        "boundary-violation",
+        "ownership-violation",
+        "impact"
+      ]
+    },
+    "FindingSeverity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn",
+        "info"
+      ]
+    },
+    "Inventories": {
+      "description": "Inventories of discovered entities.",
+      "type": "object",
+      "required": [
+        "files",
+        "packages",
+        "workspaces"
+      ],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FileInfo"
+          }
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageInfo"
+          }
+        },
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceInfo"
+          }
+        }
+      }
+    },
+    "PackageInfo": {
+      "description": "Info about a discovered package.",
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "workspace"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "Stats": {
+      "description": "Performance statistics.",
+      "type": "object",
+      "required": [
+        "durationMs",
+        "filesCached",
+        "filesParsed",
+        "graphEdges",
+        "graphNodes"
+      ],
+      "properties": {
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "filesCached": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "filesParsed": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "graphEdges": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "graphNodes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Summary": {
+      "description": "Summary counts for a report.",
+      "type": "object",
+      "required": [
+        "errors",
+        "infos",
+        "totalExports",
+        "totalFiles",
+        "totalFindings",
+        "totalPackages",
+        "totalWorkspaces",
+        "warnings"
+      ],
+      "properties": {
+        "errors": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "infos": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalExports": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalFindings": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalPackages": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalWorkspaces": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "warnings": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "WorkspaceInfo": {
+      "description": "Info about a discovered workspace.",
+      "type": "object",
+      "required": [
+        "name",
+        "packageCount",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "packageCount": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

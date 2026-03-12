@@ -1,10 +1,66 @@
-//! Analyzer stub.
+use oxgraph_config::AnalysisSeverity;
+use oxgraph_entrypoints::EntrypointProfile;
+use oxgraph_fs::FileKind;
+use oxgraph_graph::GraphBuildResult;
+use oxgraph_report::{Evidence, Finding, FindingCategory};
 
-use oxgraph_graph::ModuleGraph;
-use oxgraph_report::Finding;
+use crate::{make_finding, severity};
 
-/// Run this analyzer against the module graph.
-pub fn analyze(_graph: &ModuleGraph) -> Vec<Finding> {
-    // TODO: implement
-    Vec::new()
+/// Find tracked files that are unreachable from the active entrypoints.
+pub fn analyze(
+    build: &GraphBuildResult,
+    level: AnalysisSeverity,
+    profile: EntrypointProfile,
+) -> Vec<Finding> {
+    let Some(finding_severity) = severity(level) else {
+        return Vec::new();
+    };
+
+    let reachable = build.module_graph.reachable_file_ids(profile);
+    let mut findings = Vec::new();
+
+    for extracted_file in &build.files {
+        if matches!(
+            extracted_file.file.kind,
+            FileKind::Generated | FileKind::BuildOutput | FileKind::Config
+        ) {
+            continue;
+        }
+
+        let Some(file_id) = build
+            .module_graph
+            .file_id(&extracted_file.file.path.to_string_lossy())
+        else {
+            continue;
+        };
+
+        if reachable.contains(&file_id) {
+            continue;
+        }
+
+        let evidence = vec![Evidence {
+            kind: "reachability".to_string(),
+            file: Some(extracted_file.file.relative_path.to_string_lossy().to_string()),
+            line: None,
+            description: "No active entrypoint reaches this file.".to_string(),
+        }];
+
+        findings.push(make_finding(
+            "unused-file",
+            finding_severity,
+            FindingCategory::UnusedFile,
+            extracted_file.file.relative_path.to_string_lossy(),
+            extracted_file.file.workspace.clone(),
+            extracted_file.file.package.clone(),
+            format!(
+                "File `{}` is unreachable from the active entrypoints.",
+                extracted_file.file.relative_path.to_string_lossy()
+            ),
+            evidence,
+            Some("Remove the file or add an entrypoint/reference that keeps it live.".to_string()),
+            None,
+        ));
+    }
+
+    findings
 }
