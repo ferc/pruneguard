@@ -105,6 +105,16 @@ impl ModuleResolver {
             options.condition_names.clone_from(&config.conditions);
         }
 
+        // Map .js/.jsx/.mjs/.cjs imports to their TypeScript equivalents.
+        // This is required for moduleResolution "bundler"/"node16"/"nodenext"
+        // where TypeScript source files use .js extensions in import specifiers.
+        options.extension_alias = vec![
+            (".js".to_string(), vec![".ts".into(), ".tsx".into(), ".js".into()]),
+            (".jsx".to_string(), vec![".tsx".into(), ".jsx".into()]),
+            (".mjs".to_string(), vec![".mts".into(), ".mjs".into()]),
+            (".cjs".to_string(), vec![".cts".into(), ".cjs".into()]),
+        ];
+
         options.symlinks = !config.preserve_symlinks;
         options.tsconfig = Some(if let Some(tsconfig) = config.tsconfig.first() {
             TsconfigDiscovery::Manual(TsconfigOptions {
