@@ -182,11 +182,12 @@ jobs:
           done
 
       # Stage JS dist + schemas
+      # upload-artifact@v4 uses the common ancestor (npm/pruneguard/) as root
       - name: Stage JS artifacts
         run: |
-          cp -r artifacts/js-dist/npm/pruneguard/dist/ npm/pruneguard/dist/
-          cp artifacts/js-dist/npm/pruneguard/configuration_schema.json npm/pruneguard/
-          cp artifacts/js-dist/npm/pruneguard/report_schema.json npm/pruneguard/
+          cp -r artifacts/js-dist/dist/ npm/pruneguard/dist/
+          cp artifacts/js-dist/configuration_schema.json npm/pruneguard/
+          cp artifacts/js-dist/report_schema.json npm/pruneguard/
 
       # Verify all binaries are present
       - name: Verify binaries
