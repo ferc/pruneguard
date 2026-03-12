@@ -1,4 +1,5 @@
-use oxgraph_config::AnalysisSeverity;
+use oxgraph_config::{AnalysisSeverity, OxgraphConfig};
+use oxgraph_entrypoints::EntrypointProfile;
 use oxgraph_graph::GraphBuildResult;
 use oxgraph_report::{Finding, FindingSeverity};
 use oxgraph_rules::CompiledRules;
@@ -6,10 +7,13 @@ use oxgraph_rules::CompiledRules;
 /// Evaluate compiled forbidden dependency rules.
 pub fn analyze(
     build: &GraphBuildResult,
+    config: &OxgraphConfig,
     level: AnalysisSeverity,
+    profile: EntrypointProfile,
     rules: &CompiledRules,
 ) -> Vec<Finding> {
-    rules.evaluate(build)
+    rules
+        .evaluate(build, config, profile)
         .into_iter()
         .filter(|finding| severity_at_or_above(level, finding.severity))
         .collect()

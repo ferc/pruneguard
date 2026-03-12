@@ -12,6 +12,8 @@ pub struct GlobalFlags {
     pub focus: Option<String>,
     pub severity: Severity,
     pub no_cache: bool,
+    pub no_baseline: bool,
+    pub require_full_scope: bool,
     pub max_findings: Option<usize>,
 }
 
@@ -123,6 +125,12 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         .parse(|s| parse_severity(&s))
         .fallback(Severity::Warn);
     let no_cache = long("no-cache").help("Disable incremental cache").switch();
+    let no_baseline = long("no-baseline")
+        .help("Disable baseline auto-discovery")
+        .switch();
+    let require_full_scope = long("require-full-scope")
+        .help("Fail partial-scope scan runs when dead-code analyzers are active")
+        .switch();
     let max_findings = long("max-findings")
         .help("Maximum number of findings to report")
         .argument::<usize>("N")
@@ -135,6 +143,8 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         focus,
         severity,
         no_cache,
+        no_baseline,
+        require_full_scope,
         max_findings,
     })
 }

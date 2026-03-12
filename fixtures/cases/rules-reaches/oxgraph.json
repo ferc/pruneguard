@@ -1,0 +1,25 @@
+{
+  "analysis": {
+    "unusedExports": "off",
+    "unusedFiles": "off",
+    "unusedDependencies": "off",
+    "unusedPackages": "off",
+    "cycles": "off",
+    "boundaries": "error",
+    "ownership": "off",
+    "impact": "off"
+  },
+  "rules": {
+    "forbidden": [
+      {
+        "name": "app-reaches-leaf",
+        "severity": "error",
+        "from": {
+          "path": ["src/app.ts"],
+          "reaches": ["src/leaf.ts"]
+        },
+        "to": { "path": ["src/mid.ts"] }
+      }
+    ]
+  }
+}

@@ -24,6 +24,12 @@ oxgraph --focus "src/**" scan
 # Changed-since review for CI/agents
 oxgraph --changed-since origin/main scan
 
+# Deterministic CI/parity run without baseline influence
+oxgraph --no-baseline --no-cache scan
+
+# Fail advisory dead-code scans in automation
+oxgraph --require-full-scope scan
+
 # Partial-scope scan (advisory for dead-code findings)
 oxgraph scan src/components/Button.tsx src/lib/utils.ts
 
@@ -48,6 +54,8 @@ Dead-code trust model:
 - full-repo `scan` is the trustworthy mode for deletion decisions
 - `--focus` filters reported findings after full analysis
 - positional `scan <paths...>` narrows the analyzed file set and is reported as partial-scope/advisory in the output
+- `--require-full-scope` turns advisory partial-scope dead-code scans into a hard failure
+- `--no-baseline` disables baseline auto-discovery for deterministic CI, parity, and benchmarks
 - use `impact` and `explain` before removing code on unresolved-specifier-heavy repos
 
 ## Configuration
@@ -79,6 +87,9 @@ just ready    # fmt + check + test + lint
 just build    # release binary
 just run scan # run against current directory
 just schemas  # regenerate shipped schemas
+just schemas-check
+just build-js
+just check-napi
 just benchmark ../../claude-attack
 just benchmark-repos
 just parity   # opt-in real-repo smoke

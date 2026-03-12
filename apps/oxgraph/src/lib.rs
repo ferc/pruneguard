@@ -12,7 +12,8 @@ use oxgraph_graph::{
     build_graph_with_options,
 };
 use oxgraph_report::{
-    AnalysisReport, ExplainQueryKind, ExplainReport, Finding, ImpactReport, ProofNode, Summary,
+    AnalysisReport, ConfidenceCounts, ExplainQueryKind, ExplainReport, Finding,
+    FindingConfidence, ImpactReport, ProofNode, Summary,
 };
 
 #[cfg(feature = "napi")]
@@ -27,6 +28,8 @@ pub struct ScanOptions {
     pub changed_since: Option<String>,
     pub focus: Option<String>,
     pub no_cache: bool,
+    pub no_baseline: bool,
+    pub require_full_scope: bool,
 }
 
 #[derive(Debug)]
@@ -98,8 +101,18 @@ pub fn scan_with_options(
         profile,
         BuildOptions { cache: cache.as_ref() },
     )?;
+    if options.require_full_scope && build.stats.partial_scope && dead_code_analyzers_enabled(config)
+    {
+        miette::bail!(
+            "{}",
+            build.stats.partial_scope_reason.as_deref().unwrap_or(
+                "partial-scope scan detected while --require-full-scope was enabled"
+            )
+        );
+    }
     let findings = oxgraph_analyzers::run_analyzers(&build, config, profile);
     let mut report = report_from_build(cwd, &build, findings, profile);
+    report.stats.full_scope_required = options.require_full_scope;
 
     if let Some(reference) = &options.changed_since {
         let mut changed_scope =
@@ -108,10 +121,12 @@ pub fn scan_with_options(
         apply_changed_scope(&mut report, &build, &changed_scope, cache.as_ref(), profile);
     }
 
-    if let Some(baseline) = load_baseline(
-        options.config_dir.as_deref(),
-        &build.discovery.project_root,
-    )? {
+    if !options.no_baseline
+        && let Some(baseline) = load_baseline(
+            options.config_dir.as_deref(),
+            &build.discovery.project_root,
+        )?
+    {
         apply_baseline(&mut report, &baseline);
     }
 
@@ -343,10 +358,6 @@ fn apply_baseline(report: &mut AnalysisReport, baseline: &BaselineSet) {
     report.stats.new_findings = report.findings.len();
 
     if report.stats.baseline_profile_mismatch {
-        report.stats.parity_warnings.push(format!(
-            "baseline profile `{}` differs from current profile `{}`",
-            baseline.profile, report.profile
-        ));
         report.findings.sort_by(|left, right| left.id.cmp(&right.id));
         if let Some(first) = report.findings.first_mut() {
             first.evidence.push(oxgraph_report::Evidence {
@@ -703,9 +714,34 @@ fn refresh_summary(report: &mut AnalysisReport) {
     report.summary.errors = errors;
     report.summary.warnings = warnings;
     report.summary.infos = infos;
+    report.stats.confidence_counts = confidence_counts(&report.findings);
     if report.stats.baseline_applied && report.stats.new_findings == 0 {
         report.stats.new_findings = report.findings.len();
     }
+}
+
+fn confidence_counts(findings: &[Finding]) -> ConfidenceCounts {
+    findings.iter().fold(ConfidenceCounts::default(), |mut counts, finding| {
+        match finding.confidence {
+            FindingConfidence::High => counts.high += 1,
+            FindingConfidence::Medium => counts.medium += 1,
+            FindingConfidence::Low => counts.low += 1,
+        }
+        counts
+    })
+}
+
+const fn dead_code_analyzers_enabled(config: &OxgraphConfig) -> bool {
+    !matches!(config.analysis.unused_exports, oxgraph_config::AnalysisSeverity::Off)
+        || !matches!(config.analysis.unused_files, oxgraph_config::AnalysisSeverity::Off)
+        || !matches!(
+            config.analysis.unused_packages,
+            oxgraph_config::AnalysisSeverity::Off
+        )
+        || !matches!(
+            config.analysis.unused_dependencies,
+            oxgraph_config::AnalysisSeverity::Off
+        )
 }
 
 fn build_proof_tree(nodes: Vec<String>) -> ProofNode {
@@ -851,6 +887,8 @@ pub struct JsScanOptions {
     pub changed_since: Option<String>,
     pub focus: Option<String>,
     pub no_cache: Option<bool>,
+    pub no_baseline: Option<bool>,
+    pub require_full_scope: Option<bool>,
 }
 
 #[cfg(feature = "napi")]
@@ -950,6 +988,8 @@ pub fn scan_json(options: JsScanOptions) -> napi::Result<String> {
             changed_since: options.changed_since,
             focus: options.focus,
             no_cache: options.no_cache.unwrap_or(false),
+            no_baseline: options.no_baseline.unwrap_or(false),
+            require_full_scope: options.require_full_scope.unwrap_or(false),
         },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;
@@ -980,6 +1020,8 @@ pub fn scan_dot_text(options: JsScanOptions) -> napi::Result<String> {
             changed_since: options.changed_since,
             focus: options.focus,
             no_cache: options.no_cache.unwrap_or(false),
+            no_baseline: options.no_baseline.unwrap_or(false),
+            require_full_scope: options.require_full_scope.unwrap_or(false),
         },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;

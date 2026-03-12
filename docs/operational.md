@@ -6,6 +6,7 @@ Operational defaults:
 - baseline search order:
   - config directory `baseline.json`
   - project root `baseline.json`
+- baseline can be disabled with `--no-baseline`
 - changed-since model:
   - full graph build
   - affected-scope filtering after analysis
@@ -16,6 +17,7 @@ Operational defaults:
 - partial scan paths:
   - `scan <paths...>` narrows the analyzed file set
   - dead-code findings from partial-scope scans are advisory
+  - `--require-full-scope` turns advisory partial scans into an exit-code `2` failure
 - trust hints:
   - findings include `confidence`
   - reports include unresolved-specifier counts by reason
@@ -30,6 +32,8 @@ just benchmark ../../claude-attack
 just benchmark-repos
 just parity
 just smoke-repos
+pnpm --dir apps/oxgraph build-js
+cargo check -p oxgraph --features napi
 pnpm -r build
 npm pack --prefix npm/oxgraph --pack-destination /tmp/oxgraph-pack
 ```

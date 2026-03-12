@@ -73,6 +73,31 @@
     }
   },
   "definitions": {
+    "ConfidenceCounts": {
+      "type": "object",
+      "required": [
+        "high",
+        "low",
+        "medium"
+      ],
+      "properties": {
+        "high": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "low": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "medium": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
     "EntrypointInfo": {
       "description": "Info about an entrypoint.",
       "type": "object",
@@ -384,6 +409,7 @@
         "cacheHits",
         "cacheMisses",
         "changedFiles",
+        "confidenceCounts",
         "durationMs",
         "entrypointsDetected",
         "filesCached",
@@ -393,6 +419,7 @@
         "focusApplied",
         "focusedFiles",
         "focusedFindings",
+        "fullScopeRequired",
         "graphEdges",
         "graphNodes",
         "newFindings",
@@ -452,6 +479,9 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "confidenceCounts": {
+          "$ref": "#/definitions/ConfidenceCounts"
+        },
         "durationMs": {
           "type": "integer",
           "format": "uint64",
@@ -494,6 +524,9 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "fullScopeRequired": {
+          "type": "boolean"
         },
         "graphEdges": {
           "type": "integer",

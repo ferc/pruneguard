@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 use oxgraph_entrypoints::EntrypointProfile;
-use oxgraph_report::{Finding, FindingSeverity};
+use oxgraph_report::{ConfidenceCounts, Finding, FindingConfidence, FindingSeverity};
 
 mod cli;
 mod migrate;
@@ -47,6 +47,8 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                     changed_since: options.global.changed_since.clone(),
                     focus: options.global.focus.clone(),
                     no_cache: options.global.no_cache,
+                    no_baseline: options.global.no_baseline,
+                    require_full_scope: options.global.require_full_scope,
                 },
             )?;
             handle_scan_report(scan, &options.global)
@@ -178,10 +180,24 @@ fn handle_scan_report(
     report.summary.errors = errors;
     report.summary.warnings = warnings;
     report.summary.infos = infos;
+    report.stats.confidence_counts = report
+        .findings
+        .iter()
+        .fold(ConfidenceCounts::default(), |mut counts, finding| {
+            match finding.confidence {
+                FindingConfidence::High => counts.high += 1,
+                FindingConfidence::Medium => counts.medium += 1,
+                FindingConfidence::Low => counts.low += 1,
+            }
+            counts
+        });
 
     if matches!(flags.format, cli::OutputFormat::Dot) {
         println!("{}", oxgraph::render_module_graph_dot(&scan.build, &report.findings));
     } else {
+        if matches!(flags.format, cli::OutputFormat::Text) && flags.no_baseline {
+            println!("baseline: disabled by --no-baseline");
+        }
         print_report(&report, flags.format)?;
     }
 
@@ -330,6 +346,10 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     .get("partialScope")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
+                let full_scope_required = stats
+                    .get("fullScopeRequired")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
                 if partial_scope {
                     let reason = stats
                         .get("partialScopeReason")
@@ -338,6 +358,44 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     println!();
                     println!("advisory");
                     println!("{reason}");
+                    if full_scope_required {
+                        println!("full-scope enforcement was requested for this run.");
+                    }
+                }
+                let baseline_applied = stats
+                    .get("baselineApplied")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                println!(
+                    "baseline: {}",
+                    if baseline_applied { "applied" } else { "disabled or not found" }
+                );
+                let baseline_profile_mismatch = stats
+                    .get("baselineProfileMismatch")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                if baseline_profile_mismatch {
+                    println!("baseline profile differs from the current profile.");
+                }
+                if let Some(confidence) = stats
+                    .get("confidenceCounts")
+                    .and_then(serde_json::Value::as_object)
+                {
+                    println!(
+                        "confidence: high={}, medium={}, low={}",
+                        confidence
+                            .get("high")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                        confidence
+                            .get("medium")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                        confidence
+                            .get("low")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0),
+                    );
                 }
                 if focus_applied {
                     let focused_files = stats

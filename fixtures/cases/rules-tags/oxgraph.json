@@ -1,0 +1,41 @@
+{
+  "analysis": {
+    "unusedExports": "off",
+    "unusedFiles": "off",
+    "unusedDependencies": "off",
+    "unusedPackages": "off",
+    "cycles": "off",
+    "boundaries": "error",
+    "ownership": "off",
+    "impact": "off"
+  },
+  "ownership": {
+    "importCodeowners": false,
+    "teams": {
+      "frontend": {
+        "paths": ["src/**/*.ts"],
+        "tags": ["frontend"]
+      },
+      "platform": {
+        "paths": ["src/platform.ts"],
+        "tags": ["platform"]
+      }
+    }
+  },
+  "overrides": [
+    {
+      "files": ["src/internal/**"],
+      "tags": ["internal"]
+    }
+  ],
+  "rules": {
+    "forbidden": [
+      {
+        "name": "frontend-no-platform",
+        "severity": "error",
+        "from": { "tag": ["frontend"], "tagNot": ["internal"] },
+        "to": { "tag": ["platform"] }
+      }
+    ]
+  }
+}

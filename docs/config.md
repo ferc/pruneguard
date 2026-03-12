@@ -25,15 +25,19 @@ Current rule filter support:
 - `workspaceNot`
 - `package`
 - `packageNot`
-- `dependencyKinds`
-- `profiles`
-- `entrypointKinds`
-
-Known unsupported future rule fields:
-
 - `tag`
 - `tagNot`
+- `dependencyKinds`
+- `profiles`
 - `reachableFrom`
 - `reaches`
+- `entrypointKinds`
 
-Unsupported rule fields fail explicitly instead of being ignored.
+Current tag sources:
+
+- `ownership.teams[*].tags` for matched paths and packages
+- `overrides[*].tags` for matched `files` and `workspaces`
+- implicit `entrypoint-kind:<kind>` tags derived from entrypoint detection
+
+Reachability filters operate over graph nodes in the active profile. Query values are matched
+against file paths, package names, and workspace names.

@@ -41,7 +41,9 @@ pub fn run_analyzers(
     {
         findings.extend(boundaries::analyze(
             build,
+            config,
             config.analysis.boundaries,
+            profile,
             &compiled,
         ));
     }

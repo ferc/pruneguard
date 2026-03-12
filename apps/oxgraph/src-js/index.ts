@@ -12,6 +12,8 @@ export type ScanOptions = {
   changedSince?: string;
   focus?: string;
   noCache?: boolean;
+  noBaseline?: boolean;
+  requireFullScope?: boolean;
 };
 
 export type ImpactOptions = {
@@ -128,8 +130,14 @@ export type AnalysisReport = {
     focusApplied: boolean;
     focusedFiles: number;
     focusedFindings: number;
+    fullScopeRequired: boolean;
     partialScope: boolean;
     partialScopeReason?: string;
+    confidenceCounts: {
+      high: number;
+      medium: number;
+      low: number;
+    };
     parityWarnings: string[];
     cacheHits: number;
     cacheMisses: number;

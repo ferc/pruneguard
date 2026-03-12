@@ -273,6 +273,45 @@ fn boundaries_package_filters_report_violations() {
 }
 
 #[test]
+fn boundary_rules_support_tags_and_tag_not() {
+    let root = fixture_root("rules-tags");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["ruleName"] == "frontend-no-platform"
+            && finding["subject"] == "src/app.ts -> src/platform.ts"
+    }));
+    assert!(!findings.iter().any(|finding| {
+        finding["subject"] == "src/internal/allowed.ts -> src/platform.ts"
+    }));
+}
+
+#[test]
+fn boundary_rules_support_reachable_from() {
+    let root = fixture_root("rules-reachable-from");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["ruleName"] == "reachable-from-index"
+            && finding["subject"] == "src/app.ts -> src/secret.ts"
+    }));
+}
+
+#[test]
+fn boundary_rules_support_reaches() {
+    let root = fixture_root("rules-reaches");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["ruleName"] == "app-reaches-leaf"
+            && finding["subject"] == "src/app.ts -> src/mid.ts"
+    }));
+}
+
+#[test]
 fn boundaries_dependency_kind_filters_match_dynamic_imports() {
     let root = fixture_root("boundaries-dependency-kinds");
     let report = run_oxgraph(&root, &["--format", "json", "scan"]);

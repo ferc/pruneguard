@@ -295,9 +295,11 @@ pub struct Stats {
     pub focus_applied: bool,
     pub focused_files: usize,
     pub focused_findings: usize,
+    pub full_scope_required: bool,
     pub partial_scope: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial_scope_reason: Option<String>,
+    pub confidence_counts: ConfidenceCounts,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parity_warnings: Vec<String>,
     pub cache_hits: usize,
@@ -305,6 +307,14 @@ pub struct Stats {
     pub cache_entries_read: usize,
     pub cache_entries_written: usize,
     pub affected_scope_incomplete: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfidenceCounts {
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

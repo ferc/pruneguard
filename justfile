@@ -12,6 +12,10 @@ fmt:
 check:
     cargo check --workspace
 
+# Check the N-API feature build without packaging
+check-napi:
+    cargo check -p oxgraph --features napi
+
 # Run all tests
 test:
     cargo test --workspace
@@ -32,6 +36,15 @@ run *args:
 schemas:
     cargo run -p oxgraph --bin generate_schemas
 
+# Verify generated schemas are committed
+schemas-check:
+    cargo run -p oxgraph --bin generate_schemas
+    git diff --exit-code -- npm/oxgraph/configuration_schema.json npm/oxgraph/report_schema.json
+
+# Build the JS wrapper only
+build-js:
+    pnpm --dir apps/oxgraph build-js
+
 # Watch for changes and re-check
 watch cmd="check":
     cargo watch -x "{{cmd}}"
@@ -42,7 +55,7 @@ benchmark-workspace:
 
 # Run one named corpus scan in release mode
 benchmark CASE:
-    cargo run --release -p oxgraph --bin oxgraph -- --format json scan {{CASE}}
+    cargo run --release -p oxgraph --bin oxgraph -- --format json --no-cache --no-baseline scan {{CASE}}
 
 # Run configured corpus scans in release mode
 benchmark-repos:

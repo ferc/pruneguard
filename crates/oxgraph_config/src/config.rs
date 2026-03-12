@@ -310,6 +310,9 @@ pub struct OverrideConfig {
     /// Workspace names this override applies to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspaces: Vec<String>,
+    /// Deterministic tags applied to matching files/workspaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     /// Analysis overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub analysis: Option<AnalysisConfig>,

@@ -21,7 +21,13 @@ fn corpora_scan_without_panics() {
             continue;
         }
 
-        let mut args = vec!["--format".to_string(), "json".to_string(), "scan".to_string()];
+        let mut args = vec![
+            "--format".to_string(),
+            "json".to_string(),
+            "--no-cache".to_string(),
+            "--no-baseline".to_string(),
+            "scan".to_string(),
+        ];
         args.extend(corpus.scan_paths.clone());
         let output = Command::new(env!("CARGO_BIN_EXE_oxgraph"))
             .current_dir(&corpus.path)
@@ -50,9 +56,10 @@ fn corpora_scan_without_panics() {
             corpus.name
         );
         assert!(
-            report["stats"]["parityWarnings"]
-                .as_array()
-                .is_some_and(|warnings| warnings.is_empty()),
+            report["stats"]["parityWarnings"].is_null()
+                || report["stats"]["parityWarnings"]
+                    .as_array()
+                    .is_some_and(|warnings| warnings.is_empty()),
             "corpus `{}` reported parity warnings",
             corpus.name
         );

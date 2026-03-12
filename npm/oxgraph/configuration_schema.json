@@ -350,6 +350,13 @@
             "type": "string"
           }
         },
+        "tags": {
+          "description": "Deterministic tags applied to matching files/workspaces.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "workspaces": {
           "description": "Workspace names this override applies to.",
           "type": "array",

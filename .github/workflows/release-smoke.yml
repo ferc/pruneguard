@@ -23,7 +23,8 @@ jobs:
       - run: |
           mkdir -p /tmp/oxgraph-pack-smoke
           cd /tmp/oxgraph-pack-smoke
+          TARBALL="$(ls /tmp/oxgraph-pack/oxgraph-*.tgz | head -n 1)"
           npm init -y
-          npm install /tmp/oxgraph-pack/oxgraph-0.1.0.tgz
-          node -e "import('oxgraph').then((mod) => console.log(typeof mod.scan))"
+          npm install "$TARBALL"
+          node -e "import('oxgraph').then((mod) => { if (typeof mod.scan !== 'function') process.exit(1); console.log(typeof mod.scan); })"
           npx oxgraph --help

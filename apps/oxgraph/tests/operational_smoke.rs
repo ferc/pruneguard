@@ -209,6 +209,48 @@ fn baseline_profile_mismatch_is_reported() {
 }
 
 #[test]
+fn no_baseline_flag_disables_auto_discovery() {
+    let root = temp_dir("no-baseline");
+    copy_tree(&fixture_root("unused-file-basic"), &root);
+
+    let first = run_oxgraph_json(&root, &["--format", "json", "scan"]);
+    fs::write(
+        root.join("baseline.json"),
+        serde_json::to_vec_pretty(&first).expect("serialize baseline"),
+    )
+    .expect("baseline write");
+
+    let second = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--no-baseline", "scan"],
+    );
+    assert_eq!(second["stats"]["baselineApplied"].as_bool(), Some(false));
+    assert!(second["findings"].as_array().is_some_and(|findings| !findings.is_empty()));
+}
+
+#[test]
+fn require_full_scope_rejects_partial_dead_code_scan() {
+    let root = fixture_root("unused-file-basic");
+    let output = run_oxgraph(
+        &root,
+        &[
+            "--format",
+            "json",
+            "--require-full-scope",
+            "scan",
+            "src/used.ts",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("partial-scope"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn changed_since_tracks_renamed_files() {
     let root = temp_dir("changed-since-rename");
     copy_tree(&fixture_root("unused-file-basic"), &root);
