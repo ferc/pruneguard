@@ -122,7 +122,8 @@ fn run_debug(
 
     match cmd {
         cli::DebugCommand::Resolve { specifier, from } => {
-            let result = pruneguard_resolver::debug_resolve(&cwd, &config.resolver, &specifier, &from);
+            let result =
+                pruneguard_resolver::debug_resolve(&cwd, &config.resolver, &specifier, &from);
             println!("{result}");
             Ok(ExitCode::SUCCESS)
         }
@@ -171,7 +172,9 @@ fn load_config_or_default(
 ) -> miette::Result<pruneguard_config::PruneguardConfig> {
     match pruneguard_config::PruneguardConfig::load(cwd, config_path) {
         Ok(config) => Ok(config),
-        Err(pruneguard_config::ConfigError::NotFound) => Ok(pruneguard_config::PruneguardConfig::default()),
+        Err(pruneguard_config::ConfigError::NotFound) => {
+            Ok(pruneguard_config::PruneguardConfig::default())
+        }
         Err(err) => Err(err.into()),
     }
 }

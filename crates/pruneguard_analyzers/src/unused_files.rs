@@ -1,9 +1,9 @@
+use petgraph::visit::EdgeRef;
 use pruneguard_config::AnalysisSeverity;
 use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_fs::is_docs_path;
 use pruneguard_graph::GraphBuildResult;
 use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
-use petgraph::visit::EdgeRef;
 
 use crate::{make_finding, severity};
 

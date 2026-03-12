@@ -313,8 +313,10 @@ fn boundaries_dependency_kind_filters_match_dynamic_imports() {
 #[test]
 fn boundaries_profile_filters_only_match_development_roots() {
     let root = fixture_root("boundaries-profiles");
-    let dev_report = run_pruneguard(&root, &["--format", "json", "--profile", "development", "scan"]);
-    let prod_report = run_pruneguard(&root, &["--format", "json", "--profile", "production", "scan"]);
+    let dev_report =
+        run_pruneguard(&root, &["--format", "json", "--profile", "development", "scan"]);
+    let prod_report =
+        run_pruneguard(&root, &["--format", "json", "--profile", "production", "scan"]);
 
     assert!(dev_report["findings"].as_array().is_some_and(|findings| {
         findings.iter().any(|finding| finding["ruleName"] == "dev-cannot-hit-internal")
@@ -349,8 +351,10 @@ fn ownership_team_config_overrides_codeowners_when_explicitly_matched() {
 #[test]
 fn unused_dependencies_split_production_and_development_usage() {
     let root = fixture_root("unused-dependency-prod-dev");
-    let prod_report = run_pruneguard(&root, &["--format", "json", "--profile", "production", "scan"]);
-    let dev_report = run_pruneguard(&root, &["--format", "json", "--profile", "development", "scan"]);
+    let prod_report =
+        run_pruneguard(&root, &["--format", "json", "--profile", "production", "scan"]);
+    let dev_report =
+        run_pruneguard(&root, &["--format", "json", "--profile", "development", "scan"]);
 
     assert!(!prod_report["findings"].as_array().is_some_and(|findings| {
         findings.iter().any(|finding| finding["subject"] == "left-pad")

@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-use pruneguard_entrypoints::EntrypointProfile;
-use pruneguard_fs::{FileKind, FileRole};
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use pruneguard_entrypoints::EntrypointProfile;
+use pruneguard_fs::{FileKind, FileRole};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ids::{FileId, Interner, PackageId, WorkspaceId};

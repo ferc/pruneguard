@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use pruneguard_config::{PruneguardConfig, PackageManager};
+use pruneguard_config::{PackageManager, PruneguardConfig};
 use pruneguard_fs::{FileCollectionOptions, FileRecord, FileRole, collect_file_records};
 use pruneguard_manifest::PackageManifest;
 use rustc_hash::FxHashMap;

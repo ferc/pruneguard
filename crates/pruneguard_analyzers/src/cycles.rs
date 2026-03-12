@@ -1,8 +1,8 @@
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use pruneguard_config::AnalysisSeverity;
 use pruneguard_graph::{GraphBuildResult, ModuleNode};
 use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
-use petgraph::graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 use rustc_hash::FxHashSet;
 
 use crate::{make_finding, severity};

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Pre-commit hook that mirrors the CI checks.
+# Fast checks only — run `just ready` or `just ci` for the full suite.
+set -euo pipefail
+
+echo "pre-commit: cargo fmt --all --check"
+cargo fmt --all --check
+
+echo "pre-commit: cargo clippy --workspace -- --deny warnings"
+cargo clippy --workspace -- --deny warnings
+
+echo "pre-commit: cargo test --workspace"
+cargo test --workspace
+
+echo "pre-commit: schemas check"
+cargo run -p pruneguard --bin generate_schemas
+git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
+
+echo "pre-commit: all checks passed ✓"

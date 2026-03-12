@@ -1,8 +1,15 @@
 # pruneguard development commands
 
+# Configure git hooks (run once after clone)
+setup:
+    git config core.hooksPath .githooks
+
 # Run all checks (format, check, test, lint)
 ready: fmt check test lint
 alias r := ready
+
+# Run the full CI pipeline locally (mirrors .github/workflows/ci.yml)
+ci: fmt check lint test build-js schemas-check pack-smoke
 
 # Format all code
 fmt:

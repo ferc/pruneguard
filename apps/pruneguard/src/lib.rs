@@ -280,7 +280,12 @@ pub fn debug_entrypoints(
 }
 
 /// Debug: resolve a specifier from a file.
-pub fn debug_resolve(cwd: &Path, config: &PruneguardConfig, specifier: &str, from: &Path) -> String {
+pub fn debug_resolve(
+    cwd: &Path,
+    config: &PruneguardConfig,
+    specifier: &str,
+    from: &Path,
+) -> String {
     pruneguard_resolver::debug_resolve(cwd, &config.resolver, specifier, from)
 }
 

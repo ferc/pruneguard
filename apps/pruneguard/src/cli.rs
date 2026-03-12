@@ -233,7 +233,8 @@ fn command_parser() -> impl Parser<Command> {
         impact_command().to_options().descr("Compute blast radius for a target").command("impact");
     let explain =
         explain_command().to_options().descr("Explain a finding or path").command("explain");
-    let init = init_command().to_options().descr("Generate an pruneguard.json config").command("init");
+    let init =
+        init_command().to_options().descr("Generate an pruneguard.json config").command("init");
     let print_config = print_config_command()
         .to_options()
         .descr("Print resolved configuration")

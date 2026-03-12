@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use pruneguard_config::{
     AnalysisSeverity, OverrideConfig, OwnershipConfig, PruneguardConfig, Rule, RuleFilter,
     RulesConfig, TeamConfig,
@@ -11,8 +13,6 @@ use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_graph::{FileId, GraphBuildResult, ModuleNode, PackageId};
 use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity};
 use pruneguard_resolver::{ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind};
-use petgraph::graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Compiled rule set ready for evaluation.

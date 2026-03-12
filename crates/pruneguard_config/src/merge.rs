@@ -64,8 +64,10 @@ mod tests {
 
     #[test]
     fn test_ignore_patterns_append() {
-        let mut child =
-            PruneguardConfig { ignore_patterns: vec!["child/**".to_string()], ..Default::default() };
+        let mut child = PruneguardConfig {
+            ignore_patterns: vec!["child/**".to_string()],
+            ..Default::default()
+        };
         let base =
             PruneguardConfig { ignore_patterns: vec!["base/**".to_string()], ..Default::default() };
         child.merge_from(&base);
