@@ -61,7 +61,32 @@ importers:
 
   npm/cli-win32-x64-msvc: {}
 
-  npm/pruneguard: {}
+  npm/pruneguard:
+    optionalDependencies:
+      '@pruneguard/cli-darwin-arm64':
+        specifier: workspace:*
+        version: link:../cli-darwin-arm64
+      '@pruneguard/cli-darwin-x64':
+        specifier: workspace:*
+        version: link:../cli-darwin-x64
+      '@pruneguard/cli-linux-arm64-gnu':
+        specifier: workspace:*
+        version: link:../cli-linux-arm64-gnu
+      '@pruneguard/cli-linux-arm64-musl':
+        specifier: workspace:*
+        version: link:../cli-linux-arm64-musl
+      '@pruneguard/cli-linux-x64-gnu':
+        specifier: workspace:*
+        version: link:../cli-linux-x64-gnu
+      '@pruneguard/cli-linux-x64-musl':
+        specifier: workspace:*
+        version: link:../cli-linux-x64-musl
+      '@pruneguard/cli-win32-arm64-msvc':
+        specifier: workspace:*
+        version: link:../cli-win32-arm64-msvc
+      '@pruneguard/cli-win32-x64-msvc':
+        specifier: workspace:*
+        version: link:../cli-win32-x64-msvc
 
 packages:
 

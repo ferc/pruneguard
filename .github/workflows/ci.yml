@@ -25,5 +25,21 @@ jobs:
       - run: pnpm --dir apps/pruneguard build-js
       - run: cargo run -p pruneguard --bin generate_schemas
       - run: git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
-      - run: mkdir -p /tmp/pruneguard-pack && npm pack --pack-destination /tmp/pruneguard-pack
-        working-directory: npm/pruneguard
+      - run: pnpm --dir npm/pruneguard pack --pack-destination /tmp/pruneguard-pack
+
+      - name: Check version consistency
+        run: |
+          VERSION=$(node -e "console.log(require('./npm/pruneguard/package.json').version)")
+          for pkg in npm/cli-*/package.json; do
+            V=$(node -e "console.log(require('./${pkg}').version)")
+            if [ "$VERSION" != "$V" ]; then
+              echo "::error::Version mismatch: npm/pruneguard=$VERSION but $pkg=$V"
+              exit 1
+            fi
+          done
+          node -e "
+            const p = require('./npm/pruneguard/package.json');
+            for (const [dep, v] of Object.entries(p.optionalDependencies || {})) {
+              if (v !== 'workspace:*') { console.error(dep + ' is ' + v + ', expected workspace:*'); process.exit(1); }
+            }
+          "
