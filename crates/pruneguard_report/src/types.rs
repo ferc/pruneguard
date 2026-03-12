@@ -81,6 +81,12 @@ pub struct Finding {
     pub rule_name: Option<String>,
     /// Confidence level for this finding.
     pub confidence: FindingConfidence,
+    /// Primary remediation action kind for this finding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_action_kind: Option<RemediationActionKind>,
+    /// All applicable remediation action kinds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_kinds: Vec<RemediationActionKind>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -104,12 +110,91 @@ pub enum FindingCategory {
     Impact,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FindingConfidence {
+    #[default]
     High,
     Medium,
     Low,
+}
+
+/// Risk level for a remediation action or fix plan.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskLevel {
+    #[default]
+    Low,
+    Medium,
+    High,
+}
+
+/// The kind of remediation action to take.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemediationActionKind {
+    DeleteFile,
+    DeleteExport,
+    RemoveDependency,
+    BreakCycle,
+    MoveImport,
+    TightenEntrypoint,
+    UpdateBoundaryRule,
+    AssignOwner,
+    SplitPackage,
+    AcknowledgeBaseline,
+}
+
+/// A single step in a remediation action.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemediationStep {
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+}
+
+/// A remediation action describing how to fix one or more findings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemediationAction {
+    pub id: String,
+    pub kind: RemediationActionKind,
+    pub targets: Vec<String>,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preconditions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<RemediationStep>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verification: Vec<String>,
+    pub risk: RiskLevel,
+    pub confidence: FindingConfidence,
+}
+
+/// Fix plan report for agent-driven remediation workflows.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FixPlanReport {
+    pub query: Vec<String>,
+    pub matched_findings: Vec<Finding>,
+    pub actions: Vec<RemediationAction>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verification_steps: Vec<String>,
+    pub risk_level: RiskLevel,
+    pub confidence: FindingConfidence,
+}
+
+/// Execution mode for daemon/oneshot distinction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionMode {
+    Oneshot,
+    Daemon,
 }
 
 /// Evidence supporting a finding.
@@ -307,6 +392,24 @@ pub struct Stats {
     pub cache_entries_read: usize,
     pub cache_entries_written: usize,
     pub affected_scope_incomplete: bool,
+    /// Execution mode used for this analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<ExecutionMode>,
+    /// Whether the graph index was warm (reused from a previous run).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_warm: Option<bool>,
+    /// Age of the reused graph index in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_age_ms: Option<u64>,
+    /// Number of graph nodes reused from a warm index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reused_graph_nodes: Option<usize>,
+    /// Number of graph edges reused from a warm index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reused_graph_edges: Option<usize>,
+    /// Lag of the file-system watcher in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_lag_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -347,6 +450,15 @@ pub struct ReviewReport {
     /// Concise recommendations for the branch author.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<String>,
+    /// Proposed remediation actions for blocking findings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proposed_actions: Vec<RemediationAction>,
+    /// Execution mode used for this review.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<ExecutionMode>,
+    /// Wall-clock latency in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
 }
 
 /// Trust summary within a review report.
@@ -413,6 +525,113 @@ impl ReviewReport {
 
 impl SafeDeleteReport {
     /// Generate the JSON Schema for the safe-delete report format.
+    pub fn json_schema() -> schemars::schema::RootSchema {
+        schemars::schema_for!(Self)
+    }
+}
+
+impl FixPlanReport {
+    /// Generate the JSON Schema for the fix-plan report format.
+    pub fn json_schema() -> schemars::schema::RootSchema {
+        schemars::schema_for!(Self)
+    }
+}
+
+/// Suggested governance rules report.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestRulesReport {
+    /// Suggested rules inferred from graph analysis.
+    pub suggested_rules: Vec<SuggestedRule>,
+    /// Suggested tags for directory grouping.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<SuggestedTag>,
+    /// Ownership hints from cross-boundary analysis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ownership_hints: Vec<OwnershipHint>,
+    /// Hotspot files with high edge traffic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hotspots: Vec<Hotspot>,
+    /// Rationale explaining the suggestions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rationale: Vec<String>,
+}
+
+/// A single suggested rule.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedRule {
+    /// Kind of rule suggestion.
+    pub kind: SuggestedRuleKind,
+    /// Rule name.
+    pub name: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Configuration fragment that implements this rule.
+    pub config_fragment: serde_json::Value,
+    /// Confidence in the suggestion.
+    pub confidence: FindingConfidence,
+    /// Evidence supporting the suggestion.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
+}
+
+/// Kind of suggested rule.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SuggestedRuleKind {
+    Forbidden,
+    Required,
+    TagAssignment,
+    OwnershipBoundary,
+}
+
+/// A suggested tag for directory grouping.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedTag {
+    /// Tag name.
+    pub name: String,
+    /// Glob pattern for the tag.
+    pub glob: String,
+    /// Why this tag is suggested.
+    pub rationale: String,
+}
+
+/// Ownership assignment hint.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnershipHint {
+    /// Path glob to match.
+    pub path_glob: String,
+    /// Suggested owner identifier.
+    pub suggested_owner: String,
+    /// Number of cross-team edges.
+    pub cross_team_edges: usize,
+    /// Rationale for the suggestion.
+    pub rationale: String,
+}
+
+/// A hotspot file with high edge traffic.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Hotspot {
+    /// File path.
+    pub file: String,
+    /// Cross-package import count.
+    pub cross_package_imports: usize,
+    /// Cross-owner import count.
+    pub cross_owner_imports: usize,
+    /// Incoming edge count.
+    pub incoming_edges: usize,
+    /// Outgoing edge count.
+    pub outgoing_edges: usize,
+    /// Suggestion for addressing this hotspot.
+    pub suggestion: String,
+}
+
+impl SuggestRulesReport {
+    /// Generate the JSON Schema for the suggest-rules report format.
     pub fn json_schema() -> schemars::schema::RootSchema {
         schemars::schema_for!(Self)
     }

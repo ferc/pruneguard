@@ -45,24 +45,54 @@ jobs:
           "
 
       - name: Stage release packages
+        # The staging script validates output automatically (workspace refs,
+        # required fields, banned artifacts, optionalDependencies parity).
         run: node scripts/stage_npm_release.mjs
 
-      - name: Verify staged packages have no workspace references
+      - name: Verify staged packages (independent re-validation)
+        run: node scripts/stage_npm_release.mjs --verify
+
+      - name: Verify staged platform packages have required fields
         run: |
           node -e "
             const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('.release/npm/pruneguard/package.json', 'utf8'));
-            for (const field of ['dependencies','optionalDependencies','peerDependencies','devDependencies']) {
-              for (const [dep, ver] of Object.entries(pkg[field] || {})) {
-                if (ver.startsWith('workspace:')) {
-                  console.error('ERROR: staged package has workspace: reference: ' + dep + '@' + ver);
-                  process.exit(1);
+            const path = require('path');
+            const releaseDir = '.release/npm';
+            const required = ['name','version','description','license','repository','os','cpu'];
+            const dirs = fs.readdirSync(releaseDir).filter(d => d.startsWith('cli-'));
+            let ok = true;
+            for (const dir of dirs) {
+              const pkg = JSON.parse(fs.readFileSync(path.join(releaseDir, dir, 'package.json'), 'utf8'));
+              for (const field of required) {
+                if (pkg[field] === undefined || pkg[field] === null) {
+                  console.error('ERROR: ' + dir + ' missing field: ' + field);
+                  ok = false;
                 }
               }
             }
-            console.log('Staged root package is clean');
+            if (!ok) process.exit(1);
+            console.log('All ' + dirs.length + ' platform packages have required fields');
           "
 
+      - name: Verify staged root package bin entry
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const pkg = JSON.parse(fs.readFileSync('.release/npm/pruneguard/package.json', 'utf8'));
+            for (const [cmd, binPath] of Object.entries(pkg.bin || {})) {
+              const resolved = path.join('.release/npm/pruneguard', binPath);
+              if (!fs.existsSync(resolved)) {
+                console.error('ERROR: bin entry \"' + cmd + '\" points to non-existent file: ' + binPath);
+                process.exit(1);
+              }
+            }
+            console.log('Root package bin entries point to existing files');
+          "
+
+      # Pack smoke validates the staged root package on the current CI
+      # platform only. The full cross-platform matrix is validated during
+      # the release workflow where each target builds its own binary.
       - name: Pack smoke (staged root package)
         run: |
           mkdir -p /tmp/pruneguard-pack

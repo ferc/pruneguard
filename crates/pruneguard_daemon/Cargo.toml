@@ -1,5 +1,5 @@
 [package]
-name = "pruneguard_analyzers"
+name = "pruneguard_daemon"
 version = "0.2.1"
 authors.workspace = true
 categories.workspace = true
@@ -9,30 +9,33 @@ keywords.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Analysis passes for unused code, cycles, boundaries, and impact"
+description = "Hot-index daemon for pruneguard with file watching and incremental updates"
 publish = true
 
 [lints]
 workspace = true
 
 [dependencies]
-pruneguard_graph = { workspace = true }
 pruneguard_config = { workspace = true }
+pruneguard_graph = { workspace = true }
+pruneguard_fs = { workspace = true }
 pruneguard_discovery = { workspace = true }
 pruneguard_entrypoints = { workspace = true }
-pruneguard_fs = { workspace = true }
 pruneguard_extract = { workspace = true }
-pruneguard_manifest = { workspace = true }
-pruneguard_report = { workspace = true }
 pruneguard_resolver = { workspace = true }
+pruneguard_manifest = { workspace = true }
+pruneguard_analyzers = { workspace = true }
+pruneguard_report = { workspace = true }
+pruneguard_cache = { workspace = true }
+pruneguard_git = { workspace = true }
 pruneguard_rules = { workspace = true }
 
-compact_str = { workspace = true }
-globset = { workspace = true }
-petgraph = { workspace = true }
-rustc-hash = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
+miette = { workspace = true }
 
-[dev-dependencies]
-insta = { workspace = true }
+tokio = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }

@@ -15,6 +15,15 @@ pub struct GlobalFlags {
     pub no_baseline: bool,
     pub require_full_scope: bool,
     pub max_findings: Option<usize>,
+    pub daemon: DaemonMode,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum DaemonMode {
+    #[default]
+    Auto,
+    Off,
+    Required,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,10 +65,20 @@ pub enum Command {
     Explain { query: String },
     Review,
     SafeDelete { targets: Vec<String> },
+    FixPlan { targets: Vec<String> },
+    SuggestRules,
     Init,
     PrintConfig,
     Debug(DebugCommand),
     Migrate(MigrateCommand),
+    Daemon(DaemonCommand),
+}
+
+#[derive(Debug, Clone)]
+pub enum DaemonCommand {
+    Start,
+    Stop,
+    Status,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +122,15 @@ fn parse_severity(s: &str) -> Result<Severity, String> {
     }
 }
 
+fn parse_daemon_mode(s: &str) -> Result<DaemonMode, String> {
+    match s {
+        "auto" => Ok(DaemonMode::Auto),
+        "off" => Ok(DaemonMode::Off),
+        "required" => Ok(DaemonMode::Required),
+        other => Err(format!("unknown daemon mode: {other}")),
+    }
+}
+
 fn global_flags() -> impl Parser<GlobalFlags> {
     let format = long("format")
         .help("Output format: text|json|sarif|dot")
@@ -136,6 +164,11 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         .help("Maximum number of findings to report")
         .argument::<usize>("N")
         .optional();
+    let daemon = long("daemon")
+        .help("Daemon mode: auto|off|required")
+        .argument::<String>("MODE")
+        .parse(|s| parse_daemon_mode(&s))
+        .fallback(DaemonMode::Auto);
 
     construct!(GlobalFlags {
         format,
@@ -147,6 +180,7 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         no_baseline,
         require_full_scope,
         max_findings,
+        daemon,
     })
 }
 
@@ -174,6 +208,17 @@ fn safe_delete_command() -> impl Parser<Command> {
         .help("Files or exports to evaluate for safe deletion")
         .many();
     construct!(Command::SafeDelete { targets })
+}
+
+fn fix_plan_command() -> impl Parser<Command> {
+    let targets = positional::<String>("TARGETS")
+        .help("Finding IDs, file paths, or export names to generate fix plans for")
+        .many();
+    construct!(Command::FixPlan { targets })
+}
+
+fn suggest_rules_command() -> impl Parser<Command> {
+    pure(Command::SuggestRules)
 }
 
 fn init_command() -> impl Parser<Command> {
@@ -240,6 +285,35 @@ fn migrate_command() -> impl Parser<Command> {
     construct!([knip, depcruise]).map(Command::Migrate)
 }
 
+fn daemon_start_subcommand() -> impl Parser<DaemonCommand> {
+    pure(DaemonCommand::Start)
+}
+
+fn daemon_stop_subcommand() -> impl Parser<DaemonCommand> {
+    pure(DaemonCommand::Stop)
+}
+
+fn daemon_status_subcommand() -> impl Parser<DaemonCommand> {
+    pure(DaemonCommand::Status)
+}
+
+fn daemon_command() -> impl Parser<Command> {
+    let start = daemon_start_subcommand()
+        .to_options()
+        .descr("Start the pruneguard daemon")
+        .command("start");
+    let stop = daemon_stop_subcommand()
+        .to_options()
+        .descr("Stop the running daemon")
+        .command("stop");
+    let status = daemon_status_subcommand()
+        .to_options()
+        .descr("Show daemon status")
+        .command("status");
+
+    construct!([start, stop, status]).map(Command::Daemon)
+}
+
 fn command_parser() -> impl Parser<Command> {
     let scan = scan_command().to_options().descr("Analyze the repository").command("scan");
     let impact =
@@ -252,6 +326,14 @@ fn command_parser() -> impl Parser<Command> {
         .to_options()
         .descr("Evaluate targets for safe deletion")
         .command("safe-delete");
+    let fix_plan = fix_plan_command()
+        .to_options()
+        .descr("Generate remediation plan for findings")
+        .command("fix-plan");
+    let suggest_rules = suggest_rules_command()
+        .to_options()
+        .descr("Suggest governance rules from graph analysis")
+        .command("suggest-rules");
     let init =
         init_command().to_options().descr("Generate an pruneguard.json config").command("init");
     let print_config = print_config_command()
@@ -264,6 +346,8 @@ fn command_parser() -> impl Parser<Command> {
         .command("debug");
     let migrate =
         migrate_command().to_options().descr("Migrate from other tools").command("migrate");
+    let daemon =
+        daemon_command().to_options().descr("Manage the pruneguard daemon").command("daemon");
 
     // Default to scan when no subcommand is given
     let default_scan = scan_command();
@@ -274,10 +358,13 @@ fn command_parser() -> impl Parser<Command> {
         explain,
         review,
         safe_delete,
+        fix_plan,
+        suggest_rules,
         init,
         print_config,
         debug,
         migrate,
+        daemon,
         default_scan
     ])
 }

@@ -51,6 +51,7 @@ pruneguard_rules = { path = "crates/pruneguard_rules" }
 pruneguard_report = { path = "crates/pruneguard_report" }
 pruneguard_cache = { path = "crates/pruneguard_cache" }
 pruneguard_git = { path = "crates/pruneguard_git" }
+pruneguard_daemon = { path = "crates/pruneguard_daemon" }
 
 # Oxc crates
 oxc_parser = "0.117.0"
@@ -104,6 +105,11 @@ compact_str = { version = "0.8", features = ["serde"] }
 napi = { version = "2", default-features = false, features = ["napi9"] }
 napi-derive = "2"
 napi-build = "2"
+
+# Async / daemon
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "signal", "fs", "macros"] }
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+notify-debouncer-mini = "0.7"
 
 # Testing
 insta = { version = "1", features = ["json", "redactions"] }

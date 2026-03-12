@@ -9,7 +9,7 @@ ready: fmt check test lint
 alias r := ready
 
 # Run the full CI pipeline locally (mirrors .github/workflows/ci.yml)
-ci: fmt check lint test build-js schemas-check stage-release
+ci: fmt check lint test build-js schemas-check stage-release verify-staged
 
 # Format all code
 fmt:
@@ -79,6 +79,10 @@ smoke-repos:
 # Stage npm packages for release (rewrites workspace:* to concrete versions)
 stage-release:
     node scripts/stage_npm_release.mjs
+
+# Verify staged npm packages without re-staging
+verify-staged:
+    node scripts/stage_npm_release.mjs --verify
 
 # Build artifacts needed for pack-smoke
 _pack-smoke-build: build build-js schemas stage-release

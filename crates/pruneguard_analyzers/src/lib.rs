@@ -2,6 +2,7 @@ pub mod boundaries;
 pub mod cycles;
 pub mod impact;
 pub mod ownership;
+pub mod suggest_rules;
 pub mod unused_dependencies;
 pub mod unused_exports;
 pub mod unused_files;
@@ -12,7 +13,9 @@ use std::hash::{Hash, Hasher};
 use pruneguard_config::{AnalysisSeverity, PruneguardConfig};
 use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_graph::GraphBuildResult;
-use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity};
+use pruneguard_report::{
+    Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity, RemediationActionKind,
+};
 use pruneguard_rules::CompiledRules;
 
 /// Run all enabled analyzers and collect findings.
@@ -85,6 +88,9 @@ pub(crate) fn make_finding(
         format!("{}|{}|{}", item.kind, item.file.clone().unwrap_or_default(), item.description)
     });
     let id = finding_id(code, &subject, rule_name.as_deref(), &primary_evidence);
+    let primary_action_kind = primary_action_kind_for_code(code);
+    let action_kinds =
+        primary_action_kind.map_or_else(Vec::new, |kind| vec![kind]);
 
     Finding {
         id,
@@ -99,6 +105,23 @@ pub(crate) fn make_finding(
         evidence,
         suggestion,
         rule_name,
+        primary_action_kind,
+        action_kinds,
+    }
+}
+
+/// Map a finding code to its primary remediation action kind.
+pub fn primary_action_kind_for_code(code: &str) -> Option<RemediationActionKind> {
+    match code {
+        "unused-file" => Some(RemediationActionKind::DeleteFile),
+        "unused-export" => Some(RemediationActionKind::DeleteExport),
+        "unused-dependency" | "unused-package" => Some(RemediationActionKind::RemoveDependency),
+        "cycle" => Some(RemediationActionKind::BreakCycle),
+        "boundary-violation" => Some(RemediationActionKind::UpdateBoundaryRule),
+        "ownership-unowned" | "ownership-cross-owner" | "ownership-hotspot" => {
+            Some(RemediationActionKind::AssignOwner)
+        }
+        _ => None,
     }
 }
 

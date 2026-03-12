@@ -1,0 +1,13 @@
+{
+  "name": "trust-downgrade",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "nonexistent-pkg-alpha": "1.0.0",
+    "nonexistent-pkg-beta": "1.0.0",
+    "nonexistent-pkg-gamma": "1.0.0",
+    "nonexistent-pkg-delta": "1.0.0",
+    "nonexistent-pkg-epsilon": "1.0.0"
+  }
+}

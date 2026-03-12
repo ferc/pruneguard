@@ -12,8 +12,9 @@ use pruneguard_graph::{
 };
 use pruneguard_report::{
     AnalysisReport, ConfidenceCounts, ExplainQueryKind, ExplainReport, Finding, FindingConfidence,
-    FindingSeverity, ImpactReport, ProofNode, ReviewReport, ReviewTrust, SafeDeleteCandidate,
-    SafeDeleteReport, Summary,
+    FindingSeverity, FixPlanReport, ImpactReport, ProofNode, RemediationAction,
+    RemediationActionKind, RemediationStep, ReviewReport, ReviewTrust, RiskLevel,
+    SafeDeleteCandidate, SafeDeleteReport, SuggestRulesReport, Summary,
 };
 
 #[cfg(feature = "napi")]
@@ -294,6 +295,18 @@ pub struct SafeDeleteOptions {
     pub no_cache: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FixPlanOptions {
+    pub config_dir: Option<PathBuf>,
+    pub no_cache: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SuggestRulesOptions {
+    pub config_dir: Option<PathBuf>,
+    pub no_cache: bool,
+}
+
 /// Review a branch for CI/agent gating.
 ///
 /// Combines full-scope scan, `--changed-since`, baseline, and trust summary
@@ -373,6 +386,23 @@ pub fn review(
         recommendations.push("No new findings. Branch is clean.".to_string());
     }
 
+    let proposed_actions = blocking_findings
+        .iter()
+        .filter_map(|finding| {
+            finding.primary_action_kind.map(|kind| RemediationAction {
+                id: format!("review-{}", finding.id),
+                kind,
+                targets: vec![finding.subject.clone()],
+                why: finding.message.clone(),
+                preconditions: Vec::new(),
+                steps: Vec::new(),
+                verification: Vec::new(),
+                risk: RiskLevel::Low,
+                confidence: finding.confidence,
+            })
+        })
+        .collect();
+
     Ok(ReviewReport {
         base_ref: options.base_ref.clone(),
         changed_files,
@@ -386,6 +416,9 @@ pub fn review(
             confidence_counts: report.stats.confidence_counts.clone(),
         },
         recommendations,
+        proposed_actions,
+        execution_mode: None,
+        latency_ms: None,
     })
 }
 
@@ -551,6 +584,207 @@ pub fn safe_delete(
         deletion_order,
         evidence: all_evidence,
     })
+}
+
+/// Generate a fix plan for the given targets.
+///
+/// Matches targets against findings by ID, file path, or export name,
+/// then generates remediation actions for each matched finding.
+pub fn fix_plan(
+    cwd: &Path,
+    config: &PruneguardConfig,
+    targets: &[String],
+    profile: EntrypointProfile,
+    options: &FixPlanOptions,
+) -> miette::Result<FixPlanReport> {
+    let scan_options = ScanOptions {
+        config_dir: options.config_dir.clone(),
+        no_cache: options.no_cache,
+        no_baseline: true,
+        require_full_scope: false,
+        ..ScanOptions::default()
+    };
+    let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
+    let report = &execution.report;
+
+    let matched_findings: Vec<Finding> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            targets.iter().any(|target| {
+                finding.id == *target
+                    || finding.subject == *target
+                    || finding.subject.starts_with(target)
+                    || finding.subject.split('#').next() == Some(target.as_str())
+            })
+        })
+        .cloned()
+        .collect();
+
+    let mut actions = Vec::new();
+    let mut blocked_by = Vec::new();
+
+    for finding in &matched_findings {
+        let kind = match finding.code.as_str() {
+            "unused-file" => RemediationActionKind::DeleteFile,
+            "unused-export" => RemediationActionKind::DeleteExport,
+            "unused-dependency" | "unused-package" => RemediationActionKind::RemoveDependency,
+            "cycle" => RemediationActionKind::BreakCycle,
+            "boundary-violation" => RemediationActionKind::UpdateBoundaryRule,
+            "ownership-unowned" | "ownership-cross-owner" | "ownership-hotspot" => {
+                RemediationActionKind::AssignOwner
+            }
+            _ => {
+                blocked_by.push(format!(
+                    "No remediation strategy for finding code `{}`.",
+                    finding.code
+                ));
+                continue;
+            }
+        };
+
+        let steps = generate_remediation_steps(kind, &finding.subject);
+        let verification = vec![format!(
+            "Run `pruneguard scan` to verify `{}` is resolved.",
+            finding.subject
+        )];
+
+        actions.push(RemediationAction {
+            id: format!("fix-{}", finding.id),
+            kind,
+            targets: vec![finding.subject.clone()],
+            why: finding.message.clone(),
+            preconditions: Vec::new(),
+            steps,
+            verification,
+            risk: risk_for_action(kind),
+            confidence: finding.confidence,
+        });
+    }
+
+    let risk_level = actions
+        .iter()
+        .map(|action| action.risk)
+        .max_by_key(|risk| match risk {
+            RiskLevel::Low => 0,
+            RiskLevel::Medium => 1,
+            RiskLevel::High => 2,
+        })
+        .unwrap_or(RiskLevel::Low);
+
+    let confidence = matched_findings
+        .iter()
+        .map(|finding| finding.confidence)
+        .min_by_key(|confidence| match confidence {
+            FindingConfidence::High => 0,
+            FindingConfidence::Medium => 1,
+            FindingConfidence::Low => 2,
+        })
+        .unwrap_or(FindingConfidence::High);
+
+    let verification_steps = vec![
+        "Run `pruneguard scan` to verify all findings are resolved.".to_string(),
+        "Run your test suite to confirm no regressions.".to_string(),
+    ];
+
+    Ok(FixPlanReport {
+        query: targets.to_vec(),
+        matched_findings,
+        actions,
+        blocked_by,
+        verification_steps,
+        risk_level,
+        confidence,
+    })
+}
+
+/// Suggest governance rules based on graph analysis.
+pub fn suggest_rules(
+    cwd: &Path,
+    config: &PruneguardConfig,
+    profile: EntrypointProfile,
+    options: &SuggestRulesOptions,
+) -> miette::Result<SuggestRulesReport> {
+    let scan_options = ScanOptions {
+        config_dir: options.config_dir.clone(),
+        no_cache: options.no_cache,
+        no_baseline: true,
+        require_full_scope: false,
+        ..ScanOptions::default()
+    };
+    let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
+    Ok(pruneguard_analyzers::suggest_rules::suggest_rules(&execution.build, config))
+}
+
+fn generate_remediation_steps(kind: RemediationActionKind, subject: &str) -> Vec<RemediationStep> {
+    let file_path = subject.split('#').next().unwrap_or(subject);
+    match kind {
+        RemediationActionKind::DeleteFile => vec![RemediationStep {
+            description: format!("Delete the file `{file_path}`."),
+            file: Some(file_path.to_string()),
+            action: Some("delete".to_string()),
+        }],
+        RemediationActionKind::DeleteExport => vec![RemediationStep {
+            description: format!("Remove the unused export from `{subject}`."),
+            file: Some(file_path.to_string()),
+            action: Some("edit".to_string()),
+        }],
+        RemediationActionKind::RemoveDependency => vec![RemediationStep {
+            description: format!("Remove `{subject}` from package.json dependencies."),
+            file: None,
+            action: Some("edit".to_string()),
+        }],
+        RemediationActionKind::BreakCycle => vec![
+            RemediationStep {
+                description: format!(
+                    "Identify the weakest edge in the cycle involving `{subject}`."
+                ),
+                file: Some(file_path.to_string()),
+                action: None,
+            },
+            RemediationStep {
+                description: "Extract the shared dependency or invert the dependency direction."
+                    .to_string(),
+                file: None,
+                action: Some("refactor".to_string()),
+            },
+        ],
+        RemediationActionKind::UpdateBoundaryRule => vec![RemediationStep {
+            description: format!(
+                "Update boundary rules or refactor the import involving `{subject}`."
+            ),
+            file: Some(file_path.to_string()),
+            action: Some("edit".to_string()),
+        }],
+        RemediationActionKind::AssignOwner => vec![RemediationStep {
+            description: format!("Assign an owner for `{subject}` in the ownership config."),
+            file: None,
+            action: Some("config".to_string()),
+        }],
+        RemediationActionKind::MoveImport
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::SplitPackage
+        | RemediationActionKind::AcknowledgeBaseline => vec![RemediationStep {
+            description: format!("Apply the `{kind:?}` action for `{subject}`."),
+            file: Some(file_path.to_string()),
+            action: None,
+        }],
+    }
+}
+
+const fn risk_for_action(kind: RemediationActionKind) -> RiskLevel {
+    match kind {
+        RemediationActionKind::DeleteFile | RemediationActionKind::RemoveDependency => {
+            RiskLevel::Medium
+        }
+        RemediationActionKind::BreakCycle | RemediationActionKind::SplitPackage => RiskLevel::High,
+        RemediationActionKind::DeleteExport
+        | RemediationActionKind::MoveImport
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::UpdateBoundaryRule
+        | RemediationActionKind::AssignOwner
+        | RemediationActionKind::AcknowledgeBaseline => RiskLevel::Low,
+    }
 }
 
 /// Debug: resolve a specifier from a file.

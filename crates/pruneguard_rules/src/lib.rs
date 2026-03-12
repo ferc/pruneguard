@@ -11,7 +11,9 @@ use pruneguard_config::{
 };
 use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_graph::{FileId, GraphBuildResult, ModuleNode, PackageId};
-use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity};
+use pruneguard_report::{
+    Evidence, Finding, FindingCategory, FindingConfidence, FindingSeverity, RemediationActionKind,
+};
 use pruneguard_resolver::{ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -219,6 +221,8 @@ impl CompiledRules {
                             "Adjust the dependency direction or narrow the rule scope.".to_string(),
                         ),
                         rule_name: Some(rule.name.clone()),
+                        primary_action_kind: Some(RemediationActionKind::UpdateBoundaryRule),
+                        action_kinds: vec![RemediationActionKind::UpdateBoundaryRule],
                     });
                 }
             }

@@ -1,0 +1,104 @@
+name: pruneguard
+description: >
+  Run pruneguard analysis on your JS/TS repository.
+  Supports scan, review, safe-delete, and fix-plan commands with
+  JSON, text, or SARIF output.
+
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  command:
+    description: >
+      The pruneguard command to run: scan, review, safe-delete, or fix-plan.
+    required: true
+  args:
+    description: >
+      Additional CLI arguments passed to pruneguard (e.g. "--changed-since origin/main").
+    required: false
+    default: ""
+  version:
+    description: >
+      The pruneguard version to install. Use "latest" for the most recent release.
+    required: false
+    default: latest
+  format:
+    description: >
+      Output format: json, text, or sarif.
+    required: false
+    default: json
+
+outputs:
+  exit-code:
+    description: >
+      The exit code from the pruneguard command.
+      0 = no findings / no blockers. 1 = findings / blockers present.
+    value: ${{ steps.run.outputs.exit-code }}
+  output:
+    description: >
+      The stdout output from the pruneguard command.
+    value: ${{ steps.run.outputs.output }}
+  report-path:
+    description: >
+      Path to the report file (written when format is json or sarif).
+    value: ${{ steps.run.outputs.report-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install pruneguard
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          npm install -g pruneguard
+        else
+          npm install -g "pruneguard@${{ inputs.version }}"
+        fi
+
+    - name: Run pruneguard
+      id: run
+      shell: bash
+      run: |
+        set +e
+
+        REPORT_DIR="${RUNNER_TEMP:-/tmp}/pruneguard-reports"
+        mkdir -p "$REPORT_DIR"
+
+        COMMAND="${{ inputs.command }}"
+        FORMAT="${{ inputs.format }}"
+        ARGS="${{ inputs.args }}"
+
+        # Build the full command
+        CMD="pruneguard --format ${FORMAT} ${ARGS} ${COMMAND}"
+        echo "::debug::Running: ${CMD}"
+
+        # Run and capture output
+        OUTPUT=$(eval "${CMD}" 2>&1)
+        EXIT_CODE=$?
+
+        # Set exit code output
+        echo "exit-code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+
+        # Write report file for json and sarif formats
+        if [ "${FORMAT}" = "json" ] || [ "${FORMAT}" = "sarif" ]; then
+          EXTENSION="${FORMAT}"
+          if [ "${EXTENSION}" = "sarif" ]; then
+            EXTENSION="sarif.json"
+          fi
+          REPORT_PATH="${REPORT_DIR}/pruneguard-${COMMAND}.${EXTENSION}"
+          echo "${OUTPUT}" > "${REPORT_PATH}"
+          echo "report-path=${REPORT_PATH}" >> "$GITHUB_OUTPUT"
+        else
+          echo "report-path=" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Set output (truncate to avoid hitting output size limits)
+        {
+          echo "output<<PRUNEGUARD_OUTPUT_EOF"
+          echo "${OUTPUT}" | head -c 131072
+          echo ""
+          echo "PRUNEGUARD_OUTPUT_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        exit ${EXIT_CODE}

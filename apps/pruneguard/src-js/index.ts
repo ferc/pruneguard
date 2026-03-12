@@ -103,6 +103,8 @@ export type AnalysisReport = {
     evidence: Array<{ kind: string; file?: string; line?: number; description: string }>;
     suggestion?: string;
     ruleName?: string;
+    primaryActionKind?: string;
+    actionKinds?: string[];
   }>;
   entrypoints: Array<{
     path: string;
@@ -154,6 +156,12 @@ export type AnalysisReport = {
     cacheEntriesRead: number;
     cacheEntriesWritten: number;
     affectedScopeIncomplete: boolean;
+    executionMode?: "oneshot" | "daemon";
+    indexWarm?: boolean;
+    indexAgeMs?: number;
+    reusedGraphNodes?: number;
+    reusedGraphEdges?: number;
+    watcherLagMs?: number;
   };
 };
 
@@ -205,6 +213,19 @@ export type ReviewReport = {
     confidenceCounts: { high: number; medium: number; low: number };
   };
   recommendations: string[];
+  proposedActions?: Array<{
+    id: string;
+    kind: string;
+    targets: string[];
+    why: string;
+    preconditions: string[];
+    steps: Array<{ description: string; file?: string; action?: string }>;
+    verification: string[];
+    risk: "low" | "medium" | "high";
+    confidence: "high" | "medium" | "low";
+  }>;
+  executionMode?: "oneshot" | "daemon";
+  latencyMs?: number;
 };
 
 export type SafeDeleteOptions = {
@@ -222,6 +243,68 @@ export type SafeDeleteReport = {
   blocked: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
   deletionOrder: string[];
   evidence: Array<{ kind: string; file?: string; line?: number; description: string }>;
+};
+
+export type FixPlanOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+  targets: string[];
+  noCache?: boolean;
+};
+
+export type SuggestRulesOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+  noCache?: boolean;
+};
+
+export type SuggestRulesReport = {
+  suggestedRules: Array<{
+    kind: string;
+    name: string;
+    description: string;
+    configFragment: Record<string, unknown>;
+    confidence: "high" | "medium" | "low";
+    evidence?: string[];
+  }>;
+  tags?: Array<{ name: string; glob: string; rationale: string }>;
+  ownershipHints?: Array<{
+    pathGlob: string;
+    suggestedOwner: string;
+    crossTeamEdges: number;
+    rationale: string;
+  }>;
+  hotspots?: Array<{
+    file: string;
+    crossPackageImports: number;
+    crossOwnerImports: number;
+    incomingEdges: number;
+    outgoingEdges: number;
+    suggestion: string;
+  }>;
+  rationale?: string[];
+};
+
+export type FixPlanReport = {
+  query: string[];
+  matchedFindings: AnalysisReport["findings"];
+  actions: Array<{
+    id: string;
+    kind: string;
+    targets: string[];
+    why: string;
+    preconditions: string[];
+    steps: Array<{ description: string; file?: string; action?: string }>;
+    verification: string[];
+    risk: "low" | "medium" | "high";
+    confidence: "high" | "medium" | "low";
+  }>;
+  blockedBy: string[];
+  verificationSteps: string[];
+  riskLevel: "low" | "medium" | "high";
+  confidence: "high" | "medium" | "low";
 };
 
 // ---------------------------------------------------------------------------
@@ -406,6 +489,28 @@ export async function safeDelete(options: SafeDeleteOptions): Promise<SafeDelete
     requireSuccess(result);
   }
   return parseJson<SafeDeleteReport>(result);
+}
+
+export async function fixPlan(options: FixPlanOptions): Promise<FixPlanReport> {
+  const args = ["--format", "json"];
+  pushGlobalFlags(args, options);
+  if (options.noCache) args.push("--no-cache");
+  args.push("fix-plan", ...options.targets);
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  requireSuccess(result);
+  return parseJson<FixPlanReport>(result);
+}
+
+export async function suggestRules(options: SuggestRulesOptions = {}): Promise<SuggestRulesReport> {
+  const args = ["--format", "json"];
+  pushGlobalFlags(args, options);
+  if (options.noCache) args.push("--no-cache");
+  args.push("suggest-rules");
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  requireSuccess(result);
+  return parseJson<SuggestRulesReport>(result);
 }
 
 export async function migrateKnip(options: {

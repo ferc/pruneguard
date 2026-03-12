@@ -1,0 +1,9 @@
+{
+  "name": "package-exports-subpaths",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils": "./src/utils.ts"
+  }
+}

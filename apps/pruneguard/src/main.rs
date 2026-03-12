@@ -150,11 +150,44 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             println!("{json}");
             Ok(ExitCode::SUCCESS)
         }
+        cli::Command::FixPlan { targets } => {
+            let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            if targets.is_empty() {
+                miette::bail!("fix-plan requires at least one target");
+            }
+            let report = pruneguard::fix_plan(
+                &cwd,
+                &config,
+                &targets,
+                profile,
+                &pruneguard::FixPlanOptions {
+                    config_dir: Some(cwd.clone()),
+                    no_cache: options.global.no_cache,
+                },
+            )?;
+            print_report(&report, options.global.format)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::Command::SuggestRules => {
+            let config = load_config_or_default(&cwd, options.config.as_deref())?;
+            let report = pruneguard::suggest_rules(
+                &cwd,
+                &config,
+                profile,
+                &pruneguard::SuggestRulesOptions {
+                    config_dir: Some(cwd.clone()),
+                    no_cache: options.global.no_cache,
+                },
+            )?;
+            print_report(&report, options.global.format)?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::Command::Debug(debug_cmd) => {
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             run_debug(debug_cmd, &config, profile)
         }
         cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd, options.global.format),
+        cli::Command::Daemon(daemon_cmd) => run_daemon(daemon_cmd),
     }
 }
 
@@ -610,4 +643,103 @@ fn render_sarif<T: serde::Serialize>(report: &T) -> miette::Result<String> {
         }]
     }))
     .map_err(|err| miette::miette!("{err}"))
+}
+
+fn run_daemon(cmd: cli::DaemonCommand) -> miette::Result<ExitCode> {
+    let cwd = std::env::current_dir().expect("failed to get current directory");
+    let project_root = find_project_root_dir(&cwd);
+
+    match cmd {
+        cli::DaemonCommand::Start => {
+            let config = load_config_or_default(&project_root, None)?;
+            let server = pruneguard_daemon::DaemonServer::new(project_root, config);
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
+            rt.block_on(async {
+                server.run().await.map_err(|err| miette::miette!("daemon error: {err}"))
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DaemonCommand::Stop => {
+            let metadata = pruneguard_daemon::DaemonMetadata::load(&project_root)
+                .map_err(|err| miette::miette!("failed to load daemon metadata: {err}"))?;
+            match metadata {
+                Some(meta) => {
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
+                    rt.block_on(async {
+                        send_daemon_shutdown(meta.port, &meta.token).await
+                    })?;
+                    eprintln!("daemon stopped");
+                    Ok(ExitCode::SUCCESS)
+                }
+                None => {
+                    eprintln!("no running daemon found");
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+        cli::DaemonCommand::Status => {
+            let metadata = pruneguard_daemon::DaemonMetadata::load(&project_root)
+                .map_err(|err| miette::miette!("failed to load daemon metadata: {err}"))?;
+            match metadata {
+                Some(meta) => {
+                    println!("pid: {}", meta.pid);
+                    println!("port: {}", meta.port);
+                    println!("version: {}", meta.version);
+                    println!("started_at: {}", meta.started_at);
+                    Ok(ExitCode::SUCCESS)
+                }
+                None => {
+                    println!("no running daemon");
+                    Ok(ExitCode::from(1))
+                }
+            }
+        }
+    }
+}
+
+fn find_project_root_dir(cwd: &std::path::Path) -> std::path::PathBuf {
+    let mut dir = cwd.to_path_buf();
+    loop {
+        if dir.join("pruneguard.json").exists() || dir.join("package.json").exists() {
+            return dir;
+        }
+        if !dir.pop() {
+            return cwd.to_path_buf();
+        }
+    }
+}
+
+async fn send_daemon_shutdown(port: u16, token: &str) -> miette::Result<()> {
+    use pruneguard_daemon::protocol::{read_frame, write_frame};
+    use tokio::net::TcpStream;
+
+    let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .map_err(|err| miette::miette!("failed to connect to daemon: {err}"))?;
+
+    let (mut reader, mut writer) = stream.into_split();
+
+    // Send auth token as first frame.
+    write_frame(&mut writer, token.as_bytes())
+        .await
+        .map_err(|err| miette::miette!("failed to write to daemon: {err}"))?;
+
+    // Send shutdown request.
+    let request = pruneguard_daemon::DaemonRequest::Shutdown;
+    let payload = serde_json::to_vec(&request).expect("serialize request");
+    write_frame(&mut writer, &payload)
+        .await
+        .map_err(|err| miette::miette!("failed to write to daemon: {err}"))?;
+
+    // Read response.
+    if let Some(_resp) = read_frame(&mut reader)
+        .await
+        .map_err(|err| miette::miette!("failed to read from daemon: {err}"))?
+    {
+        // Response received, shutdown acknowledged.
+    }
+
+    Ok(())
 }
