@@ -1,4 +1,4 @@
-#![allow(dead_code)] // Fields parsed by bpaf but not yet consumed by stub commands.
+#![allow(dead_code)] // Parser-only fields may be unused in specific command paths.
 
 use bpaf::{OptionParser, Parser, construct, long, positional, pure, short};
 use std::path::PathBuf;

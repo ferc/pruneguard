@@ -8,9 +8,11 @@ fn fixture_root(name: &str) -> PathBuf {
 }
 
 fn run_oxgraph(root: &std::path::Path, args: &[&str]) -> Value {
+    let mut argv = vec!["--no-cache"];
+    argv.extend_from_slice(args);
     let output = Command::new(env!("CARGO_BIN_EXE_oxgraph"))
         .current_dir(root)
-        .args(args)
+        .args(&argv)
         .output()
         .expect("oxgraph should run");
 
@@ -121,5 +123,207 @@ fn ownership_reports_cross_owner_edges() {
     assert!(findings.iter().any(|finding| {
         finding["code"] == "ownership-cross-owner"
             && finding["subject"] == "src/index.ts -> src/b.ts"
+    }));
+}
+
+#[test]
+fn focus_filters_findings_without_changing_inventory() {
+    let root = fixture_root("focus-filtering");
+    let report = run_oxgraph(&root, &["--format", "json", "--focus", "src/used.ts", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let files = report["inventories"]["files"].as_array().expect("files array");
+
+    assert_eq!(report["stats"]["focusApplied"].as_bool(), Some(true));
+    assert_eq!(report["stats"]["focusedFiles"].as_u64(), Some(1));
+    assert!(files.iter().any(|file| file["path"] == "src/unused.ts"));
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/used.ts#extra"
+    }));
+    assert!(!findings.iter().any(|finding| {
+        finding["subject"] == "src/unused.ts"
+    }));
+}
+
+#[test]
+fn namespace_imports_only_keep_accessed_members_live() {
+    let root = fixture_root("namespace-imports");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(!findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/leaf.ts#used"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/leaf.ts#unused"
+    }));
+}
+
+#[test]
+fn package_fields_are_detected_as_entrypoints() {
+    let root = fixture_root("entrypoints-package-fields");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let entrypoints = report["entrypoints"].as_array().expect("entrypoints array");
+
+    assert!(entrypoints.iter().any(|entrypoint| {
+        entrypoint["source"] == "package:src/main.ts"
+    }));
+    assert!(entrypoints.iter().any(|entrypoint| {
+        entrypoint["source"] == "package:./src/public.ts"
+    }));
+    assert!(entrypoints.iter().any(|entrypoint| {
+        entrypoint["kind"] == "package-bin"
+    }));
+}
+
+#[test]
+fn tsconfig_path_aliases_resolve_without_unresolved_edges() {
+    let root = fixture_root("tsconfig-paths-basic");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+
+    assert_eq!(report["stats"]["unresolvedSpecifiers"].as_u64(), Some(0));
+}
+
+#[test]
+fn boundaries_path_filters_report_violations() {
+    let root = fixture_root("boundaries-path");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "boundary-violation"
+            && finding["ruleName"] == "no-internal"
+            && finding["subject"] == "src/app.ts -> src/internal/secret.ts"
+    }));
+}
+
+#[test]
+fn boundaries_workspace_filters_report_violations() {
+    let root = fixture_root("boundaries-workspace");
+    let report = run_oxgraph(
+        &root,
+        &["--format", "json", "--max-findings", "20", "scan"],
+    );
+    let findings = report["findings"].as_array().expect("findings array");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["ruleName"] == "workspace-boundary"
+                && finding["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("@fixture/b"))
+        }),
+        "expected workspace boundary violation"
+    );
+}
+
+#[test]
+fn boundaries_package_filters_report_violations() {
+    let root = fixture_root("boundaries-package");
+    let report = run_oxgraph(
+        &root,
+        &["--format", "json", "--max-findings", "20", "scan"],
+    );
+    let findings = report["findings"].as_array().expect("findings array");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["ruleName"] == "package-boundary"
+                && finding["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("@fixture/b"))
+        }),
+        "expected package boundary violation"
+    );
+}
+
+#[test]
+fn boundaries_dependency_kind_filters_match_dynamic_imports() {
+    let root = fixture_root("boundaries-dependency-kinds");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["ruleName"] == "no-dynamic-internal"
+    }));
+}
+
+#[test]
+fn boundaries_profile_filters_only_match_development_roots() {
+    let root = fixture_root("boundaries-profiles");
+    let dev_report = run_oxgraph(
+        &root,
+        &["--format", "json", "--profile", "development", "scan"],
+    );
+    let prod_report = run_oxgraph(
+        &root,
+        &["--format", "json", "--profile", "production", "scan"],
+    );
+
+    assert!(dev_report["findings"].as_array().is_some_and(|findings| findings.iter().any(|finding| {
+        finding["ruleName"] == "dev-cannot-hit-internal"
+    })));
+    assert!(!prod_report["findings"].as_array().is_some_and(|findings| findings.iter().any(|finding| {
+        finding["ruleName"] == "dev-cannot-hit-internal"
+    })));
+}
+
+#[test]
+fn boundaries_entrypoint_kind_filters_match_script_entrypoints() {
+    let root = fixture_root("boundaries-entrypoint-kinds");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+
+    assert!(report["findings"].as_array().is_some_and(|findings| findings.iter().any(|finding| {
+        finding["ruleName"] == "script-cannot-hit-internal"
+    })));
+}
+
+#[test]
+fn ownership_team_config_overrides_codeowners_when_explicitly_matched() {
+    let root = fixture_root("ownership-codeowners-precedence");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "ownership-cross-owner"
+            && finding["subject"] == "src/index.ts -> src/special.ts"
+    }));
+}
+
+#[test]
+fn unused_dependencies_split_production_and_development_usage() {
+    let root = fixture_root("unused-dependency-prod-dev");
+    let prod_report = run_oxgraph(
+        &root,
+        &["--format", "json", "--profile", "production", "scan"],
+    );
+    let dev_report = run_oxgraph(
+        &root,
+        &["--format", "json", "--profile", "development", "scan"],
+    );
+
+    assert!(!prod_report["findings"].as_array().is_some_and(|findings| findings.iter().any(|finding| {
+        finding["subject"] == "left-pad"
+    })));
+    assert!(prod_report["findings"].as_array().is_some_and(|findings| findings.iter().all(|finding| {
+        finding["subject"] != "vite"
+    })));
+    assert!(!dev_report["findings"].as_array().is_some_and(|findings| findings.iter().any(|finding| {
+        finding["subject"] == "vite"
+    })));
+}
+
+#[test]
+fn cycles_include_candidate_break_edges() {
+    let root = fixture_root("cycles-basic");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let cycle = findings
+        .iter()
+        .find(|finding| finding["code"] == "cycle")
+        .expect("cycle finding");
+    let evidence = cycle["evidence"].as_array().expect("evidence array");
+
+    assert!(evidence.iter().any(|item| {
+        item["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("Candidate break edges"))
     }));
 }

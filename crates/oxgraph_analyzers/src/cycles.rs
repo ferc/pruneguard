@@ -33,6 +33,10 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
             .unwrap_or_else(|| files.clone());
         let subject = chain.join(" -> ");
         let primary = files.first().cloned().unwrap_or_default();
+        let break_edges = chain
+            .windows(2)
+            .map(|window| format!("{} -> {}", window[0], window[1]))
+            .collect::<Vec<_>>();
         findings.push(make_finding(
             "cycle",
             finding_severity,
@@ -46,6 +50,14 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
                 file: Some(primary),
                 line: None,
                 description: format!("Cycle chain: {}", chain.join(" -> ")),
+            }, Evidence {
+                kind: "cycle".to_string(),
+                file: None,
+                line: None,
+                description: format!(
+                    "Candidate break edges: {}.",
+                    break_edges.join(", ")
+                ),
             }],
             Some("Break one edge in the cycle to restore acyclic reachability.".to_string()),
             None,

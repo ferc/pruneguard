@@ -169,6 +169,77 @@ fn warm_cache_reuses_file_facts() {
 }
 
 #[test]
+fn baseline_profile_mismatch_is_reported() {
+    let root = temp_dir("baseline-mismatch");
+    copy_tree(&fixture_root("unused-dependency-prod-dev"), &root);
+
+    let development = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--profile", "development", "scan"],
+    );
+    fs::write(
+        root.join("baseline.json"),
+        serde_json::to_vec_pretty(&development).expect("serialize baseline"),
+    )
+    .expect("baseline write");
+
+    let production = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--profile", "production", "scan"],
+    );
+    assert_eq!(
+        production["stats"]["baselineProfileMismatch"].as_bool(),
+        Some(true)
+    );
+}
+
+#[test]
+fn changed_since_tracks_renamed_files() {
+    let root = temp_dir("changed-since-rename");
+    copy_tree(&fixture_root("unused-file-basic"), &root);
+    init_git_repo(&root);
+
+    run(
+        &root,
+        &[
+            "git",
+            "mv",
+            "src/unused.ts",
+            "src/renamed-unused.ts",
+        ],
+    );
+    run(&root, &["git", "commit", "-am", "rename unused"]);
+
+    let report = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--changed-since", "HEAD~1", "scan"],
+    );
+    assert!(
+        report["stats"]["changedFiles"].as_u64().unwrap_or(0) >= 1,
+        "rename should contribute at least one changed path"
+    );
+}
+
+#[test]
+fn deleted_file_with_cache_recovery_keeps_scope_complete() {
+    let root = temp_dir("changed-since-delete-cache");
+    copy_tree(&fixture_root("unused-file-basic"), &root);
+    init_git_repo(&root);
+
+    let _ = run_oxgraph_json(&root, &["--format", "json", "scan"]);
+
+    fs::remove_file(root.join("src/unused.ts")).expect("delete file");
+    run(&root, &["git", "add", "-A"]);
+    run(&root, &["git", "commit", "-m", "delete unused"]);
+
+    let report = run_oxgraph_json(
+        &root,
+        &["--format", "json", "--changed-since", "HEAD~1", "scan"],
+    );
+    assert_eq!(report["stats"]["affectedScopeIncomplete"].as_bool(), Some(false));
+}
+
+#[test]
 fn scan_dot_outputs_graphviz() {
     let root = fixture_root("unused-file-basic");
     let output = run_oxgraph(&root, &["--format", "dot", "scan"]);

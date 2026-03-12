@@ -10,6 +10,7 @@ export type ScanOptions = {
   paths?: string[];
   profile?: Profile;
   changedSince?: string;
+  focus?: string;
   noCache?: boolean;
 };
 
@@ -18,6 +19,7 @@ export type ImpactOptions = {
   config?: string;
   target: string;
   profile?: Profile;
+  focus?: string;
 };
 
 export type ExplainOptions = {
@@ -25,6 +27,7 @@ export type ExplainOptions = {
   config?: string;
   query: string;
   profile?: Profile;
+  focus?: string;
 };
 
 export type DebugResolveOptions = {
@@ -113,6 +116,10 @@ export type AnalysisReport = {
     baselineProfileMismatch: boolean;
     suppressedFindings: number;
     newFindings: number;
+    focusApplied: boolean;
+    focusedFiles: number;
+    focusedFindings: number;
+    parityWarnings: string[];
     cacheHits: number;
     cacheMisses: number;
     cacheEntriesRead: number;
@@ -148,6 +155,7 @@ export function scan(options: ScanOptions = {}): AnalysisReport {
   return JSON.parse(native.scan_json(options)) as AnalysisReport;
 }
 
+/** @experimental */
 export function scanDot(options: ScanOptions = {}): string {
   return native.scan_dot_text(options);
 }
@@ -178,6 +186,7 @@ export function debugEntrypoints(
   return JSON.parse(native.debug_entrypoints_json(options)) as string[];
 }
 
+/** @experimental */
 export function migrateKnip(options: {
   cwd?: string;
   file?: string;
@@ -185,6 +194,7 @@ export function migrateKnip(options: {
   return JSON.parse(native.migrate_knip_json(options)) as MigrationOutput;
 }
 
+/** @experimental */
 export function migrateDepcruise(options: {
   cwd?: string;
   file?: string;

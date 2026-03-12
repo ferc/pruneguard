@@ -40,3 +40,23 @@ watch cmd="check":
 # Run benchmarks
 benchmark:
     cargo bench --workspace
+
+# Run one fixture scan smoke
+fixture CASE:
+    cargo test -p oxgraph scan_smoke -- --nocapture {{CASE}}
+
+# Run real-repo smoke on configured corpora
+smoke-repos:
+    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+
+# Run package smoke locally
+pack-smoke:
+    mkdir -p /tmp/oxgraph-pack
+    npm_config_cache=/tmp/oxgraph-npm-cache npm pack --prefix npm/oxgraph --pack-destination /tmp/oxgraph-pack
+
+# Alias for parity harness
+parity:
+    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+
+parity-repos:
+    cargo test -p oxgraph parity_smoke -- --ignored --nocapture

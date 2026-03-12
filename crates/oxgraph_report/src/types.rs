@@ -244,6 +244,7 @@ pub struct EntrypointInfo {
 /// Performance statistics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Stats {
     pub duration_ms: u64,
     pub files_parsed: usize,
@@ -262,6 +263,11 @@ pub struct Stats {
     pub baseline_profile_mismatch: bool,
     pub suppressed_findings: usize,
     pub new_findings: usize,
+    pub focus_applied: bool,
+    pub focused_files: usize,
+    pub focused_findings: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parity_warnings: Vec<String>,
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub cache_entries_read: usize,

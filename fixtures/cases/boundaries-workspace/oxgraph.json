@@ -1,0 +1,15 @@
+{
+  "workspaces": {
+    "roots": ["packages/*"]
+  },
+  "rules": {
+    "forbidden": [
+      {
+        "name": "workspace-boundary",
+        "severity": "error",
+        "from": { "workspace": ["@fixture/a"] },
+        "to": { "workspace": ["@fixture/b"] }
+      }
+    ]
+  }
+}

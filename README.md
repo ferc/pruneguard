@@ -18,6 +18,9 @@ npm install oxgraph
 # Full scan
 oxgraph scan
 
+# Focus findings to a slice of the repo
+oxgraph --focus "src/**" scan
+
 # With config
 oxgraph --config oxgraph.json scan
 
@@ -62,7 +65,18 @@ Requires: Rust (stable), Node.js, pnpm, just
 just ready    # fmt + check + test + lint
 just build    # release binary
 just run scan # run against current directory
+just parity   # opt-in real-repo smoke
 ```
+
+## Experimental JS Exports
+
+The npm package currently exposes these additional helpers as experimental:
+
+- `scanDot`
+- `migrateKnip`
+- `migrateDepcruise`
+
+They are usable now, but they are not yet treated as fully stable semver surface.
 
 ## License
 

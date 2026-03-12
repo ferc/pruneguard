@@ -18,14 +18,18 @@ pub fn analyze(
         return Vec::new();
     };
 
-    let reachable = build.module_graph.reachable_file_ids(profile);
-    let mut used_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    let reachable_prod = build
+        .module_graph
+        .reachable_file_ids(EntrypointProfile::Production);
+    let reachable_dev = build
+        .module_graph
+        .reachable_file_ids(EntrypointProfile::Development);
+    let mut used_prod_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    let mut used_dev_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
 
     for extracted_file in &build.files {
         if extracted_file.file.role.excluded_from_dead_code_by_default()
             || is_docs_path(&extracted_file.file.relative_path)
-            || (profile == EntrypointProfile::Production
-                && extracted_file.file.role.is_development_only())
         {
             continue;
         }
@@ -40,13 +44,26 @@ pub fn analyze(
             continue;
         };
 
-        if !reachable.contains(&file_id) {
+        let is_prod_reachable = reachable_prod.contains(&file_id)
+            && !extracted_file.file.role.is_development_only();
+        let is_dev_reachable = reachable_dev.contains(&file_id);
+        if !is_prod_reachable && !is_dev_reachable {
             continue;
         }
 
-        let used = used_by_workspace.entry(workspace.clone()).or_default();
         for dependency in &extracted_file.external_dependencies {
-            used.insert(dependency.clone());
+            if is_prod_reachable {
+                used_prod_by_workspace
+                    .entry(workspace.clone())
+                    .or_default()
+                    .insert(dependency.clone());
+            }
+            if is_dev_reachable {
+                used_dev_by_workspace
+                    .entry(workspace.clone())
+                    .or_default()
+                    .insert(dependency.clone());
+            }
         }
     }
 
@@ -58,7 +75,8 @@ pub fn analyze(
             .name
             .clone()
             .unwrap_or_else(|| workspace_name.clone());
-        let used = used_by_workspace.get(&workspace_name);
+        let used_prod = used_prod_by_workspace.get(&workspace_name);
+        let used_dev = used_dev_by_workspace.get(&workspace_name);
 
         let manifest_path = workspace
             .root
@@ -68,8 +86,10 @@ pub fn analyze(
             .to_string_lossy()
             .to_string();
 
-        for (dependency, dependency_kind) in declared_dependencies(&workspace.manifest, profile) {
-            if used.is_some_and(|deps| deps.contains(dependency)) {
+        for (dependency, dependency_kind, used) in
+            declared_dependencies(&workspace.manifest, profile, used_prod, used_dev)
+        {
+            if used {
                 continue;
             }
 
@@ -102,38 +122,48 @@ pub fn analyze(
     findings
 }
 
-fn declared_dependencies(
-    manifest: &oxgraph_manifest::PackageManifest,
+fn declared_dependencies<'a>(
+    manifest: &'a oxgraph_manifest::PackageManifest,
     profile: EntrypointProfile,
-) -> Vec<(&str, &'static str)> {
-    let mut dependencies = manifest
-        .dependencies
-        .iter()
-        .flat_map(|deps| deps.keys().map(|name| (name.as_str(), "dependency")))
-        .chain(
-            manifest
-                .peer_dependencies
-                .iter()
-                .flat_map(|deps| deps.keys().map(|name| (name.as_str(), "peer dependency"))),
-        )
-        .chain(
-            manifest
-                .optional_dependencies
-                .iter()
-                .flat_map(|deps| deps.keys().map(|name| (name.as_str(), "optional dependency"))),
-        )
-        .collect::<Vec<_>>();
+    used_prod: Option<&'a FxHashSet<String>>,
+    used_dev: Option<&'a FxHashSet<String>>,
+) -> Vec<(&'a str, &'static str, bool)> {
+    let prod_labels = manifest.dependencies.iter().flat_map(|deps| {
+        deps.keys().map(|name| (name.as_str(), "dependency"))
+    });
+    let peer_labels = manifest.peer_dependencies.iter().flat_map(|deps| {
+        deps.keys().map(|name| (name.as_str(), "peer dependency"))
+    });
+    let optional_labels = manifest.optional_dependencies.iter().flat_map(|deps| {
+        deps.keys().map(|name| (name.as_str(), "optional dependency"))
+    });
+    let dev_labels = manifest.dev_dependencies.iter().flat_map(|deps| {
+        deps.keys().map(|name| (name.as_str(), "dev dependency"))
+    });
+
+    let mut dependencies = Vec::new();
+    for (dependency, kind) in prod_labels.chain(peer_labels).chain(optional_labels) {
+        let used = match profile {
+            EntrypointProfile::Production => used_prod.is_some_and(|deps| deps.contains(dependency)),
+            EntrypointProfile::Development | EntrypointProfile::Both => {
+                used_prod.is_some_and(|deps| deps.contains(dependency))
+                    || used_dev.is_some_and(|deps| deps.contains(dependency))
+            }
+        };
+        dependencies.push((dependency, kind, used));
+    }
 
     if profile != EntrypointProfile::Production {
-        dependencies.extend(
-            manifest
-                .dev_dependencies
-                .iter()
-                .flat_map(|deps| deps.keys().map(|name| (name.as_str(), "dev dependency"))),
-        );
+        for (dependency, kind) in dev_labels {
+            dependencies.push((
+                dependency,
+                kind,
+                used_dev.is_some_and(|deps| deps.contains(dependency)),
+            ));
+        }
     }
 
     dependencies.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(right.1)));
-    dependencies.dedup();
+    dependencies.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
     dependencies
 }

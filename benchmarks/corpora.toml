@@ -1,0 +1,26 @@
+[[corpus]]
+name = "knip"
+path = "/Users/fcarril/projects/side-projects/oxc-architecture/knip"
+expected_commit = "local-reference"
+scan_paths = ["."]
+min_files = 500
+min_packages = 1
+representative_targets = ["packages/knip/src/ConfigurationChief.ts"]
+
+[[corpus]]
+name = "dependency-cruiser"
+path = "/Users/fcarril/projects/side-projects/oxc-architecture/dependency-cruiser"
+expected_commit = "local-reference"
+scan_paths = ["."]
+min_files = 300
+min_packages = 1
+representative_targets = ["src/graph-utl/rule-set.mjs"]
+
+[[corpus]]
+name = "oxc"
+path = "/Users/fcarril/projects/side-projects/oxc-architecture/oxc"
+expected_commit = "local-reference"
+scan_paths = ["."]
+min_files = 1000
+min_packages = 5
+representative_targets = ["apps/oxlint/src/main.rs"]

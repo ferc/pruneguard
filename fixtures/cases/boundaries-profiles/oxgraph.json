@@ -1,0 +1,22 @@
+{
+  "analysis": {
+    "unusedExports": "off",
+    "unusedFiles": "off",
+    "unusedDependencies": "off",
+    "unusedPackages": "off",
+    "cycles": "off",
+    "boundaries": "error",
+    "ownership": "off",
+    "impact": "off"
+  },
+  "rules": {
+    "forbidden": [
+      {
+        "name": "dev-cannot-hit-internal",
+        "severity": "error",
+        "from": { "path": ["src/dev.ts"], "profiles": ["development"] },
+        "to": { "path": ["src/internal/**"] }
+      }
+    ]
+  }
+}

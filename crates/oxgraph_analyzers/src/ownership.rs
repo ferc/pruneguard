@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use oxgraph_config::{AnalysisSeverity, OwnershipConfig};
 use oxgraph_fs::is_docs_path;
 use oxgraph_graph::GraphBuildResult;
-use oxgraph_report::{Evidence, Finding, FindingCategory};
+use oxgraph_report::{Evidence, Finding, FindingCategory, FindingSeverity};
 
 use crate::{make_finding, severity};
 
@@ -34,7 +34,7 @@ pub fn analyze(
                 owner_for_file(
                     build,
                     &team_matchers,
-                    &file.file.relative_path.to_string_lossy(),
+                    file,
                 ),
             )
         })
@@ -72,6 +72,7 @@ pub fn analyze(
     }
 
     let mut seen_cross_edges = FxHashSet::default();
+    let mut hotspots = FxHashMap::<String, (FxHashSet<String>, Option<String>, Option<String>, usize)>::default();
     for extracted_file in &build.files {
         if should_skip_file(extracted_file.file.role, &extracted_file.file.relative_path) {
             continue;
@@ -110,6 +111,17 @@ pub fn analyze(
                 continue;
             }
 
+            let entry = hotspots.entry(target.file.relative_path.to_string_lossy().to_string()).or_insert_with(|| {
+                (
+                    FxHashSet::default(),
+                    target.file.workspace.clone(),
+                    target.file.package.clone(),
+                    0,
+                )
+            });
+            entry.0.insert(source_owner.clone());
+            entry.3 += 1;
+
             findings.push(make_finding(
                 "ownership-cross-owner",
                 finding_severity,
@@ -143,41 +155,95 @@ pub fn analyze(
         }
     }
 
+    let mut hotspot_paths = hotspots.keys().cloned().collect::<Vec<_>>();
+    hotspot_paths.sort();
+    for relative_path in hotspot_paths {
+        let Some((owners_seen, workspace, package, edge_count)) = hotspots.remove(&relative_path) else {
+            continue;
+        };
+        if owners_seen.len() < 2 {
+            continue;
+        }
+
+        findings.push(make_finding(
+            "ownership-hotspot",
+            FindingSeverity::Info,
+            FindingCategory::OwnershipViolation,
+            &relative_path,
+            workspace,
+            package,
+            format!(
+                "File `{relative_path}` is a shared ownership hotspot with {edge_count} cross-owner incoming edges."
+            ),
+            vec![Evidence {
+                kind: "ownership".to_string(),
+                file: Some(relative_path.clone()),
+                line: None,
+                description: format!(
+                    "Cross-owner callers: {}.",
+                    owners_seen.into_iter().collect::<Vec<_>>().join(", ")
+                ),
+            }],
+            Some("Consider splitting the file, narrowing dependencies, or assigning shared ownership explicitly.".to_string()),
+            None,
+        ));
+    }
+
     findings
 }
 
-fn compile_team_matchers(
-    config: &OwnershipConfig,
-) -> Vec<(String, GlobSet)> {
+struct TeamMatcher {
+    team: String,
+    path_matcher: Option<GlobSet>,
+    packages: FxHashSet<String>,
+}
+
+fn compile_team_matchers(config: &OwnershipConfig) -> Vec<TeamMatcher> {
     let mut matchers = config
         .teams
         .as_ref()
         .map(|teams| {
             teams
                 .iter()
-                .filter_map(|(team, config)| compile_globset(&config.paths).map(|matcher| (team.clone(), matcher)))
+                .map(|(team, config)| TeamMatcher {
+                    team: team.clone(),
+                    path_matcher: compile_globset(&config.paths),
+                    packages: config.packages.iter().cloned().collect(),
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    matchers.sort_by(|left, right| left.0.cmp(&right.0));
+    matchers.sort_by(|left, right| left.team.cmp(&right.team));
     matchers
 }
 
 fn owner_for_file(
     build: &GraphBuildResult,
-    team_matchers: &[(String, GlobSet)],
-    relative_path: &str,
+    team_matchers: &[TeamMatcher],
+    file: &oxgraph_extract::ExtractedFile,
 ) -> Option<String> {
+    let relative_path = file.file.relative_path.to_string_lossy();
+    if let Some(team) = team_matchers.iter().find(|matcher| {
+        matcher
+            .path_matcher
+            .as_ref()
+            .is_some_and(|glob| glob.is_match(relative_path.as_ref()))
+            || file
+                .file
+                .package
+                .as_ref()
+                .is_some_and(|package| matcher.packages.contains(package))
+    }) {
+        return Some(team.team.clone());
+    }
+
     if let Some(codeowners) = &build.discovery.codeowners
-        && let Some(owners) = match_codeowners(codeowners, relative_path)
+        && let Some(owners) = match_codeowners(codeowners, relative_path.as_ref())
     {
         return Some(owners.join(" "));
     }
 
-    team_matchers
-        .iter()
-        .find(|(_, matcher)| matcher.is_match(relative_path))
-        .map(|(team, _)| team.clone())
+    None
 }
 
 fn should_skip_file(role: oxgraph_fs::FileRole, relative_path: &Path) -> bool {

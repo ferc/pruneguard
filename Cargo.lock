@@ -1091,6 +1091,7 @@ name = "oxgraph"
 version = "0.1.0"
 dependencies = [
  "bpaf",
+ "globset",
  "insta",
  "miette",
  "napi",
@@ -1128,6 +1129,7 @@ dependencies = [
  "oxgraph_config",
  "oxgraph_discovery",
  "oxgraph_entrypoints",
+ "oxgraph_extract",
  "oxgraph_fs",
  "oxgraph_graph",
  "oxgraph_manifest",
@@ -1312,8 +1314,11 @@ dependencies = [
  "globset",
  "miette",
  "oxgraph_config",
+ "oxgraph_entrypoints",
  "oxgraph_graph",
  "oxgraph_report",
+ "oxgraph_resolver",
+ "petgraph",
  "rustc-hash",
  "serde",
  "tracing",

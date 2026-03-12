@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use miette::IntoDiagnostic;
 use oxgraph_cache::AnalysisCache;
 use oxgraph_config::OxgraphConfig;
@@ -22,6 +23,7 @@ mod migrate;
 pub struct ScanOptions {
     pub config_dir: Option<PathBuf>,
     pub changed_since: Option<String>,
+    pub focus: Option<String>,
     pub no_cache: bool,
 }
 
@@ -45,6 +47,21 @@ struct AffectedScope {
     packages: BTreeSet<String>,
     entrypoints: BTreeSet<String>,
     incomplete: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ImpactOptions {
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExplainOptions {
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FocusFilter {
+    matcher: GlobSet,
 }
 
 /// Run a full scan and return the analysis report.
@@ -96,6 +113,10 @@ pub fn scan_with_options(
         apply_baseline(&mut report, &baseline);
     }
 
+    if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
+        apply_focus_to_scan_report(&mut report, &build, &focus);
+    }
+
     refresh_summary(&mut report);
 
     Ok(ScanExecution { report, build })
@@ -107,6 +128,16 @@ pub fn impact(
     config: &OxgraphConfig,
     target: &str,
     profile: EntrypointProfile,
+) -> miette::Result<ImpactReport> {
+    impact_with_options(cwd, config, target, profile, &ImpactOptions::default())
+}
+
+pub fn impact_with_options(
+    cwd: &Path,
+    config: &OxgraphConfig,
+    target: &str,
+    profile: EntrypointProfile,
+    options: &ImpactOptions,
 ) -> miette::Result<ImpactReport> {
     let build = build_graph(cwd, config, &[], profile)?;
     let target_file = build
@@ -128,7 +159,7 @@ pub fn impact(
         })
         .unwrap_or_default();
 
-    Ok(ImpactReport {
+    let mut report = ImpactReport {
         target: target_file.file.relative_path.to_string_lossy().to_string(),
         affected_entrypoints: analysis.affected_entrypoints,
         affected_packages: analysis.affected_packages,
@@ -143,7 +174,13 @@ pub fn impact(
                 description: format!("One entrypoint path to the target: {}", proofs.join(" -> ")),
             }]
         },
-    })
+    };
+
+    if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
+        apply_focus_to_impact_report(&mut report, &build, &focus);
+    }
+
+    Ok(report)
 }
 
 /// Explain a finding or path.
@@ -152,6 +189,16 @@ pub fn explain(
     config: &OxgraphConfig,
     query: &str,
     profile: EntrypointProfile,
+) -> miette::Result<ExplainReport> {
+    explain_with_options(cwd, config, query, profile, &ExplainOptions::default())
+}
+
+pub fn explain_with_options(
+    cwd: &Path,
+    config: &OxgraphConfig,
+    query: &str,
+    profile: EntrypointProfile,
+    options: &ExplainOptions,
 ) -> miette::Result<ExplainReport> {
     let build = build_graph(cwd, config, &[], profile)?;
     let findings = oxgraph_analyzers::run_analyzers(&build, config, profile);
@@ -187,7 +234,14 @@ pub fn explain(
         .into_iter()
         .collect::<Vec<_>>();
 
-    Ok(ExplainReport { query: query.to_string(), matched_node, proofs, related_findings })
+    let mut report =
+        ExplainReport { query: query.to_string(), matched_node, proofs, related_findings };
+
+    if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
+        apply_focus_to_explain_report(&mut report, &build, &focus);
+    }
+
+    Ok(report)
 }
 
 /// Debug: list all detected entrypoints.
@@ -310,6 +364,79 @@ fn apply_changed_scope(
         .retain(|finding| finding_in_affected_scope(finding, &affected));
 }
 
+fn apply_focus_to_scan_report(
+    report: &mut AnalysisReport,
+    build: &GraphBuildResult,
+    focus: &FocusFilter,
+) {
+    report.stats.focus_applied = true;
+    report.stats.focused_files = report
+        .inventories
+        .files
+        .iter()
+        .filter(|file| focus_matches_path(focus, &file.path))
+        .count();
+    report
+        .findings
+        .retain(|finding| finding_matches_focus(focus, finding, build));
+    report.stats.focused_findings = report.findings.len();
+}
+
+fn apply_focus_to_impact_report(
+    report: &mut ImpactReport,
+    build: &GraphBuildResult,
+    focus: &FocusFilter,
+) {
+    report.affected_files.retain(|path| focus_matches_path(focus, path));
+
+    let focused_packages = report
+        .affected_files
+        .iter()
+        .filter_map(|path| build.find_file(path))
+        .filter_map(|file| file.file.package.clone())
+        .collect::<BTreeSet<_>>();
+    report
+        .affected_packages
+        .retain(|package| focused_packages.contains(package));
+
+    report.affected_entrypoints.retain(|path| {
+        let relative = normalize_focus_token(
+            Path::new(path)
+                .strip_prefix(&build.discovery.project_root)
+                .unwrap_or_else(|_| Path::new(path))
+                .to_string_lossy()
+                .as_ref(),
+        );
+        focus_matches_path(focus, &relative)
+    });
+
+    report.evidence.retain(|evidence| {
+        evidence
+            .file
+            .as_ref()
+            .is_some_and(|file| focus_matches_path(focus, &normalize_focus_token(file)))
+            || evidence
+                .description
+                .split(" -> ")
+                .any(|segment| focus_matches_path(focus, &normalize_focus_token(segment)))
+    });
+}
+
+fn apply_focus_to_explain_report(
+    report: &mut ExplainReport,
+    build: &GraphBuildResult,
+    focus: &FocusFilter,
+) {
+    report
+        .related_findings
+        .retain(|finding| finding_matches_focus(focus, finding, build));
+    report.proofs = report
+        .proofs
+        .iter()
+        .filter_map(|proof| filter_proof_node(proof, focus))
+        .collect();
+}
+
 fn compute_affected_scope(
     build: &GraphBuildResult,
     changed_scope: &ChangedScope,
@@ -414,6 +541,44 @@ fn finding_in_affected_scope(finding: &Finding, affected: &AffectedScope) -> boo
     finding.package.as_ref().is_some_and(|package| affected.packages.contains(package))
 }
 
+fn finding_matches_focus(
+    focus: &FocusFilter,
+    finding: &Finding,
+    build: &GraphBuildResult,
+) -> bool {
+    let subject_tokens = subject_tokens(&finding.subject);
+    if subject_tokens
+        .iter()
+        .any(|token| focus_matches_path(focus, token))
+    {
+        return true;
+    }
+
+    if finding.evidence.iter().any(|evidence| {
+        evidence
+            .file
+            .as_ref()
+            .map(|file| normalize_focus_token(file))
+            .is_some_and(|file| focus_matches_path(focus, &file))
+    }) {
+        return true;
+    }
+
+    if matches!(finding.category, oxgraph_report::FindingCategory::UnusedPackage)
+        && let Some(package) = &finding.package
+    {
+        return build.files.iter().any(|file| {
+            file.file.package.as_ref() == Some(package)
+                && focus_matches_path(
+                    focus,
+                    &file.file.relative_path.to_string_lossy(),
+                )
+        });
+    }
+
+    false
+}
+
 fn subject_tokens(subject: &str) -> Vec<String> {
     if subject.contains(" -> ") {
         return subject
@@ -428,13 +593,53 @@ fn subject_tokens(subject: &str) -> Vec<String> {
 }
 
 fn normalize_subject_token(subject: &str) -> String {
+    normalize_focus_token(
+        subject
+            .split('#')
+            .next()
+            .unwrap_or(subject)
+            .trim()
+            .trim_start_matches("./"),
+    )
+}
+
+fn normalize_focus_token(subject: &str) -> String {
     subject
-        .split('#')
-        .next()
-        .unwrap_or(subject)
         .trim()
         .trim_start_matches("./")
+        .trim_start_matches('/')
         .to_string()
+}
+
+fn compile_focus_filter(pattern: Option<&str>) -> miette::Result<Option<FocusFilter>> {
+    let Some(pattern) = pattern.filter(|pattern| !pattern.trim().is_empty()) else {
+        return Ok(None);
+    };
+
+    let mut builder = GlobSetBuilder::new();
+    builder.add(Glob::new(pattern).map_err(|err| miette::miette!("{err}"))?);
+    let matcher = builder.build().map_err(|err| miette::miette!("{err}"))?;
+    Ok(Some(FocusFilter { matcher }))
+}
+
+fn focus_matches_path(focus: &FocusFilter, path: &str) -> bool {
+    focus.matcher.is_match(normalize_focus_token(path))
+}
+
+fn filter_proof_node(node: &ProofNode, focus: &FocusFilter) -> Option<ProofNode> {
+    let children = node
+        .children
+        .iter()
+        .filter_map(|child| filter_proof_node(child, focus))
+        .collect::<Vec<_>>();
+    if focus_matches_path(focus, &node.node) || !children.is_empty() {
+        return Some(ProofNode {
+            node: node.node.clone(),
+            relationship: node.relationship.clone(),
+            children,
+        });
+    }
+    None
 }
 
 fn recover_deleted_paths(cache: Option<&AnalysisCache>, changed_scope: &mut ChangedScope) {
@@ -605,6 +810,7 @@ pub struct JsScanOptions {
     pub paths: Option<Vec<String>>,
     pub profile: Option<String>,
     pub changed_since: Option<String>,
+    pub focus: Option<String>,
     pub no_cache: Option<bool>,
 }
 
@@ -615,6 +821,7 @@ pub struct JsImpactOptions {
     pub config: Option<String>,
     pub target: String,
     pub profile: Option<String>,
+    pub focus: Option<String>,
 }
 
 #[cfg(feature = "napi")]
@@ -624,6 +831,7 @@ pub struct JsExplainOptions {
     pub config: Option<String>,
     pub query: String,
     pub profile: Option<String>,
+    pub focus: Option<String>,
 }
 
 #[cfg(feature = "napi")]
@@ -701,6 +909,7 @@ pub fn scan_json(options: JsScanOptions) -> napi::Result<String> {
         &ScanOptions {
             config_dir: resolve_config_dir(&cwd, options.config.as_deref()),
             changed_since: options.changed_since,
+            focus: options.focus,
             no_cache: options.no_cache.unwrap_or(false),
         },
     )
@@ -730,6 +939,7 @@ pub fn scan_dot_text(options: JsScanOptions) -> napi::Result<String> {
         &ScanOptions {
             config_dir: resolve_config_dir(&cwd, options.config.as_deref()),
             changed_since: options.changed_since,
+            focus: options.focus,
             no_cache: options.no_cache.unwrap_or(false),
         },
     )
@@ -746,11 +956,14 @@ pub fn impact_json(options: JsImpactOptions) -> napi::Result<String> {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let config = load_config_for_js(&cwd, options.config.as_deref())?;
-    let report = impact(
+    let report = impact_with_options(
         &cwd,
         &config,
         &options.target,
         parse_profile(options.profile.as_deref()),
+        &ImpactOptions {
+            focus: options.focus,
+        },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;
     serde_json::to_string(&report).map_err(|err| napi::Error::from_reason(err.to_string()))
@@ -765,11 +978,14 @@ pub fn explain_json(options: JsExplainOptions) -> napi::Result<String> {
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let config = load_config_for_js(&cwd, options.config.as_deref())?;
-    let report = explain(
+    let report = explain_with_options(
         &cwd,
         &config,
         &options.query,
         parse_profile(options.profile.as_deref()),
+        &ExplainOptions {
+            focus: options.focus,
+        },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;
     serde_json::to_string(&report).map_err(|err| napi::Error::from_reason(err.to_string()))

@@ -1,0 +1,15 @@
+{
+  "name": "entrypoints-package-fields",
+  "private": true,
+  "main": "src/main.ts",
+  "module": "src/module.ts",
+  "types": "src/types.d.ts",
+  "bin": {
+    "entrypoints-package-fields": "src/cli.ts"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/public.ts"
+    }
+  }
+}

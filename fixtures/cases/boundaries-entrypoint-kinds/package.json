@@ -1,0 +1,8 @@
+{
+  "name": "boundaries-entrypoint-kinds",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "node scripts/dev.ts"
+  }
+}

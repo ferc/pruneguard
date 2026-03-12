@@ -1,0 +1,22 @@
+{
+  "analysis": {
+    "unusedExports": "off",
+    "unusedFiles": "off",
+    "unusedDependencies": "off",
+    "unusedPackages": "off",
+    "cycles": "off",
+    "boundaries": "error",
+    "ownership": "off",
+    "impact": "off"
+  },
+  "rules": {
+    "forbidden": [
+      {
+        "name": "script-cannot-hit-internal",
+        "severity": "error",
+        "from": { "path": ["scripts/dev.ts"], "entrypointKinds": ["package-script"] },
+        "to": { "path": ["src/internal/**"] }
+      }
+    ]
+  }
+}

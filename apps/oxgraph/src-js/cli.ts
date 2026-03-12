@@ -25,6 +25,7 @@ type Parsed = {
   format: OutputFormat;
   profile: Profile;
   changedSince?: string;
+  focus?: string;
   severity: Severity;
   noCache: boolean;
   maxFindings?: number;
@@ -54,6 +55,7 @@ function run(parsed: Parsed): void {
             paths: rest,
             profile: parsed.profile,
             changedSince: parsed.changedSince,
+            focus: parsed.focus,
             noCache: parsed.noCache,
           }),
         );
@@ -65,6 +67,7 @@ function run(parsed: Parsed): void {
         paths: rest,
         profile: parsed.profile,
         changedSince: parsed.changedSince,
+        focus: parsed.focus,
         noCache: parsed.noCache,
       });
       const findings = filterFindings(report.findings, parsed.severity, parsed.maxFindings);
@@ -94,7 +97,13 @@ function run(parsed: Parsed): void {
         throw new Error("impact requires a target");
       }
       render(
-        impact({ cwd: process.cwd(), config: parsed.config, target, profile: parsed.profile }),
+        impact({
+          cwd: process.cwd(),
+          config: parsed.config,
+          target,
+          profile: parsed.profile,
+          focus: parsed.focus,
+        }),
         parsed.format,
       );
       return;
@@ -108,7 +117,13 @@ function run(parsed: Parsed): void {
         throw new Error("explain requires a query");
       }
       render(
-        explain({ cwd: process.cwd(), config: parsed.config, query, profile: parsed.profile }),
+        explain({
+          cwd: process.cwd(),
+          config: parsed.config,
+          query,
+          profile: parsed.profile,
+          focus: parsed.focus,
+        }),
         parsed.format,
       );
       return;
@@ -187,6 +202,7 @@ function run(parsed: Parsed): void {
         paths: [command, ...rest],
         profile: parsed.profile,
         changedSince: parsed.changedSince,
+        focus: parsed.focus,
         noCache: parsed.noCache,
       });
       render(report, parsed.format);
@@ -200,6 +216,7 @@ function parseArgs(argv: string[]): Parsed {
   let format: OutputFormat = "text";
   let profile: Profile = "all";
   let changedSince: string | undefined;
+  let focus: string | undefined;
   let severity: Severity = "warn";
   let noCache = false;
   let maxFindings: number | undefined;
@@ -227,6 +244,11 @@ function parseArgs(argv: string[]): Parsed {
       index += 1;
       continue;
     }
+    if (value === "--focus") {
+      focus = argv[index + 1];
+      index += 1;
+      continue;
+    }
     if (value === "--severity") {
       severity = (argv[index + 1] as Severity | undefined) ?? "warn";
       index += 1;
@@ -242,12 +264,22 @@ function parseArgs(argv: string[]): Parsed {
       continue;
     }
     if (value === "--help" || value === "-h") {
-      return { config, format, profile, changedSince, severity, noCache, maxFindings, command: ["help"] };
+      return {
+        config,
+        format,
+        profile,
+        changedSince,
+        focus,
+        severity,
+        noCache,
+        maxFindings,
+        command: ["help"],
+      };
     }
     command.push(value);
   }
 
-  return { config, format, profile, changedSince, severity, noCache, maxFindings, command };
+  return { config, format, profile, changedSince, focus, severity, noCache, maxFindings, command };
 }
 
 function filterFindings<T extends { severity: Severity }>(
@@ -309,12 +341,21 @@ function render(report: unknown, format: OutputFormat): void {
   const asRecord = report as Record<string, unknown>;
   if ("summary" in asRecord && "findings" in asRecord) {
     const summary = asRecord.summary as Record<string, number>;
+    const stats = (asRecord.stats as Record<string, unknown>) ?? {};
     const findings = (asRecord.findings as Array<Record<string, unknown>>) ?? [];
     const entrypoints = ((asRecord.entrypoints as unknown[]) ?? []).length;
+    console.log("repo summary");
     console.log(`files: ${summary.totalFiles ?? 0}`);
     console.log(`packages: ${summary.totalPackages ?? 0}`);
     console.log(`entrypoints: ${entrypoints}`);
     console.log(`findings: ${findings.length}`);
+    if (stats.focusApplied === true) {
+      console.log("");
+      console.log("focus summary");
+      console.log(`focused files: ${stats.focusedFiles ?? 0}`);
+      console.log(`focused findings: ${stats.focusedFindings ?? 0}`);
+      console.log("findings were filtered after full analysis.");
+    }
     if (findings.length > 0) {
       console.log("");
       for (const finding of findings) {
@@ -324,6 +365,24 @@ function render(report: unknown, format: OutputFormat): void {
         console.log(`  ${finding.message ?? ""}`);
       }
     }
+    return;
+  }
+
+  if ("target" in asRecord && "affectedFiles" in asRecord) {
+    console.log(`impact target: ${String(asRecord.target ?? "")}`);
+    console.log(`affected entrypoints: ${((asRecord.affectedEntrypoints as unknown[]) ?? []).length}`);
+    console.log(`affected packages: ${((asRecord.affectedPackages as unknown[]) ?? []).length}`);
+    console.log(`affected files: ${((asRecord.affectedFiles as unknown[]) ?? []).length}`);
+    return;
+  }
+
+  if ("query" in asRecord && "proofs" in asRecord) {
+    console.log(`query: ${String(asRecord.query ?? "")}`);
+    console.log(`matched node: ${String(asRecord.matchedNode ?? "none")}`);
+    console.log(`proofs: ${((asRecord.proofs as unknown[]) ?? []).length}`);
+    console.log(
+      `related findings: ${((asRecord.relatedFindings as unknown[]) ?? []).length}`,
+    );
     return;
   }
 
@@ -374,6 +433,7 @@ function printHelp(): void {
   console.log("Usage:");
   console.log("  oxgraph [paths...]");
   console.log("  oxgraph scan [paths...]");
+  console.log("  oxgraph --focus src/** scan");
   console.log("  oxgraph impact <target>");
   console.log("  oxgraph explain <query>");
   console.log("  oxgraph init");

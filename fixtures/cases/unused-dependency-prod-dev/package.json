@@ -1,0 +1,14 @@
+{
+  "name": "unused-dependency-prod-dev",
+  "private": true,
+  "dependencies": {
+    "left-pad": "1.0.0"
+  },
+  "devDependencies": {
+    "vite": "1.0.0"
+  },
+  "scripts": {
+    "build": "node src/index.ts",
+    "dev": "node src/dev.ts"
+  }
+}

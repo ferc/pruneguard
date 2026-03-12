@@ -19,9 +19,12 @@ workspace = true
 oxgraph_graph = { workspace = true }
 oxgraph_config = { workspace = true }
 oxgraph_report = { workspace = true }
+oxgraph_entrypoints = { workspace = true }
+oxgraph_resolver = { workspace = true }
 
 globset = { workspace = true }
 miette = { workspace = true }
+petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }

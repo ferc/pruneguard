@@ -373,6 +373,9 @@
         "filesDiscovered",
         "filesParsed",
         "filesResolved",
+        "focusApplied",
+        "focusedFiles",
+        "focusedFindings",
         "graphEdges",
         "graphNodes",
         "newFindings",
@@ -459,6 +462,19 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "focusApplied": {
+          "type": "boolean"
+        },
+        "focusedFiles": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "focusedFindings": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "graphEdges": {
           "type": "integer",
           "format": "uint",
@@ -473,6 +489,12 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "parityWarnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "suppressedFindings": {
           "type": "integer",

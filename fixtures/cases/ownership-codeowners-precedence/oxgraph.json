@@ -1,0 +1,20 @@
+{
+  "analysis": {
+    "unusedExports": "off",
+    "unusedFiles": "off",
+    "unusedDependencies": "off",
+    "unusedPackages": "off",
+    "cycles": "off",
+    "boundaries": "off",
+    "ownership": "error",
+    "impact": "off"
+  },
+  "ownership": {
+    "importCodeowners": true,
+    "teams": {
+      "@team-special": {
+        "paths": ["src/special.ts"]
+      }
+    }
+  }
+}

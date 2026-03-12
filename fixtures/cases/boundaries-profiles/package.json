@@ -1,0 +1,8 @@
+{
+  "name": "boundaries-profiles",
+  "private": true,
+  "scripts": {
+    "build": "node src/build.ts",
+    "dev": "node src/dev.ts"
+  }
+}

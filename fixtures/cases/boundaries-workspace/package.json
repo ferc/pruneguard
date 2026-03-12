@@ -1,0 +1,5 @@
+{
+  "name": "boundaries-workspace-root",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

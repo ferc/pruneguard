@@ -45,6 +45,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                 &oxgraph::ScanOptions {
                     config_dir: Some(config_cwd),
                     changed_since: options.global.changed_since.clone(),
+                    focus: options.global.focus.clone(),
                     no_cache: options.global.no_cache,
                 },
             )?;
@@ -55,9 +56,20 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             if matches!(options.global.format, cli::OutputFormat::Dot) {
                 miette::bail!("dot output is only supported for scan in this phase");
             }
-            let report =
-                oxgraph::impact(&cwd, &config, &target, profile)?;
-            print_report(&report, options.global.format)?;
+            let report = oxgraph::impact_with_options(
+                &cwd,
+                &config,
+                &target,
+                profile,
+                &oxgraph::ImpactOptions {
+                    focus: options.global.focus.clone(),
+                },
+            )?;
+            if matches!(options.global.format, cli::OutputFormat::Text) {
+                print_impact_text(&report, options.global.focus.as_deref());
+            } else {
+                print_report(&report, options.global.format)?;
+            }
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Explain { query } => {
@@ -65,9 +77,20 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             if matches!(options.global.format, cli::OutputFormat::Dot) {
                 miette::bail!("dot output is only supported for scan in this phase");
             }
-            let report =
-                oxgraph::explain(&cwd, &config, &query, profile)?;
-            print_report(&report, options.global.format)?;
+            let report = oxgraph::explain_with_options(
+                &cwd,
+                &config,
+                &query,
+                profile,
+                &oxgraph::ExplainOptions {
+                    focus: options.global.focus.clone(),
+                },
+            )?;
+            if matches!(options.global.format, cli::OutputFormat::Text) {
+                print_explain_text(&report, options.global.focus.as_deref());
+            } else {
+                print_report(&report, options.global.format)?;
+            }
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Init => {
@@ -282,6 +305,7 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                 .and_then(|summary| summary.get("totalPackages"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
+            println!("repo summary");
             println!("files: {total_files}");
             println!("packages: {total_packages}");
             println!("entrypoints: {entrypoints}");
@@ -297,6 +321,25 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     .unwrap_or(0);
                 println!("unresolved specifiers: {unresolved}");
                 println!("duration ms: {duration}");
+                let focus_applied = stats
+                    .get("focusApplied")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                if focus_applied {
+                    let focused_files = stats
+                        .get("focusedFiles")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let focused_findings = stats
+                        .get("focusedFindings")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    println!();
+                    println!("focus summary");
+                    println!("focused files: {focused_files}");
+                    println!("focused findings: {focused_findings}");
+                    println!("findings were filtered after full analysis.");
+                }
             }
             if !findings.is_empty() {
                 println!();
@@ -338,6 +381,49 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
         _ => println!("{}", serde_json::to_string_pretty(report).expect("serialize report")),
     }
     Ok(())
+}
+
+fn print_impact_text(report: &oxgraph_report::ImpactReport, focus: Option<&str>) {
+    println!("impact target: {}", report.target);
+    println!("affected entrypoints: {}", report.affected_entrypoints.len());
+    println!("affected packages: {}", report.affected_packages.len());
+    println!("affected files: {}", report.affected_files.len());
+    if let Some(focus) = focus {
+        println!("focus: {focus}");
+        println!("returned items were filtered after full-graph impact analysis.");
+    }
+    if !report.affected_files.is_empty() {
+        println!();
+        for file in &report.affected_files {
+            println!("file: {file}");
+        }
+    }
+}
+
+fn print_explain_text(report: &oxgraph_report::ExplainReport, focus: Option<&str>) {
+    let match_kind = report
+        .matched_node
+        .as_deref()
+        .map_or("finding-id", |node| if node.contains('#') { "export" } else { "file" });
+    println!("query: {} ({match_kind})", report.query);
+    if let Some(node) = &report.matched_node {
+        println!("matched node: {node}");
+    } else {
+        println!("matched node: none");
+    }
+    if let Some(focus) = focus {
+        let filtered = report.proofs.is_empty() || report.related_findings.is_empty();
+        println!(
+            "focus: {focus} ({})",
+            if filtered {
+                "related findings or proofs were filtered"
+            } else {
+                "related findings and proofs are within focus"
+            }
+        );
+    }
+    println!("proofs: {}", report.proofs.len());
+    println!("related findings: {}", report.related_findings.len());
 }
 
 fn render_sarif<T: serde::Serialize>(report: &T) -> miette::Result<String> {

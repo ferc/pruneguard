@@ -1,0 +1,29 @@
+name: release-smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.10.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: mkdir -p /tmp/oxgraph-pack && npm pack --pack-destination /tmp/oxgraph-pack
+        working-directory: npm/oxgraph
+      - run: |
+          mkdir -p /tmp/oxgraph-pack-smoke
+          cd /tmp/oxgraph-pack-smoke
+          npm init -y
+          npm install /tmp/oxgraph-pack/oxgraph-0.1.0.tgz
+          node -e "import('oxgraph').then((mod) => console.log(typeof mod.scan))"
+          npx oxgraph --help
