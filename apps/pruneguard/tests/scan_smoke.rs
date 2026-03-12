@@ -385,3 +385,34 @@ fn cycles_include_candidate_break_edges() {
             .is_some_and(|description| description.contains("Candidate break edges"))
     }));
 }
+
+#[test]
+fn js_extension_imports_resolve_to_ts_source_files() {
+    let root = fixture_root("js-extension-imports");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // .js extension imports must resolve — zero unresolved specifiers.
+    assert_eq!(
+        report["stats"]["unresolvedSpecifiers"].as_u64(),
+        Some(0),
+        "imports with .js extensions should resolve to .ts source files"
+    );
+
+    // utils.ts and helpers/math.ts must be reachable (not flagged as unused).
+    let findings = report["findings"].as_array().expect("findings array");
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/utils.ts"),
+        "src/utils.ts should be reachable via .js import"
+    );
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file"
+            && f["subject"].as_str().is_some_and(|s| s.ends_with("helpers/math.ts"))),
+        "src/helpers/math.ts should be reachable via .js import"
+    );
+
+    // The intentionally orphaned file should still be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/orphan.ts"),
+        "src/orphan.ts should be flagged as unused"
+    );
+}
