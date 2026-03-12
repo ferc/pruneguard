@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use oxgraph_entrypoints::EntrypointProfile;
-use oxgraph_fs::FileKind;
+use oxgraph_fs::{FileKind, FileRole};
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -43,6 +43,7 @@ pub enum ModuleNode {
         workspace: Option<String>,
         package: Option<String>,
         kind: FileKind,
+        role: FileRole,
     },
     Entrypoint {
         file: FileId,
@@ -66,6 +67,7 @@ pub enum EntrypointKind {
     Explicit,
     FrameworkDetected,
     Convention,
+    PackageScript,
 }
 
 impl EntrypointKind {
@@ -77,6 +79,7 @@ impl EntrypointKind {
             Self::Explicit => "explicit-config",
             Self::FrameworkDetected => "framework-pack",
             Self::Convention => "convention",
+            Self::PackageScript => "package-script",
         }
     }
 }
@@ -150,6 +153,7 @@ impl ModuleGraph {
         workspace: Option<&str>,
         package: Option<&str>,
         kind: FileKind,
+        role: FileRole,
     ) -> (FileId, NodeIndex) {
         let id = FileId(self.interner.intern(path));
         let idx = self.graph.add_node(ModuleNode::File {
@@ -159,6 +163,7 @@ impl ModuleGraph {
             workspace: workspace.map(ToString::to_string),
             package: package.map(ToString::to_string),
             kind,
+            role,
         });
         self.file_index.insert(id, idx);
         (id, idx)

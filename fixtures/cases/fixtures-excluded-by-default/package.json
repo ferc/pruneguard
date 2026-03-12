@@ -1,0 +1,4 @@
+{
+  "name": "fixtures-excluded-by-default",
+  "main": "src/index.ts"
+}

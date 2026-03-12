@@ -1,5 +1,8 @@
 use oxgraph_config::AnalysisSeverity;
 use oxgraph_graph::{GraphBuildResult, ModuleNode};
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+use rustc_hash::FxHashSet;
 use oxgraph_report::{Evidence, Finding, FindingCategory};
 
 use crate::{make_finding, severity};
@@ -26,7 +29,9 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
             continue;
         }
 
-        let subject = files.join(" -> ");
+        let chain = minimal_cycle_chain(build, &component)
+            .unwrap_or_else(|| files.clone());
+        let subject = chain.join(" -> ");
         let primary = files.first().cloned().unwrap_or_default();
         findings.push(make_finding(
             "cycle",
@@ -40,7 +45,7 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
                 kind: "cycle".to_string(),
                 file: Some(primary),
                 line: None,
-                description: format!("Cycle chain: {}", files.join(" -> ")),
+                description: format!("Cycle chain: {}", chain.join(" -> ")),
             }],
             Some("Break one edge in the cycle to restore acyclic reachability.".to_string()),
             None,
@@ -48,4 +53,41 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
     }
 
     findings
+}
+
+fn minimal_cycle_chain(build: &GraphBuildResult, component: &[NodeIndex]) -> Option<Vec<String>> {
+    let component_set = component.iter().copied().collect::<FxHashSet<_>>();
+    let &start = component.iter().find(|index| matches!(build.module_graph.graph[**index], ModuleNode::File { .. }))?;
+    let mut stack = vec![(start, vec![start])];
+
+    while let Some((node, path)) = stack.pop() {
+        for edge in build.module_graph.graph.edges(node) {
+            let next = edge.target();
+            if !component_set.contains(&next) || !matches!(build.module_graph.graph[next], ModuleNode::File { .. }) {
+                continue;
+            }
+            if next == start && path.len() > 1 {
+                let mut cycle = path
+                    .iter()
+                    .filter_map(|index| match &build.module_graph.graph[*index] {
+                        ModuleNode::File { relative_path, .. } => Some(relative_path.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(first) = cycle.first().cloned() {
+                    cycle.push(first);
+                }
+                return Some(cycle);
+            }
+            if path.contains(&next) {
+                continue;
+            }
+
+            let mut next_path = path.clone();
+            next_path.push(next);
+            stack.push((next, next_path));
+        }
+    }
+
+    None
 }

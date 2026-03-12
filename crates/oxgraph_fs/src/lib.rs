@@ -14,6 +14,75 @@ pub enum FileKind {
     BuildOutput,
 }
 
+/// Finer-grained classification used for entrypoint and analyzer semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRole {
+    Source,
+    Test,
+    Story,
+    Fixture,
+    Example,
+    Template,
+    Benchmark,
+    Config,
+    Generated,
+    BuildOutput,
+}
+
+impl FileRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Test => "test",
+            Self::Story => "story",
+            Self::Fixture => "fixture",
+            Self::Example => "example",
+            Self::Template => "template",
+            Self::Benchmark => "benchmark",
+            Self::Config => "config",
+            Self::Generated => "generated",
+            Self::BuildOutput => "buildOutput",
+        }
+    }
+
+    pub const fn kind(self) -> FileKind {
+        match self {
+            Self::Source | Self::Fixture | Self::Example | Self::Template | Self::Benchmark => {
+                FileKind::Source
+            }
+            Self::Test => FileKind::Test,
+            Self::Story => FileKind::Story,
+            Self::Config => FileKind::Config,
+            Self::Generated => FileKind::Generated,
+            Self::BuildOutput => FileKind::BuildOutput,
+        }
+    }
+
+    pub const fn is_development_only(self) -> bool {
+        matches!(self, Self::Test | Self::Story)
+    }
+
+    pub const fn excluded_from_dead_code_by_default(self) -> bool {
+        matches!(
+            self,
+            Self::Fixture
+                | Self::Example
+                | Self::Template
+                | Self::Benchmark
+                | Self::Config
+                | Self::Generated
+                | Self::BuildOutput
+        )
+    }
+
+    pub const fn excluded_from_auto_entrypoints(self) -> bool {
+        matches!(
+            self,
+            Self::Fixture | Self::Example | Self::Template | Self::Benchmark
+        )
+    }
+}
+
 /// A tracked file in the repository inventory.
 #[derive(Debug, Clone)]
 pub struct FileRecord {
@@ -22,6 +91,7 @@ pub struct FileRecord {
     pub workspace: Option<String>,
     pub package: Option<String>,
     pub kind: FileKind,
+    pub role: FileRole,
     pub ignored_reason: Option<String>,
 }
 
@@ -31,7 +101,7 @@ pub struct FileCollectionOptions {
     pub ignore_patterns: Vec<String>,
     pub workspace_roots: FxHashMap<String, PathBuf>,
     pub package_names: FxHashMap<String, String>,
-    pub extra_classifications: Vec<(String, FileKind)>,
+    pub extra_classifications: Vec<(String, FileRole)>,
 }
 
 /// Walk a directory tree, respecting `.gitignore` and custom ignore patterns.
@@ -106,7 +176,8 @@ pub fn collect_file_records(root: &Path, options: &FileCollectionOptions) -> Vec
                 .as_ref()
                 .and_then(|name| options.package_names.get(name))
                 .cloned();
-            let kind = classify_file(&relative, &classification_patterns);
+            let role = classify_file(&relative, &classification_patterns);
+            let kind = role.kind();
 
             Some(FileRecord {
                 path,
@@ -114,6 +185,7 @@ pub fn collect_file_records(root: &Path, options: &FileCollectionOptions) -> Vec
                 workspace,
                 package,
                 kind,
+                role,
                 ignored_reason: None,
             })
         })
@@ -141,8 +213,8 @@ fn compile_globset(patterns: &[String]) -> Option<GlobSet> {
 }
 
 fn compile_classifiers(
-    patterns: &[(String, FileKind)],
-) -> Vec<(GlobSet, FileKind)> {
+    patterns: &[(String, FileRole)],
+) -> Vec<(GlobSet, FileRole)> {
     let mut matchers = Vec::new();
     for (pattern, kind) in patterns {
         let Some(globset) = compile_globset(std::slice::from_ref(pattern)) else {
@@ -181,7 +253,14 @@ fn workspace_for_path(
         .map(|(name, _)| name.clone())
 }
 
-fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileKind)]) -> FileKind {
+pub fn is_docs_path(relative_path: &Path) -> bool {
+    relative_path
+        .components()
+        .next()
+        .is_some_and(|component| component.as_os_str() == "docs")
+}
+
+fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -> FileRole {
     for (matcher, kind) in extra_patterns {
         if matcher.is_match(relative_path) {
             return *kind;
@@ -196,7 +275,7 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileKind)]) -
         || file_name.ends_with(".generated.ts")
         || file_name.ends_with(".generated.js")
     {
-        return FileKind::Generated;
+        return FileRole::Generated;
     }
 
     if path.contains("/dist/")
@@ -205,25 +284,47 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileKind)]) -
         || path.contains("/storybook-static/")
         || path.contains("/.next/")
     {
-        return FileKind::BuildOutput;
+        return FileRole::BuildOutput;
+    }
+
+    if path.starts_with("fixtures/") || path.contains("/fixtures/") {
+        return FileRole::Fixture;
+    }
+
+    if path.starts_with("examples/") || path.contains("/examples/") {
+        return FileRole::Example;
+    }
+
+    if path.starts_with("templates/") || path.contains("/templates/") {
+        return FileRole::Template;
+    }
+
+    if path.starts_with("benchmarks/") || path.contains("/benchmarks/") {
+        return FileRole::Benchmark;
     }
 
     if path.contains("/__tests__/")
+        || path.starts_with("test/")
+        || path.starts_with("tests/")
         || file_name.contains(".test.")
         || file_name.contains(".spec.")
     {
-        return FileKind::Test;
+        return FileRole::Test;
     }
 
-    if file_name.contains(".stories.") || path.contains("/.storybook/") {
-        return FileKind::Story;
+    if file_name.contains(".stories.")
+        || file_name.contains(".story.")
+        || path.contains("/.storybook/")
+        || path.starts_with("stories/")
+    {
+        return FileRole::Story;
     }
 
     if matches!(file_name, "package.json" | "tsconfig.json" | "tsconfig.base.json")
         || file_name.contains(".config.")
     {
-        return FileKind::Config;
+        return FileRole::Config;
     }
 
-    FileKind::Source
+    FileRole::Source
 }

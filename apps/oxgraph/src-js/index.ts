@@ -54,7 +54,22 @@ export type AnalysisReport = {
     infos: number;
   };
   inventories: {
-    files: Array<{ path: string; workspace?: string; kind: string }>;
+    files: Array<{
+      path: string;
+      workspace?: string;
+      kind: string;
+      role?:
+        | "source"
+        | "test"
+        | "story"
+        | "fixture"
+        | "example"
+        | "template"
+        | "benchmark"
+        | "config"
+        | "generated"
+        | "buildOutput";
+    }>;
     packages: Array<{ name: string; version?: string; workspace: string; path: string }>;
     workspaces: Array<{ name: string; path: string; packageCount: number }>;
   };
@@ -76,11 +91,16 @@ export type AnalysisReport = {
     kind: string;
     profile: string;
     workspace?: string;
+    source: string;
   }>;
   stats: {
     durationMs: number;
     filesParsed: number;
     filesCached: number;
+    filesDiscovered: number;
+    filesResolved: number;
+    unresolvedSpecifiers: number;
+    entrypointsDetected: number;
     graphNodes: number;
     graphEdges: number;
   };

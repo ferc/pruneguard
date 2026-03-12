@@ -82,7 +82,7 @@ fn run_debug(
 
     match cmd {
         cli::DebugCommand::Resolve { specifier, from } => {
-            let result = oxgraph_resolver::debug_resolve(&config.resolver, &specifier, &from);
+            let result = oxgraph_resolver::debug_resolve(&cwd, &config.resolver, &specifier, &from);
             println!("{result}");
             Ok(ExitCode::SUCCESS)
         }
@@ -228,6 +228,18 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
             println!("packages: {total_packages}");
             println!("entrypoints: {entrypoints}");
             println!("findings: {}", findings.len());
+            if let Some(stats) = map.get("stats").and_then(serde_json::Value::as_object) {
+                let unresolved = stats
+                    .get("unresolvedSpecifiers")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                let duration = stats
+                    .get("durationMs")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                println!("unresolved specifiers: {unresolved}");
+                println!("duration ms: {duration}");
+            }
             if !findings.is_empty() {
                 println!();
                 for finding in findings {
@@ -249,6 +261,19 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                         .unwrap_or("");
                     println!("[{severity}] {code} {subject}");
                     println!("  {message}");
+                    if let Some(evidence) =
+                        finding.get("evidence").and_then(serde_json::Value::as_array)
+                    {
+                        for item in evidence.iter().take(3) {
+                            let description = item
+                                .get("description")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("");
+                            if !description.is_empty() {
+                                println!("  proof: {description}");
+                            }
+                        }
+                    }
                 }
             }
         }

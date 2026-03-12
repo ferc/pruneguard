@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use oxgraph_config::{EntrypointsConfig, FrameworkToggle, FrameworksConfig};
+use oxgraph_fs::has_js_ts_extension;
 use oxgraph_frameworks::FrameworkPack;
 use oxgraph_manifest::PackageManifest;
 use rustc_hash::FxHashSet;
@@ -24,6 +25,7 @@ pub enum EntrypointKind {
     ExplicitConfig,
     FrameworkPack,
     Convention,
+    PackageScript,
 }
 
 /// Which analysis profile the entrypoint belongs to.
@@ -53,6 +55,7 @@ impl EntrypointKind {
             Self::ExplicitConfig => "explicit-config",
             Self::FrameworkPack => "framework-pack",
             Self::Convention => "convention",
+            Self::PackageScript => "package-script",
         }
     }
 }
@@ -71,6 +74,7 @@ impl std::fmt::Display for EntrypointSeed {
 }
 
 /// Detect entrypoints for a workspace package.
+#[allow(clippy::too_many_lines)]
 pub fn detect_entrypoints(
     workspace_name: Option<&str>,
     workspace_root: &Path,
@@ -122,6 +126,26 @@ pub fn detect_entrypoints(
                 workspace_name,
                 format!("package:{file}"),
             );
+        }
+
+        for (script_name, command) in manifest.scripts.as_ref().into_iter().flat_map(|scripts| scripts.iter()) {
+            let profile = script_profile(script_name);
+            for candidate in extract_script_entrypoint_candidates(command) {
+                let path = workspace_root.join(&candidate);
+                if !path.exists() || !has_js_ts_extension(&path) {
+                    continue;
+                }
+
+                push_entrypoint(
+                    &mut entrypoints,
+                    &mut seen,
+                    path,
+                    EntrypointKind::PackageScript,
+                    profile,
+                    workspace_name,
+                    format!("package-script:{script_name}:{candidate}"),
+                );
+            }
         }
 
         for candidate in &[
@@ -237,4 +261,67 @@ fn is_exports_entry(path: &str, manifest: &PackageManifest) -> bool {
         .as_ref()
         .and_then(|exports| exports.to_string().contains(path).then_some(()))
         .is_some()
+}
+
+fn script_profile(name: &str) -> EntrypointProfile {
+    match name {
+        "start" | "serve" | "prod" | "build" => EntrypointProfile::Production,
+        "test" | "lint" | "dev" | "storybook" | "bench" => EntrypointProfile::Development,
+        _ if name.starts_with("test:")
+            || name.starts_with("dev:")
+            || name.starts_with("lint:")
+            || name.starts_with("storybook:")
+            || name.starts_with("bench:") =>
+        {
+            EntrypointProfile::Development
+        }
+        _ if name.starts_with("start:")
+            || name.starts_with("serve:")
+            || name.starts_with("prod:")
+            || name.starts_with("build:") =>
+        {
+            EntrypointProfile::Production
+        }
+        _ => EntrypointProfile::Both,
+    }
+}
+
+fn extract_script_entrypoint_candidates(command: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = FxHashSet::default();
+
+    for raw in command.split_whitespace() {
+        let token = raw
+            .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '(' | ')'))
+            .trim();
+        if token.is_empty() || token.starts_with('-') || token.contains('$') {
+            continue;
+        }
+
+        let path = Path::new(token);
+        if !looks_like_script_path(token, path) {
+            continue;
+        }
+
+        let normalized = path
+            .components()
+            .as_path()
+            .to_string_lossy()
+            .to_string();
+        if seen.insert(normalized.clone()) {
+            candidates.push(normalized);
+        }
+    }
+
+    candidates
+}
+
+fn looks_like_script_path(token: &str, path: &Path) -> bool {
+    has_js_ts_extension(path)
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.starts_with("src/")
+        || token.starts_with("scripts/")
+        || token.starts_with("bin/")
+        || token.starts_with("app/")
 }

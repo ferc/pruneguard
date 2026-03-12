@@ -1,6 +1,6 @@
 use oxgraph_config::AnalysisSeverity;
 use oxgraph_entrypoints::EntrypointProfile;
-use oxgraph_fs::FileKind;
+use oxgraph_fs::is_docs_path;
 use oxgraph_graph::GraphBuildResult;
 use oxgraph_report::{Evidence, Finding, FindingCategory};
 
@@ -20,10 +20,11 @@ pub fn analyze(
     let mut findings = Vec::new();
 
     for extracted_file in &build.files {
-        if matches!(
-            extracted_file.file.kind,
-            FileKind::Generated | FileKind::BuildOutput | FileKind::Config
-        ) {
+        if extracted_file.file.role.excluded_from_dead_code_by_default()
+            || is_docs_path(&extracted_file.file.relative_path)
+            || (profile == EntrypointProfile::Production
+                && extracted_file.file.role.is_development_only())
+        {
             continue;
         }
 

@@ -172,6 +172,8 @@ pub struct FileInfo {
     pub path: String,
     pub workspace: Option<String>,
     pub kind: FileKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<FileRole>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -182,6 +184,30 @@ pub enum FileKind {
     Story,
     Config,
     Generated,
+    BuildOutput,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+pub enum FileRole {
+    #[serde(rename = "source")]
+    Source,
+    #[serde(rename = "test")]
+    Test,
+    #[serde(rename = "story")]
+    Story,
+    #[serde(rename = "fixture")]
+    Fixture,
+    #[serde(rename = "example")]
+    Example,
+    #[serde(rename = "template")]
+    Template,
+    #[serde(rename = "benchmark")]
+    Benchmark,
+    #[serde(rename = "config")]
+    Config,
+    #[serde(rename = "generated")]
+    Generated,
+    #[serde(rename = "buildOutput")]
     BuildOutput,
 }
 
@@ -212,6 +238,7 @@ pub struct EntrypointInfo {
     pub kind: String,
     pub profile: String,
     pub workspace: Option<String>,
+    pub source: String,
 }
 
 /// Performance statistics.
@@ -221,6 +248,10 @@ pub struct Stats {
     pub duration_ms: u64,
     pub files_parsed: usize,
     pub files_cached: usize,
+    pub files_discovered: usize,
+    pub files_resolved: usize,
+    pub unresolved_specifiers: usize,
+    pub entrypoints_detected: usize,
     pub graph_nodes: usize,
     pub graph_edges: usize,
 }

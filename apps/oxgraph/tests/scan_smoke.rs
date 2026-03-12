@@ -51,3 +51,75 @@ fn explain_returns_proof_for_reachable_file() {
     assert_eq!(report["matchedNode"].as_str(), Some("src/used.ts"));
     assert!(report["proofs"].as_array().is_some_and(|proofs| !proofs.is_empty()));
 }
+
+#[test]
+fn reexports_star_only_keeps_consumed_exports_live() {
+    let root = fixture_root("reexports-star");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/leaf.ts#unused"
+    }));
+    assert!(!findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/leaf.ts#used"
+    }));
+}
+
+#[test]
+fn type_only_liveness_respects_type_consumers() {
+    let root = fixture_root("type-only-liveness");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(!findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#Foo"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#Bar"
+    }));
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#runtimeOnly"
+    }));
+}
+
+#[test]
+fn fixture_files_are_in_inventory_but_excluded_from_dead_code_findings() {
+    let root = fixture_root("fixtures-excluded-by-default");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let files = report["inventories"]["files"].as_array().expect("files array");
+
+    assert!(files.iter().any(|file| {
+        file["path"] == "fixtures/helper.ts" && file["role"] == "fixture"
+    }));
+    assert!(!findings.iter().any(|finding| {
+        finding["code"] == "unused-file" && finding["subject"] == "fixtures/helper.ts"
+    }));
+}
+
+#[test]
+fn package_scripts_are_detected_as_entrypoints_with_sources() {
+    let root = fixture_root("package-scripts-roots");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let entrypoints = report["entrypoints"].as_array().expect("entrypoints array");
+
+    assert!(entrypoints.iter().any(|entrypoint| {
+        entrypoint["source"] == "package-script:build:scripts/build.ts"
+    }));
+    assert!(entrypoints.iter().any(|entrypoint| {
+        entrypoint["source"] == "package-script:dev:scripts/dev.ts"
+    }));
+}
+
+#[test]
+fn ownership_reports_cross_owner_edges() {
+    let root = fixture_root("ownership-cross-owner");
+    let report = run_oxgraph(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    assert!(findings.iter().any(|finding| {
+        finding["code"] == "ownership-cross-owner"
+            && finding["subject"] == "src/index.ts -> src/b.ts"
+    }));
+}

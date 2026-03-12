@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 oxgraph_config = { workspace = true }
+oxgraph_fs = { workspace = true }
 oxgraph_manifest = { workspace = true }
 oxgraph_frameworks = { workspace = true }
 

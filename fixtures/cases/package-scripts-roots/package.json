@@ -1,0 +1,7 @@
+{
+  "name": "package-scripts-roots",
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "dev": "tsx scripts/dev.ts"
+  }
+}

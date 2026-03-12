@@ -1,0 +1,6 @@
+{
+  "entrypoints": {
+    "auto": false,
+    "include": ["src/main.ts"]
+  }
+}

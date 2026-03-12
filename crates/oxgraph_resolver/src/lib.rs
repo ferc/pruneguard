@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use oxc_resolver::{ResolveOptions, Resolver};
+use oxc_resolver::{
+    ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences,
+};
 use oxgraph_config::ResolverConfig;
 use rustc_hash::FxHashMap;
 
@@ -33,8 +35,38 @@ pub struct ResolvedEdge {
     pub to_file: Option<PathBuf>,
     pub to_dependency: Option<String>,
     pub kind: ResolvedEdgeKind,
+    pub outcome: ResolutionOutcome,
+    pub unresolved_reason: Option<UnresolvedReason>,
     pub via_exports: bool,
     pub line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionOutcome {
+    ResolvedToFile,
+    ResolvedToDependency,
+    Unresolved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnresolvedReason {
+    MissingFile,
+    UnsupportedSpecifier,
+    TsconfigPathMiss,
+    ExportsConditionMiss,
+    Externalized,
+}
+
+impl UnresolvedReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingFile => "missing-file",
+            Self::UnsupportedSpecifier => "unsupported-specifier",
+            Self::TsconfigPathMiss => "tsconfig-path-miss",
+            Self::ExportsConditionMiss => "exports-condition-miss",
+            Self::Externalized => "externalized",
+        }
+    }
 }
 
 /// Module resolver built on `oxc_resolver`.
@@ -44,8 +76,8 @@ pub struct ModuleResolver {
 
 impl ModuleResolver {
     /// Create a new resolver from config.
-    pub fn new(config: &ResolverConfig) -> Self {
-        let mut options = ResolveOptions::default();
+    pub fn new(config: &ResolverConfig, cwd: &Path) -> Self {
+        let mut options = ResolveOptions { cwd: Some(cwd.to_path_buf()), ..ResolveOptions::default() };
 
         if config.extensions.is_empty() {
             options.extensions = vec![
@@ -72,6 +104,18 @@ impl ModuleResolver {
         }
 
         options.symlinks = !config.preserve_symlinks;
+        options.tsconfig = Some(if let Some(tsconfig) = config.tsconfig.first() {
+            TsconfigDiscovery::Manual(TsconfigOptions {
+                config_file: if Path::new(tsconfig).is_absolute() {
+                    PathBuf::from(tsconfig)
+                } else {
+                    cwd.join(tsconfig)
+                },
+                references: TsconfigReferences::Auto,
+            })
+        } else {
+            TsconfigDiscovery::Auto
+        });
 
         let inner = Resolver::new(options);
         Self { inner }
@@ -85,24 +129,29 @@ impl ModuleResolver {
                 path: resolution.into_path_buf(),
                 via_exports: false, // TODO: detect this
             }),
-            Err(_err) => Err(ResolveError::NotFound {
+            Err(err) => Err(ResolveError::NotFound {
                 specifier: specifier.to_string(),
                 from: from.to_path_buf(),
+                reason: Some(classify_unresolved_reason(specifier, &err.to_string())),
             }),
         }
     }
 }
 
 /// Debug resolve a specifier from a file and return a human-readable result.
-pub fn debug_resolve(config: &ResolverConfig, specifier: &str, from: &Path) -> String {
-    let resolver = ModuleResolver::new(config);
+pub fn debug_resolve(cwd: &Path, config: &ResolverConfig, specifier: &str, from: &Path) -> String {
+    let resolver = ModuleResolver::new(config, cwd);
     match resolver.resolve(specifier, from) {
         Ok(module) => format!(
             "{specifier} -> {}{}",
             module.path.display(),
             if module.via_exports { " (via exports)" } else { "" }
         ),
-        Err(err) => format!("{specifier} -> UNRESOLVED ({err})"),
+        Err(err) => format!(
+            "{specifier} -> UNRESOLVED ({})",
+            err.reason()
+                .map_or_else(|| err.to_string(), |reason| reason.as_str().to_string())
+        ),
     }
 }
 
@@ -142,5 +191,39 @@ impl ResolutionCache {
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     #[error("cannot resolve '{specifier}' from {from}")]
-    NotFound { specifier: String, from: PathBuf },
+    NotFound {
+        specifier: String,
+        from: PathBuf,
+        reason: Option<UnresolvedReason>,
+    },
+}
+
+impl ResolveError {
+    pub const fn reason(&self) -> Option<UnresolvedReason> {
+        match self {
+            Self::NotFound { reason, .. } => *reason,
+        }
+    }
+}
+
+fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason {
+    if specifier.starts_with("node:") {
+        return UnresolvedReason::Externalized;
+    }
+
+    if !specifier.starts_with('.') && !specifier.starts_with('/') {
+        if error.contains("tsconfig") || error.contains("paths") {
+            return UnresolvedReason::TsconfigPathMiss;
+        }
+        if error.contains("exports") || error.contains("condition") {
+            return UnresolvedReason::ExportsConditionMiss;
+        }
+        return UnresolvedReason::MissingFile;
+    }
+
+    if specifier.contains('*') || specifier.contains('?') {
+        return UnresolvedReason::UnsupportedSpecifier;
+    }
+
+    UnresolvedReason::MissingFile
 }

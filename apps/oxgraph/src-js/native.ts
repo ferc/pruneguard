@@ -33,4 +33,15 @@ function loadNative(): NativeBinding {
   );
 }
 
-export const native = loadNative();
+let cachedNative: NativeBinding | undefined;
+
+function getNative(): NativeBinding {
+  cachedNative ??= loadNative();
+  return cachedNative;
+}
+
+export const native = new Proxy({} as NativeBinding, {
+  get(_target, property) {
+    return Reflect.get(getNative(), property);
+  },
+});

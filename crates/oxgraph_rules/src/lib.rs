@@ -178,6 +178,7 @@ impl CompiledRule {
 
 impl CompiledFilter {
     fn compile(filter: &RuleFilter) -> miette::Result<Self> {
+        reject_unsupported_filter_fields(filter)?;
         Ok(Self {
             path: compile_globset(&filter.path)?,
             path_not: compile_globset(&filter.path_not)?,
@@ -231,6 +232,28 @@ impl CompiledFilter {
 
         true
     }
+}
+
+fn reject_unsupported_filter_fields(filter: &RuleFilter) -> miette::Result<()> {
+    if !filter.tag.is_empty() || !filter.tag_not.is_empty() {
+        miette::bail!("rule tags are not implemented yet");
+    }
+    if !filter.dependency_kinds.is_empty() {
+        miette::bail!("rule dependencyKinds are not implemented yet");
+    }
+    if !filter.profiles.is_empty() {
+        miette::bail!("rule profiles are not implemented yet");
+    }
+    if filter.reachable_from.as_ref().is_some_and(|values| !values.is_empty()) {
+        miette::bail!("rule reachableFrom is not implemented yet");
+    }
+    if filter.reaches.as_ref().is_some_and(|values| !values.is_empty()) {
+        miette::bail!("rule reaches is not implemented yet");
+    }
+    if !filter.entrypoint_kinds.is_empty() {
+        miette::bail!("rule entrypointKinds are not implemented yet");
+    }
+    Ok(())
 }
 
 fn compile_globset(patterns: &[String]) -> miette::Result<Option<GlobSet>> {

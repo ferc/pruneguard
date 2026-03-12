@@ -120,8 +120,8 @@ pub fn debug_entrypoints(
 }
 
 /// Debug: resolve a specifier from a file.
-pub fn debug_resolve(config: &OxgraphConfig, specifier: &str, from: &Path) -> String {
-    oxgraph_resolver::debug_resolve(&config.resolver, specifier, from)
+pub fn debug_resolve(cwd: &Path, config: &OxgraphConfig, specifier: &str, from: &Path) -> String {
+    oxgraph_resolver::debug_resolve(cwd, &config.resolver, specifier, from)
 }
 
 fn report_from_build(
@@ -193,7 +193,13 @@ fn finding_summary(findings: &[Finding]) -> (usize, usize, usize) {
 
 fn node_label(build: &GraphBuildResult, index: petgraph::graph::NodeIndex) -> String {
     match &build.module_graph.graph[index] {
-        ModuleNode::Entrypoint { path, .. } => path.clone(),
+        ModuleNode::Entrypoint { path, .. } => {
+            let path = Path::new(path);
+            path.strip_prefix(&build.discovery.project_root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string()
+        }
         ModuleNode::File { relative_path, .. } => relative_path.clone(),
         ModuleNode::Package { name, .. }
         | ModuleNode::Workspace { name, .. }
@@ -348,7 +354,7 @@ pub fn debug_resolve_text(options: JsDebugResolveOptions) -> napi::Result<String
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let config = load_config_for_js(&cwd, options.config.as_deref())?;
-    Ok(debug_resolve(&config, &options.specifier, Path::new(&options.from)))
+    Ok(debug_resolve(&cwd, &config, &options.specifier, Path::new(&options.from)))
 }
 
 #[cfg(feature = "napi")]

@@ -21,10 +21,13 @@ oxgraph_config = { workspace = true }
 oxgraph_discovery = { workspace = true }
 oxgraph_entrypoints = { workspace = true }
 oxgraph_fs = { workspace = true }
+oxgraph_manifest = { workspace = true }
 oxgraph_report = { workspace = true }
 oxgraph_rules = { workspace = true }
 
+compact_str = { workspace = true }
 globset = { workspace = true }
+petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 tracing = { workspace = true }
 

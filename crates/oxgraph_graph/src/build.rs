@@ -9,9 +9,14 @@ use oxgraph_discovery::{DiscoveryResult, discover};
 use oxgraph_entrypoints::{EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, detect_entrypoints};
 use oxgraph_extract::{ExtractedFile, extract_file_facts};
 use oxgraph_frameworks::built_in_packs;
-use oxgraph_fs::{FileKind, has_js_ts_extension};
-use oxgraph_report::{EntrypointInfo, FileInfo, Inventories, PackageInfo, Stats, WorkspaceInfo};
-use oxgraph_resolver::{ModuleResolver, ResolvedEdge, ResolvedEdgeKind, dependency_name};
+use oxgraph_fs::{FileKind, FileRole, has_js_ts_extension};
+use oxgraph_report::{
+    EntrypointInfo, FileInfo, FileRole as ReportFileRole, Inventories, PackageInfo, Stats,
+    WorkspaceInfo,
+};
+use oxgraph_resolver::{
+    ModuleResolver, ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind, dependency_name,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{ModuleEdge, ModuleGraph, SymbolGraph};
@@ -45,6 +50,7 @@ impl GraphBuildResult {
 }
 
 /// Build the project graph for a scan/impact/explain run.
+#[allow(clippy::too_many_lines)]
 pub fn build_graph(
     cwd: &Path,
     config: &OxgraphConfig,
@@ -62,7 +68,7 @@ pub fn build_graph(
         files.retain(|file| scan_roots.iter().any(|root| file.path.starts_with(root)));
     }
 
-    let resolver = ModuleResolver::new(&config.resolver);
+    let resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
     let mut extracted_files = files.into_iter().map(ExtractedFile::new).collect::<Vec<_>>();
     let repo_files = extracted_files
         .iter()
@@ -82,6 +88,16 @@ pub fn build_graph(
         exclude_matcher.as_ref(),
         &scan_roots,
     );
+    let file_roles = extracted_files
+        .iter()
+        .map(|file| (file.file.path.clone(), file.file.role))
+        .collect::<FxHashMap<_, _>>();
+    entrypoint_seeds.retain(|seed| {
+        let Some(role) = file_roles.get(&seed.path).copied() else {
+            return false;
+        };
+        should_keep_entrypoint_seed(seed, role, config)
+    });
     filter_entrypoints_by_profile(&mut entrypoint_seeds, profile);
 
     let inventories = build_inventories(&discovery, &extracted_files);
@@ -113,6 +129,7 @@ pub fn build_graph(
             extracted_file.file.workspace.as_deref(),
             extracted_file.file.package.as_deref(),
             extracted_file.file.kind,
+            extracted_file.file.role,
         );
         file_nodes.insert(extracted_file.file.path.clone(), (file_id, node));
 
@@ -143,10 +160,25 @@ pub fn build_graph(
     let entrypoints = build_entrypoints(&mut module_graph, &entrypoint_seeds, &file_nodes, &package_nodes);
     seed_public_exports(&mut symbol_graph, &entrypoint_seeds, &file_nodes);
 
+    let files_resolved = extracted_files
+        .iter()
+        .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
+        .filter(|edge| !matches!(edge.outcome, ResolutionOutcome::Unresolved))
+        .count();
+    let unresolved_specifiers = extracted_files
+        .iter()
+        .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
+        .filter(|edge| matches!(edge.outcome, ResolutionOutcome::Unresolved))
+        .count();
+
     let stats = Stats {
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         files_parsed: extracted_files.iter().filter(|file| file.facts.is_some()).count(),
         files_cached: 0,
+        files_discovered: extracted_files.len(),
+        files_resolved,
+        unresolved_specifiers,
+        entrypoints_detected: entrypoint_seeds.len(),
         graph_nodes: module_graph.node_count(),
         graph_edges: module_graph.edge_count(),
     };
@@ -271,6 +303,8 @@ fn resolve_edge(
             to_file: Some(module.path),
             to_dependency: None,
             kind,
+            outcome: ResolutionOutcome::ResolvedToFile,
+            unresolved_reason: None,
             via_exports: module.via_exports,
             line: Some(line),
         },
@@ -280,15 +314,23 @@ fn resolve_edge(
             to_file: None,
             to_dependency: dependency_name(specifier).or_else(|| module.path.file_name().map(|name| name.to_string_lossy().to_string())),
             kind,
+            outcome: ResolutionOutcome::ResolvedToDependency,
+            unresolved_reason: None,
             via_exports: module.via_exports,
             line: Some(line),
         },
-        Err(_) => ResolvedEdge {
+        Err(err) => ResolvedEdge {
             from: from.to_path_buf(),
             specifier: specifier.to_string(),
             to_file: None,
             to_dependency: dependency_name(specifier),
             kind,
+            outcome: if dependency_name(specifier).is_some() {
+                ResolutionOutcome::ResolvedToDependency
+            } else {
+                ResolutionOutcome::Unresolved
+            },
+            unresolved_reason: err.reason(),
             via_exports: false,
             line: Some(line),
         },
@@ -371,6 +413,30 @@ fn filter_entrypoints_by_profile(entrypoints: &mut Vec<EntrypointSeed>, profile:
     });
 }
 
+fn should_keep_entrypoint_seed(
+    seed: &EntrypointSeed,
+    role: FileRole,
+    config: &OxgraphConfig,
+) -> bool {
+    if seed.kind == SeedKind::ExplicitConfig {
+        return true;
+    }
+
+    if role.excluded_from_auto_entrypoints() {
+        return false;
+    }
+
+    if role == FileRole::Test && !config.entrypoints.include_tests {
+        return false;
+    }
+
+    if role == FileRole::Story && !config.entrypoints.include_stories {
+        return false;
+    }
+
+    true
+}
+
 fn build_inventories(discovery: &DiscoveryResult, files: &[ExtractedFile]) -> Inventories {
     let mut workspaces = discovery
         .workspaces
@@ -412,6 +478,18 @@ fn build_inventories(discovery: &DiscoveryResult, files: &[ExtractedFile]) -> In
                 FileKind::Generated => oxgraph_report::FileKind::Generated,
                 FileKind::BuildOutput => oxgraph_report::FileKind::BuildOutput,
             },
+            role: Some(match file.file.role {
+                FileRole::Source => ReportFileRole::Source,
+                FileRole::Test => ReportFileRole::Test,
+                FileRole::Story => ReportFileRole::Story,
+                FileRole::Fixture => ReportFileRole::Fixture,
+                FileRole::Example => ReportFileRole::Example,
+                FileRole::Template => ReportFileRole::Template,
+                FileRole::Benchmark => ReportFileRole::Benchmark,
+                FileRole::Config => ReportFileRole::Config,
+                FileRole::Generated => ReportFileRole::Generated,
+                FileRole::BuildOutput => ReportFileRole::BuildOutput,
+            }),
         })
         .collect::<Vec<_>>();
     file_inventory.sort_by(|a, b| a.path.cmp(&b.path));
@@ -439,6 +517,7 @@ fn build_entrypoints(
             SeedKind::ExplicitConfig => crate::EntrypointKind::Explicit,
             SeedKind::FrameworkPack => crate::EntrypointKind::FrameworkDetected,
             SeedKind::Convention => crate::EntrypointKind::Convention,
+            SeedKind::PackageScript => crate::EntrypointKind::PackageScript,
         };
 
         let entrypoint_node = module_graph.add_entrypoint(
@@ -461,10 +540,11 @@ fn build_entrypoints(
             kind: seed.kind.as_str().to_string(),
             profile: seed.profile.as_str().to_string(),
             workspace: seed.workspace.clone(),
+            source: seed.source.clone(),
         });
     }
 
-    entrypoints.sort_by(|a, b| a.path.cmp(&b.path).then(a.kind.cmp(&b.kind)));
+    entrypoints.sort_by(|a, b| a.path.cmp(&b.path).then(a.kind.cmp(&b.kind)).then(a.source.cmp(&b.source)));
     entrypoints
 }
 
@@ -544,6 +624,7 @@ fn add_symbol_edges(
                 CompactString::new("*"),
                 CompactString::new("*"),
                 true,
+                reexport.is_type,
             );
             continue;
         }
@@ -555,6 +636,7 @@ fn add_symbol_edges(
                 name.original.clone(),
                 name.exported.clone(),
                 false,
+                reexport.is_type,
             );
         }
     }

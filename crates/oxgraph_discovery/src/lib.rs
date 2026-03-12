@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use oxgraph_config::{OxgraphConfig, PackageManager};
-use oxgraph_fs::{FileCollectionOptions, FileKind, FileRecord, collect_file_records};
+use oxgraph_fs::{FileCollectionOptions, FileRecord, FileRole, collect_file_records};
 use oxgraph_manifest::PackageManifest;
 use rustc_hash::FxHashMap;
 
@@ -62,10 +62,19 @@ impl DiscoveryResult {
             workspace_roots: self.workspace_roots(),
             package_names: self.package_names(),
             extra_classifications: vec![
-                ("**/*.stories.*".to_string(), FileKind::Story),
-                ("**/*.test.*".to_string(), FileKind::Test),
-                ("**/*.spec.*".to_string(), FileKind::Test),
-                ("**/__tests__/**".to_string(), FileKind::Test),
+                ("**/*.stories.*".to_string(), FileRole::Story),
+                ("**/*.story.*".to_string(), FileRole::Story),
+                ("**/*.test.*".to_string(), FileRole::Test),
+                ("**/*.spec.*".to_string(), FileRole::Test),
+                ("**/__tests__/**".to_string(), FileRole::Test),
+                ("fixtures/**".to_string(), FileRole::Fixture),
+                ("**/fixtures/**".to_string(), FileRole::Fixture),
+                ("examples/**".to_string(), FileRole::Example),
+                ("**/examples/**".to_string(), FileRole::Example),
+                ("templates/**".to_string(), FileRole::Template),
+                ("**/templates/**".to_string(), FileRole::Template),
+                ("benchmarks/**".to_string(), FileRole::Benchmark),
+                ("**/benchmarks/**".to_string(), FileRole::Benchmark),
             ],
         };
 

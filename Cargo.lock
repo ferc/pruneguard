@@ -1121,6 +1121,7 @@ dependencies = [
 name = "oxgraph_analyzers"
 version = "0.1.0"
 dependencies = [
+ "compact_str 0.8.1",
  "globset",
  "insta",
  "oxgraph_config",
@@ -1128,8 +1129,10 @@ dependencies = [
  "oxgraph_entrypoints",
  "oxgraph_fs",
  "oxgraph_graph",
+ "oxgraph_manifest",
  "oxgraph_report",
  "oxgraph_rules",
+ "petgraph",
  "rustc-hash",
  "tracing",
 ]
@@ -1184,6 +1187,7 @@ dependencies = [
  "globset",
  "oxgraph_config",
  "oxgraph_frameworks",
+ "oxgraph_fs",
  "oxgraph_manifest",
  "rustc-hash",
  "tracing",

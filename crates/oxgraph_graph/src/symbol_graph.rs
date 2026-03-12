@@ -53,6 +53,8 @@ pub struct ReexportEdge {
     pub exported_name: CompactString,
     /// Whether this is `export *`.
     pub is_star: bool,
+    /// Whether this is a type-only re-export.
+    pub is_type: bool,
 }
 
 impl SymbolGraph {
@@ -84,6 +86,7 @@ impl SymbolGraph {
         original_name: CompactString,
         exported_name: CompactString,
         is_star: bool,
+        is_type: bool,
     ) {
         self.reexport_edges.push(ReexportEdge {
             reexporter,
@@ -91,6 +94,7 @@ impl SymbolGraph {
             original_name,
             exported_name,
             is_star,
+            is_type,
         });
     }
 

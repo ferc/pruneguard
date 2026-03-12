@@ -79,7 +79,8 @@
       "required": [
         "kind",
         "path",
-        "profile"
+        "profile",
+        "source"
       ],
       "properties": {
         "kind": {
@@ -89,6 +90,9 @@
           "type": "string"
         },
         "profile": {
+          "type": "string"
+        },
+        "source": {
           "type": "string"
         },
         "workspace": {
@@ -147,6 +151,16 @@
         "path": {
           "type": "string"
         },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workspace": {
           "type": [
             "string",
@@ -164,6 +178,21 @@
         "config",
         "generated",
         "buildoutput"
+      ]
+    },
+    "FileRole": {
+      "type": "string",
+      "enum": [
+        "source",
+        "test",
+        "story",
+        "fixture",
+        "example",
+        "template",
+        "benchmark",
+        "config",
+        "generated",
+        "buildOutput"
       ]
     },
     "Finding": {
@@ -328,10 +357,14 @@
       "type": "object",
       "required": [
         "durationMs",
+        "entrypointsDetected",
         "filesCached",
+        "filesDiscovered",
         "filesParsed",
+        "filesResolved",
         "graphEdges",
-        "graphNodes"
+        "graphNodes",
+        "unresolvedSpecifiers"
       ],
       "properties": {
         "durationMs": {
@@ -339,12 +372,27 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "entrypointsDetected": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "filesCached": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
         },
+        "filesDiscovered": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "filesParsed": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "filesResolved": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
@@ -355,6 +403,11 @@
           "minimum": 0.0
         },
         "graphNodes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "unresolvedSpecifiers": {
           "type": "integer",
           "format": "uint",
           "minimum": 0.0

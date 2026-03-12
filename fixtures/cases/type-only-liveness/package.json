@@ -1,0 +1,4 @@
+{
+  "name": "type-only-liveness",
+  "main": "src/main.ts"
+}
