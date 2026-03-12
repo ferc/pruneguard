@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
 /// default extensions, condition names) so that the analysis cache is invalidated.
-pub const RESOLVER_LOGIC_VERSION: u32 = 2;
+pub const RESOLVER_LOGIC_VERSION: u32 = 3;
 
 /// Result of resolving a module specifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +77,9 @@ impl UnresolvedReason {
 /// Module resolver built on `oxc_resolver`.
 pub struct ModuleResolver {
     inner: Resolver,
+    /// Map of workspace package names to their root directories.
+    /// Enables resolution of deep subpath imports like `@scope/pkg/path/to/file`.
+    workspace_roots: FxHashMap<String, PathBuf>,
 }
 
 impl ModuleResolver {
@@ -134,7 +137,14 @@ impl ModuleResolver {
         });
 
         let inner = Resolver::new(options);
-        Self { inner }
+        Self { inner, workspace_roots: FxHashMap::default() }
+    }
+
+    /// Register workspace package name → root directory mappings.
+    /// This enables resolution of deep subpath imports into workspace packages
+    /// (e.g. `@calcom/features/auth/lib/getLocale` → `packages/features/auth/lib/getLocale.ts`).
+    pub fn set_workspace_roots(&mut self, roots: FxHashMap<String, PathBuf>) {
+        self.workspace_roots = roots;
     }
 
     /// Resolve a module specifier from a given file.
@@ -145,12 +155,38 @@ impl ModuleResolver {
                 let via_exports = resolved_via_package_exports(specifier, &resolution);
                 Ok(ResolvedModule { path: resolution.into_path_buf(), via_exports })
             }
-            Err(err) => Err(ResolveError::NotFound {
-                specifier: specifier.to_string(),
-                from: from.to_path_buf(),
-                reason: Some(classify_unresolved_reason(specifier, &err.to_string())),
-            }),
+            Err(err) => {
+                // Try workspace-aware resolution: map `@scope/pkg/sub/path` to
+                // the workspace root for `@scope/pkg` and resolve the subpath
+                // as a relative import from there.
+                if let Some(resolved) = self.resolve_via_workspace(specifier) {
+                    return Ok(resolved);
+                }
+                Err(ResolveError::NotFound {
+                    specifier: specifier.to_string(),
+                    from: from.to_path_buf(),
+                    reason: Some(classify_unresolved_reason(specifier, &err.to_string())),
+                })
+            }
         }
+    }
+
+    /// Try to resolve a bare specifier via workspace package mappings.
+    fn resolve_via_workspace(&self, specifier: &str) -> Option<ResolvedModule> {
+        let pkg_name = dependency_name(specifier)?;
+        let workspace_root = self.workspace_roots.get(&pkg_name)?;
+
+        // Extract the subpath after the package name.
+        let subpath = specifier.strip_prefix(&pkg_name)?;
+        let subpath = subpath.strip_prefix('/').unwrap_or(subpath);
+
+        if subpath.is_empty() {
+            // Bare package import — resolve via the package's main entry.
+            return resolve_with_extensions(workspace_root, "index");
+        }
+
+        // Deep subpath import — resolve as a file relative to the workspace root.
+        resolve_with_extensions(workspace_root, subpath)
     }
 }
 
@@ -287,6 +323,37 @@ fn looks_like_package_name(specifier: &str) -> bool {
         && name_part
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+}
+
+/// Resolve a subpath relative to a directory by trying common JS/TS extensions.
+/// This bypasses `oxc_resolver` entirely to avoid tsconfig resolution issues.
+fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule> {
+    let base = root.join(subpath);
+
+    // If the path already has an extension and exists, use it directly.
+    if base.is_file() {
+        return Some(ResolvedModule { path: base, via_exports: false });
+    }
+
+    // Try appending common extensions.
+    for ext in &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"] {
+        let candidate = base.with_extension(ext);
+        if candidate.is_file() {
+            return Some(ResolvedModule { path: candidate, via_exports: false });
+        }
+    }
+
+    // Try as a directory with index file.
+    if base.is_dir() {
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let candidate = base.join("index").with_extension(ext);
+            if candidate.is_file() {
+                return Some(ResolvedModule { path: candidate, via_exports: false });
+            }
+        }
+    }
+
+    None
 }
 
 fn resolved_via_package_exports(specifier: &str, resolution: &oxc_resolver::Resolution) -> bool {

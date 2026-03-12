@@ -99,7 +99,20 @@ pub fn build_graph_with_options(
         )
     });
 
-    let resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
+    let mut resolver = ModuleResolver::new(&config.resolver, &discovery.project_root);
+
+    // Build workspace package name → root directory mapping so the resolver
+    // can handle deep subpath imports into workspace packages (e.g.
+    // `@calcom/features/auth/lib/getLocale` → `packages/features/auth/lib/getLocale.ts`).
+    let workspace_roots: FxHashMap<String, PathBuf> = discovery
+        .workspaces
+        .values()
+        .filter_map(|ws| {
+            let pkg_name = ws.manifest.name.as_ref()?;
+            Some((pkg_name.clone(), ws.root.clone()))
+        })
+        .collect();
+    resolver.set_workspace_roots(workspace_roots);
     let config_hash = hash_json(config);
     let resolver_hash = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -645,22 +658,30 @@ fn detect_all_entrypoints(
                 return false;
             }
 
-            if !config.include_tests
-                && relative
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.contains(".test.") || name.contains(".spec."))
-            {
-                return false;
-            }
+            // Framework-contributed entrypoints (e.g. vitest config, storybook
+            // stories) bypass the include_tests / include_stories filters — they
+            // were explicitly added by the framework pack precisely because the
+            // framework owns those files.
+            if entrypoint.kind != SeedKind::FrameworkPack {
+                if !config.include_tests
+                    && relative
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.contains(".test.") || name.contains(".spec."))
+                {
+                    return false;
+                }
 
-            if !config.include_stories
-                && relative
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.contains(".stories.") || name.contains(".story."))
-            {
-                return false;
+                if !config.include_stories
+                    && relative
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.contains(".stories.") || name.contains(".story.")
+                        })
+                {
+                    return false;
+                }
             }
 
             true
