@@ -323,6 +323,17 @@ fn collect_namespace_usage(source: &str, alias: &str) -> NamespaceUsage {
             continue;
         }
 
+        // Check for spread operator: `...alias` — keeps entire module live.
+        if before == Some(b'.') {
+            let dots_start = index.saturating_sub(3);
+            let prefix = &bytes[dots_start..index];
+            if prefix.ends_with(b"...") {
+                usage.dynamic = true;
+                index += alias_bytes.len();
+                continue;
+            }
+        }
+
         match after {
             Some(b'.') => {
                 let member_start = index + alias_bytes.len() + 1;
@@ -337,17 +348,56 @@ fn collect_namespace_usage(source: &str, alias: &str) -> NamespaceUsage {
                 }
             }
             Some(b'[') => {
+                // Dynamic bracket access: `alias[key]` — keeps entire module live.
                 usage.dynamic = true;
                 index += alias_bytes.len();
                 continue;
             }
-            _ => {}
+            // The namespace passed as an argument: `fn(alias)` or `fn(alias,`
+            // or assigned: `x = alias` — keeps entire module live.
+            Some(b')' | b',') => {
+                let after_boundary =
+                    after.is_none_or(|byte| !is_identifier_byte(byte));
+                if after_boundary {
+                    usage.dynamic = true;
+                    index += alias_bytes.len();
+                    continue;
+                }
+            }
+            _ => {
+                // If the alias appears as a standalone identifier (not followed by
+                // `.` or `[`), it might be passed around, so mark as dynamic.
+                let after_boundary =
+                    after.is_none_or(|byte| !is_identifier_byte(byte) && byte != b'.');
+                if after_boundary
+                    && after != Some(b':')
+                    && !matches!(before, Some(b'.' | b'='))
+                {
+                    // Check if this is in an import/export context (which we already
+                    // handle via the AST) by looking at the surrounding context.
+                    // If not, it's a dynamic use.
+                    if !is_in_import_context(bytes, index) {
+                        usage.dynamic = true;
+                        index += alias_bytes.len();
+                        continue;
+                    }
+                }
+            }
         }
 
         index += 1;
     }
 
     usage
+}
+
+/// Crude check: is this position likely inside an `import` or `export` statement?
+/// We look backward for `import ` or `export ` on the same line.
+fn is_in_import_context(bytes: &[u8], pos: usize) -> bool {
+    let line_start = bytes[..pos].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let line_prefix = &bytes[line_start..pos];
+    line_prefix.windows(7).any(|w| w == b"import ")
+        || line_prefix.windows(7).any(|w| w == b"export ")
 }
 
 const fn is_identifier_byte(byte: u8) -> bool {

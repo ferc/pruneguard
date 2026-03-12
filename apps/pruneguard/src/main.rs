@@ -32,8 +32,19 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
     let cwd = std::env::current_dir().expect("failed to get current directory");
     let profile = to_entrypoint_profile(options.global.profile);
 
+    // Resolve the effective daemon mode: `auto` in CI becomes `off`.
+    let effective_daemon = resolve_daemon_mode(options.global.daemon);
+
     match options.command {
         cli::Command::Scan { paths } => {
+            // Try daemon-backed scan first.
+            if let Some(exit) = try_daemon_scan(
+                &cwd, effective_daemon, &paths, &options.global,
+            )? {
+                return Ok(exit);
+            }
+
+            // Fall back to one-shot scan.
             let config_cwd = paths.first().map_or_else(
                 || cwd.clone(),
                 |path| {
@@ -58,6 +69,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             handle_scan_report(scan, &options.global)
         }
         cli::Command::Impact { target } => {
+            // Try daemon-backed impact first.
+            if let Some(exit) = try_daemon_impact(
+                &cwd, effective_daemon, &target, &options.global,
+            )? {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             if matches!(options.global.format, cli::OutputFormat::Dot) {
                 miette::bail!("dot output is only supported for scan in this phase");
@@ -77,6 +95,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Explain { query } => {
+            // Try daemon-backed explain first.
+            if let Some(exit) = try_daemon_explain(
+                &cwd, effective_daemon, &query, &options.global,
+            )? {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             if matches!(options.global.format, cli::OutputFormat::Dot) {
                 miette::bail!("dot output is only supported for scan in this phase");
@@ -96,6 +121,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Review => {
+            // Try daemon-backed review first.
+            if let Some(exit) = try_daemon_review(
+                &cwd, effective_daemon, &options.global,
+            )? {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             let report = pruneguard::review(
                 &cwd,
@@ -187,7 +219,247 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             run_debug(debug_cmd, &config, profile)
         }
         cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd, options.global.format),
-        cli::Command::Daemon(daemon_cmd) => run_daemon(daemon_cmd),
+        cli::Command::Daemon(daemon_cmd) => run_daemon(&daemon_cmd),
+    }
+}
+
+/// Resolve the effective daemon mode: `Auto` becomes `Off` in CI.
+fn resolve_daemon_mode(mode: cli::DaemonMode) -> cli::DaemonMode {
+    match mode {
+        cli::DaemonMode::Auto if pruneguard_daemon::client::is_ci() => {
+            tracing::debug!("CI detected; daemon auto-start disabled");
+            cli::DaemonMode::Off
+        }
+        other => other,
+    }
+}
+
+/// Attempt to connect to a daemon (auto-starting if needed) and return a client.
+///
+/// Returns `Ok(None)` if the daemon mode is `Off` or the daemon is not available
+/// and auto-start is not applicable.
+///
+/// For `Auto` mode, if no daemon is currently running, a daemon process is
+/// spawned in the background for future runs and `None` is returned so the
+/// current invocation falls back to one-shot. This avoids making the first
+/// run slow due to daemon startup.
+fn try_daemon_client(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+) -> miette::Result<Option<pruneguard_daemon::DaemonClient>> {
+    let project_root = find_project_root_dir(cwd);
+    match mode {
+        cli::DaemonMode::Off => Ok(None),
+        cli::DaemonMode::Auto => {
+            match pruneguard_daemon::DaemonClient::try_connect_or_background_start(&project_root) {
+                Ok(Some(client)) => Ok(Some(client)),
+                Ok(None) => {
+                    tracing::debug!(
+                        "no running daemon; spawned one in background, falling back to one-shot"
+                    );
+                    Ok(None)
+                }
+                Err(err) => {
+                    // In auto mode, silently fall back to one-shot on any error.
+                    tracing::debug!("daemon auto-connect failed, falling back to one-shot: {err}");
+                    Ok(None)
+                }
+            }
+        }
+        cli::DaemonMode::Required => {
+            match pruneguard_daemon::DaemonClient::connect_or_start(&project_root) {
+                Ok(client) => Ok(Some(client)),
+                Err(err) => {
+                    miette::bail!("daemon required but not available: {err}");
+                }
+            }
+        }
+    }
+}
+
+/// Try a daemon-backed scan. Returns `Some(exit)` if the daemon handled it,
+/// or `None` if the caller should fall back to one-shot.
+fn try_daemon_scan(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    paths: &[std::path::PathBuf],
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::Scan {
+        paths: paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+        changed_since: flags.changed_since.clone(),
+        focus: flags.focus.clone(),
+    };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::ScanResult { report }) => {
+            eprintln!("(daemon-backed scan)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            tracing::debug!("daemon scan returned error: {message}");
+            // Fall back to one-shot on daemon error in auto mode.
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon scan failed: {message}");
+            }
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon scan failed: {err}");
+            }
+            tracing::debug!("daemon scan request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed review.
+fn try_daemon_review(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::Review {
+        base_ref: flags.changed_since.clone(),
+    };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::ReviewResult { report }) => {
+            eprintln!("(daemon-backed review)");
+            print_daemon_report(&report, flags.format);
+            let has_blocking = report
+                .get("blockingFindings")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|arr| !arr.is_empty());
+            Ok(Some(if has_blocking {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon review failed: {message}");
+            }
+            tracing::debug!("daemon review returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon review failed: {err}");
+            }
+            tracing::debug!("daemon review request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed impact query.
+fn try_daemon_impact(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    target: &str,
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::Impact {
+        target: target.to_string(),
+        focus: flags.focus.clone(),
+    };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::ImpactResult { report }) => {
+            eprintln!("(daemon-backed impact)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon impact failed: {message}");
+            }
+            tracing::debug!("daemon impact returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon impact failed: {err}");
+            }
+            tracing::debug!("daemon impact request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed explain query.
+fn try_daemon_explain(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    query: &str,
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::Explain {
+        query: query.to_string(),
+        focus: flags.focus.clone(),
+    };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::ExplainResult { report }) => {
+            eprintln!("(daemon-backed explain)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon explain failed: {message}");
+            }
+            tracing::debug!("daemon explain returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon explain failed: {err}");
+            }
+            tracing::debug!("daemon explain request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Print a daemon JSON report using the selected output format.
+fn print_daemon_report(
+    report: &serde_json::Value,
+    format: cli::OutputFormat,
+) {
+    match format {
+        cli::OutputFormat::Json
+        | cli::OutputFormat::Text
+        | cli::OutputFormat::Sarif
+        | cli::OutputFormat::Dot => {
+            // For all formats, print JSON for now -- the daemon returns raw
+            // JSON reports.
+            println!("{}", serde_json::to_string_pretty(report).expect("serialize report"));
+        }
     }
 }
 
@@ -227,6 +499,7 @@ fn run_debug(
                 }
                 Err(err) => format!("error: {err}"),
             };
+            let is_ci = pruneguard_daemon::client::is_ci();
             println!("binary: {binary}");
             println!("platform: {}-{}", std::env::consts::OS, std::env::consts::ARCH);
             println!("version: {}", env!("CARGO_PKG_VERSION"));
@@ -235,6 +508,51 @@ fn run_debug(
             println!("schema_exists: {schema_exists}");
             println!("config: {config_status}");
             println!("resolution_source: binary");
+            println!("ci: {is_ci}");
+            println!(
+                "default_execution_mode: {}",
+                if is_ci { "oneshot" } else { "daemon" }
+            );
+
+            // Report daemon status if available.
+            let project_root = find_project_root_dir(&cwd);
+            match pruneguard_daemon::DaemonClient::try_connect(&project_root) {
+                Ok(Some(client)) => {
+                    println!();
+                    println!("daemon: running");
+                    println!("daemon_pid: {}", client.pid());
+                    println!("daemon_port: {}", client.port());
+                    println!("daemon_version: {}", client.version());
+                    match client.status() {
+                        Ok(info) => {
+                            println!(
+                                "daemon_warm: {}",
+                                if info.index_warm { "yes" } else { "no" }
+                            );
+                            println!("daemon_graph_nodes: {}", info.graph_nodes);
+                            println!("daemon_graph_edges: {}", info.graph_edges);
+                            println!("daemon_watched_files: {}", info.watched_files);
+                            println!("daemon_generation: {}", info.generation);
+                            println!("daemon_last_update_ms: {}", info.last_update_ms);
+                            if let Some(lag) = info.watcher_lag_ms {
+                                println!("daemon_watcher_lag_ms: {lag}");
+                            }
+                            println!("daemon_uptime_secs: {}", info.uptime_secs);
+                        }
+                        Err(err) => {
+                            println!("daemon_status_error: {err}");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    println!();
+                    println!("daemon: not running");
+                }
+                Err(err) => {
+                    println!();
+                    println!("daemon: error ({err})");
+                }
+            }
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -429,9 +747,18 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     stats.get("durationMs").and_then(serde_json::Value::as_u64).unwrap_or(0);
                 println!("duration ms: {duration}");
 
-                // Trust summary
+                // Trust summary — prominent block so users can gauge reliability.
                 println!();
-                println!("trust summary");
+                println!("--- trust summary ---");
+
+                // Execution mode: daemon vs oneshot.
+                let execution_mode = stats
+                    .get("executionMode")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("oneshot");
+                println!("mode: {execution_mode}");
+
+                // Scope: full vs partial.
                 let partial_scope =
                     stats.get("partialScope").and_then(serde_json::Value::as_bool).unwrap_or(false);
                 let full_scope_required = stats
@@ -450,6 +777,7 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     }
                 }
 
+                // Baseline status.
                 let baseline_applied = stats
                     .get("baselineApplied")
                     .and_then(serde_json::Value::as_bool)
@@ -466,27 +794,68 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                     println!("  baseline profile differs from the current profile.");
                 }
 
+                // Unresolved pressure.
                 println!("unresolved specifiers: {unresolved}");
                 if resolved > 0 && unresolved > 0 {
                     #[allow(clippy::cast_precision_loss)]
                     let pressure_pct = (unresolved as f64 / (resolved + unresolved) as f64) * 100.0;
-                    if pressure_pct > 5.0 {
+                    if pressure_pct > 15.0 {
                         println!(
-                            "  unresolved pressure: {pressure_pct:.1}% — findings may have lower accuracy"
+                            "  unresolved pressure: {pressure_pct:.1}% (HIGH) — many findings may be false positives"
+                        );
+                    } else if pressure_pct > 5.0 {
+                        println!(
+                            "  unresolved pressure: {pressure_pct:.1}% (moderate) — some findings may have lower accuracy"
+                        );
+                    } else {
+                        println!(
+                            "  unresolved pressure: {pressure_pct:.1}% (low)"
                         );
                     }
                 }
 
+                // Unresolved breakdown by reason.
+                if let Some(by_reason) = stats.get("unresolvedByReason").and_then(serde_json::Value::as_object) {
+                    let missing = by_reason.get("missingFile").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let unsupported = by_reason.get("unsupportedSpecifier").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let tsconfig = by_reason.get("tsconfigPathMiss").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let exports_miss = by_reason.get("exportsConditionMiss").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let externalized = by_reason.get("externalized").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    if unresolved > 0 {
+                        println!(
+                            "  breakdown: missing={missing}, unsupported={unsupported}, tsconfig={tsconfig}, exports={exports_miss}, externalized={externalized}"
+                        );
+                    }
+                }
+
+                // Confidence counts.
                 if let Some(confidence) =
                     stats.get("confidenceCounts").and_then(serde_json::Value::as_object)
                 {
+                    let high = confidence.get("high").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let medium = confidence.get("medium").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let low = confidence.get("low").and_then(serde_json::Value::as_u64).unwrap_or(0);
                     println!(
-                        "confidence: high={}, medium={}, low={}",
-                        confidence.get("high").and_then(serde_json::Value::as_u64).unwrap_or(0),
-                        confidence.get("medium").and_then(serde_json::Value::as_u64).unwrap_or(0),
-                        confidence.get("low").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                        "confidence: high={high}, medium={medium}, low={low}",
                     );
+                    if high > 0 && low == 0 && medium == 0 {
+                        println!("  all findings are high-confidence — safe to act on.");
+                    } else if low > high + medium {
+                        println!("  majority of findings are low-confidence — review carefully.");
+                    }
                 }
+
+                // Daemon warm-index info.
+                if let Some(index_warm) = stats.get("indexWarm").and_then(serde_json::Value::as_bool)
+                    && index_warm {
+                        let age_ms = stats.get("indexAgeMs").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                        let reused_nodes = stats.get("reusedGraphNodes").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                        println!(
+                            "warm index: reused {reused_nodes} nodes, age {age_ms}ms"
+                        );
+                    }
+
+                println!("---------------------");
 
                 let focus_applied =
                     stats.get("focusApplied").and_then(serde_json::Value::as_bool).unwrap_or(false);
@@ -645,7 +1014,7 @@ fn render_sarif<T: serde::Serialize>(report: &T) -> miette::Result<String> {
     .map_err(|err| miette::miette!("{err}"))
 }
 
-fn run_daemon(cmd: cli::DaemonCommand) -> miette::Result<ExitCode> {
+fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
     let cwd = std::env::current_dir().expect("failed to get current directory");
     let project_root = find_project_root_dir(&cwd);
 
@@ -663,35 +1032,55 @@ fn run_daemon(cmd: cli::DaemonCommand) -> miette::Result<ExitCode> {
         cli::DaemonCommand::Stop => {
             let metadata = pruneguard_daemon::DaemonMetadata::load(&project_root)
                 .map_err(|err| miette::miette!("failed to load daemon metadata: {err}"))?;
-            match metadata {
-                Some(meta) => {
-                    let rt = tokio::runtime::Runtime::new()
-                        .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
-                    rt.block_on(async {
-                        send_daemon_shutdown(meta.port, &meta.token).await
-                    })?;
-                    eprintln!("daemon stopped");
-                    Ok(ExitCode::SUCCESS)
-                }
-                None => {
-                    eprintln!("no running daemon found");
-                    Ok(ExitCode::from(1))
-                }
+            if let Some(meta) = metadata {
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
+                rt.block_on(async {
+                    send_daemon_shutdown(meta.port, &meta.token).await
+                })?;
+                eprintln!("daemon stopped");
+                Ok(ExitCode::SUCCESS)
+            } else {
+                eprintln!("no running daemon found");
+                Ok(ExitCode::from(1))
             }
         }
         cli::DaemonCommand::Status => {
-            let metadata = pruneguard_daemon::DaemonMetadata::load(&project_root)
-                .map_err(|err| miette::miette!("failed to load daemon metadata: {err}"))?;
-            match metadata {
-                Some(meta) => {
-                    println!("pid: {}", meta.pid);
-                    println!("port: {}", meta.port);
-                    println!("version: {}", meta.version);
-                    println!("started_at: {}", meta.started_at);
+            match pruneguard_daemon::DaemonClient::try_connect(&project_root) {
+                Ok(Some(client)) => {
+                    println!("pid: {}", client.pid());
+                    println!("port: {}", client.port());
+                    println!("version: {}", client.version());
+                    println!("execution_mode: daemon");
+                    match client.status() {
+                        Ok(info) => {
+                            println!(
+                                "warm: {}",
+                                if info.index_warm { "yes" } else { "no" }
+                            );
+                            println!("graph_nodes: {}", info.graph_nodes);
+                            println!("graph_edges: {}", info.graph_edges);
+                            println!("watched_files: {}", info.watched_files);
+                            println!("generation: {}", info.generation);
+                            println!("last_update_ms: {}", info.last_update_ms);
+                            if let Some(lag) = info.watcher_lag_ms {
+                                println!("watcher_lag_ms: {lag}");
+                            }
+                            println!("pending_invalidations: {}", info.pending_invalidations);
+                            println!("uptime_secs: {}", info.uptime_secs);
+                        }
+                        Err(err) => {
+                            eprintln!("failed to query daemon status: {err}");
+                        }
+                    }
                     Ok(ExitCode::SUCCESS)
                 }
-                None => {
+                Ok(None) => {
                     println!("no running daemon");
+                    Ok(ExitCode::from(1))
+                }
+                Err(err) => {
+                    eprintln!("failed to connect to daemon: {err}");
                     Ok(ExitCode::from(1))
                 }
             }

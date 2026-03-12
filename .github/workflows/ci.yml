@@ -44,56 +44,31 @@ jobs:
             }
           "
 
+      # Stage release packages (.release/npm/ is the sole publish source).
+      # The staging script rewrites workspace:* to concrete versions, injects
+      # metadata, and validates: no workspace refs, no banned artifacts, no
+      # repo-local paths, all optionalDependencies accounted for.
       - name: Stage release packages
-        # The staging script validates output automatically (workspace refs,
-        # required fields, banned artifacts, optionalDependencies parity).
         run: node scripts/stage_npm_release.mjs
 
-      - name: Verify staged packages (independent re-validation)
+      # Independent re-validation of staged output
+      - name: Verify staged packages
         run: node scripts/stage_npm_release.mjs --verify
 
-      - name: Verify staged platform packages have required fields
-        run: |
-          node -e "
-            const fs = require('fs');
-            const path = require('path');
-            const releaseDir = '.release/npm';
-            const required = ['name','version','description','license','repository','os','cpu'];
-            const dirs = fs.readdirSync(releaseDir).filter(d => d.startsWith('cli-'));
-            let ok = true;
-            for (const dir of dirs) {
-              const pkg = JSON.parse(fs.readFileSync(path.join(releaseDir, dir, 'package.json'), 'utf8'));
-              for (const field of required) {
-                if (pkg[field] === undefined || pkg[field] === null) {
-                  console.error('ERROR: ' + dir + ' missing field: ' + field);
-                  ok = false;
-                }
-              }
-            }
-            if (!ok) process.exit(1);
-            console.log('All ' + dirs.length + ' platform packages have required fields');
-          "
-
-      - name: Verify staged root package bin entry
-        run: |
-          node -e "
-            const fs = require('fs');
-            const path = require('path');
-            const pkg = JSON.parse(fs.readFileSync('.release/npm/pruneguard/package.json', 'utf8'));
-            for (const [cmd, binPath] of Object.entries(pkg.bin || {})) {
-              const resolved = path.join('.release/npm/pruneguard', binPath);
-              if (!fs.existsSync(resolved)) {
-                console.error('ERROR: bin entry \"' + cmd + '\" points to non-existent file: ' + binPath);
-                process.exit(1);
-              }
-            }
-            console.log('Root package bin entries point to existing files');
-          "
-
-      # Pack smoke validates the staged root package on the current CI
-      # platform only. The full cross-platform matrix is validated during
-      # the release workflow where each target builds its own binary.
+      # Pack smoke: pack the staged root package to verify it produces a
+      # valid tarball. The full cross-platform matrix (with real binaries)
+      # is validated during the release workflow.
       - name: Pack smoke (staged root package)
         run: |
-          mkdir -p /tmp/pruneguard-pack
-          npm pack --pack-destination /tmp/pruneguard-pack .release/npm/pruneguard
+          PACK_DIR="/tmp/pruneguard-pack"
+          rm -rf "$PACK_DIR"
+          mkdir -p "$PACK_DIR"
+          npm pack --pack-destination "$PACK_DIR" .release/npm/pruneguard
+
+          # Verify the packed tarball contains no workspace: references
+          tar -xzf "$PACK_DIR"/*.tgz -C "$PACK_DIR" package/package.json
+          if grep -q '"workspace:' "$PACK_DIR/package/package.json"; then
+            echo "::error::workspace: reference found in packed tarball"
+            exit 1
+          fi
+          echo "Staged root package packs cleanly with no workspace: leaks"

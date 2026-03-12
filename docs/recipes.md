@@ -2,7 +2,36 @@
 
 Copy-paste examples using the pruneguard JS API for common automation tasks.
 
-## Branch Review in CI
+## Scan
+
+Run a full scan and process findings.
+
+```js
+import { scan } from "pruneguard";
+
+const report = await scan({
+  cwd: "/path/to/repo",
+  noCache: true,
+  noBaseline: true,
+});
+
+console.log(`Total findings: ${report.summary.totalFindings}`);
+console.log(`  Errors: ${report.summary.errors}`);
+console.log(`  Warnings: ${report.summary.warnings}`);
+console.log(`  Info: ${report.summary.infos}`);
+console.log(`  Duration: ${report.stats.durationMs}ms`);
+
+// Filter to high-confidence errors only
+const critical = report.findings.filter(
+  (f) => f.severity === "error" && f.confidence === "high"
+);
+
+for (const f of critical) {
+  console.log(`${f.code} ${f.subject}: ${f.message}`);
+}
+```
+
+## Review
 
 Run `review` on a pull request and fail the build if there are blocking
 findings. The `review` command classifies findings as blocking (high
@@ -43,55 +72,9 @@ In a GitHub Actions workflow, wrap this in a step:
 ```yaml
 - name: Branch review
   run: node scripts/review-gate.mjs
-  env:
-    NODE_OPTIONS: "--experimental-vm-modules"
 ```
 
-## Baseline-Gated CI
-
-Generate a baseline from the `main` branch scan, then compare subsequent
-scans to only surface new findings. This lets teams adopt pruneguard
-incrementally without fixing all existing issues first.
-
-**Step 1: Generate baseline on main**
-
-```js
-import { scan } from "pruneguard";
-import { writeFileSync } from "node:fs";
-
-const report = await scan({
-  noCache: true,
-  noBaseline: true,
-});
-
-writeFileSync("baseline.json", JSON.stringify(report, null, 2));
-console.log(`Baseline saved: ${report.findings.length} findings`);
-```
-
-**Step 2: Compare on feature branches**
-
-```js
-import { scan } from "pruneguard";
-import { readFileSync } from "node:fs";
-
-const baseline = JSON.parse(readFileSync("baseline.json", "utf-8"));
-const baselineIds = new Set(baseline.findings.map((f) => f.id));
-
-const current = await scan({ noCache: true, noBaseline: true });
-const newFindings = current.findings.filter((f) => !baselineIds.has(f.id));
-
-if (newFindings.length > 0) {
-  console.error(`${newFindings.length} new finding(s) introduced:`);
-  for (const f of newFindings) {
-    console.error(`  ${f.id}: ${f.message}`);
-  }
-  process.exit(1);
-}
-
-console.log("No new findings. Branch is clean relative to baseline.");
-```
-
-## Safe Deletion Checks
+## safeDelete
 
 Before deleting files in an automated cleanup, use `safeDelete` to verify
 each target is safe to remove. This prevents breaking changes from automated
@@ -140,10 +123,147 @@ for (const path of result.deletionOrder) {
 }
 ```
 
+## fixPlan
+
+Use `fixPlan` to generate a structured remediation plan with specific actions
+per finding, then execute the actions programmatically.
+
+```js
+import { fixPlan, scan } from "pruneguard";
+
+// Generate fix plan for specific targets
+const plan = await fixPlan({
+  targets: ["src/legacy/old-widget.ts"],
+});
+
+console.log(`Risk level: ${plan.riskLevel}`);
+console.log(`Confidence: ${plan.confidence}`);
+console.log(`Actions: ${plan.actions.length}`);
+
+for (const action of plan.actions) {
+  console.log(`\n${action.kind}: ${action.targets.join(", ")}`);
+  console.log(`  Why: ${action.why}`);
+  console.log(`  Risk: ${action.risk}, Confidence: ${action.confidence}`);
+
+  if (action.preconditions.length > 0) {
+    console.log("  Preconditions:");
+    for (const p of action.preconditions) {
+      console.log(`    - ${p}`);
+    }
+  }
+
+  console.log("  Steps:");
+  for (const step of action.steps) {
+    console.log(`    - ${step.description}`);
+  }
+}
+
+if (plan.blockedBy.length > 0) {
+  console.warn("\nBlocked by:");
+  for (const b of plan.blockedBy) {
+    console.warn(`  - ${b}`);
+  }
+}
+
+console.log("\nVerification steps:");
+for (const v of plan.verificationSteps) {
+  console.log(`  - ${v}`);
+}
+```
+
+## run
+
+Use `run` as an escape hatch for CLI flags not covered by the typed API.
+
+```js
+import { run } from "pruneguard";
+
+// Run a scan with custom flags
+const result = await run([
+  "--format", "json",
+  "--no-cache",
+  "--no-baseline",
+  "--daemon", "off",
+  "--severity", "error",
+  "scan",
+]);
+
+console.log(`Exit code: ${result.exitCode}`);
+console.log(`Duration: ${result.durationMs}ms`);
+
+if (result.exitCode === 0 || result.exitCode === 1) {
+  const report = JSON.parse(result.stdout);
+  console.log(`Findings: ${report.findings.length}`);
+}
+```
+
+## binaryPath
+
+Resolve the native binary for custom integrations.
+
+```js
+import { binaryPath, resolutionInfo } from "pruneguard";
+
+// Get just the path
+console.log(binaryPath());
+
+// Get full resolution diagnostics
+const info = resolutionInfo();
+console.log(`Binary: ${info.binaryPath}`);
+console.log(`Source: ${info.source}`);
+console.log(`Platform: ${info.platform}`);
+if (info.platformPackage) {
+  console.log(`Package: ${info.platformPackage}`);
+}
+```
+
+## Baseline-Gated CI
+
+Generate a baseline from the `main` branch scan, then compare subsequent
+scans to only surface new findings. This lets teams adopt pruneguard
+incrementally without fixing all existing issues first.
+
+**Step 1: Generate baseline on main**
+
+```js
+import { scan } from "pruneguard";
+import { writeFileSync } from "node:fs";
+
+const report = await scan({
+  noCache: true,
+  noBaseline: true,
+});
+
+writeFileSync("baseline.json", JSON.stringify(report, null, 2));
+console.log(`Baseline saved: ${report.findings.length} findings`);
+```
+
+**Step 2: Compare on feature branches**
+
+```js
+import { scan } from "pruneguard";
+import { readFileSync } from "node:fs";
+
+const baseline = JSON.parse(readFileSync("baseline.json", "utf-8"));
+const baselineIds = new Set(baseline.findings.map((f) => f.id));
+
+const current = await scan({ noCache: true, noBaseline: true });
+const newFindings = current.findings.filter((f) => !baselineIds.has(f.id));
+
+if (newFindings.length > 0) {
+  console.error(`${newFindings.length} new finding(s) introduced:`);
+  for (const f of newFindings) {
+    console.error(`  ${f.id}: ${f.message}`);
+  }
+  process.exit(1);
+}
+
+console.log("No new findings. Branch is clean relative to baseline.");
+```
+
 ## Fix-Plan Repair Loop
 
-Use the `fix-plan` command output to drive automated fixes. The fix-plan
-produces a structured remediation plan with specific actions per finding.
+Use the `fix-plan` command output to drive automated fixes.
 
 ```js
 import { run } from "pruneguard";
@@ -198,11 +318,10 @@ console.log(`Remaining findings: ${report.findings.length}`);
 ## Impact Analysis Before Merge
 
 Before merging a PR that modifies shared code, run `impact` on each changed
-file to understand the blast radius. This helps reviewers focus on the files
-most likely to be affected.
+file to understand the blast radius.
 
 ```js
-import { impact, scan } from "pruneguard";
+import { impact } from "pruneguard";
 import { execSync } from "node:child_process";
 
 // Get changed files from git
@@ -234,7 +353,7 @@ for (const file of changedFiles) {
       for (const e of result.affectedEntrypoints) totalAffected.add(e);
     }
   } catch (err) {
-    // File may be new or deleted — impact may not resolve
+    // File may be new or deleted -- impact may not resolve
     console.warn(`  Skipped ${file}: ${err.message}`);
   }
 }
@@ -247,4 +366,39 @@ if (totalAffected.size > 50) {
     "requesting additional reviewers."
   );
 }
+```
+
+## Suggest Rules and Apply
+
+Discover governance rules that match your repo's actual dependency patterns.
+
+```js
+import { suggestRules, loadConfig } from "pruneguard";
+import { writeFileSync, readFileSync } from "node:fs";
+
+const result = await suggestRules();
+
+console.log(`Suggested ${result.suggestedRules.length} rule(s):`);
+for (const rule of result.suggestedRules) {
+  console.log(`  [${rule.confidence}] ${rule.name}: ${rule.description}`);
+}
+
+if (result.hotspots?.length) {
+  console.log("\nHotspots:");
+  for (const h of result.hotspots) {
+    console.log(`  ${h.file}: ${h.suggestion}`);
+  }
+}
+
+// Merge suggested rules into existing config
+const config = JSON.parse(readFileSync("pruneguard.json", "utf-8"));
+config.rules = config.rules || {};
+config.rules.forbidden = config.rules.forbidden || [];
+
+for (const rule of result.suggestedRules.filter((r) => r.confidence === "high")) {
+  config.rules.forbidden.push(rule.configFragment);
+}
+
+writeFileSync("pruneguard.json", JSON.stringify(config, null, 2));
+console.log("Updated pruneguard.json with high-confidence rules.");
 ```

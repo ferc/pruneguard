@@ -1,37 +1,31 @@
 # pruneguard
 
-**One graph. Every answer.** Find unused exports, dead files, phantom dependencies, import cycles, and boundary violations across your entire JS/TS monorepo — in a single, fast Rust-powered pass.
+**One graph. Every answer.** Find unused exports, dead files, phantom dependencies, import cycles, and boundary violations across your entire JS/TS monorepo -- in a single, fast Rust-powered pass.
 
 [![npm version](https://img.shields.io/npm/v/pruneguard)](https://www.npmjs.com/package/pruneguard)
 [![license](https://img.shields.io/npm/l/pruneguard)](https://github.com/ferc/pruneguard/blob/main/LICENSE)
 
 ---
 
-## Why pruneguard?
+## Install
 
-Large JS/TS monorepos accumulate dead code, orphan files, and undeclared cross-package imports faster than any team can manually track. Existing tools either focus on a single concern, struggle with monorepo workspaces, or sacrifice accuracy for speed.
+```sh
+npm install -D pruneguard   # or: npx pruneguard scan
+```
 
-Pruneguard builds one complete module graph — resolving TypeScript paths, package.json `exports`, workspace links, and framework conventions — then runs every analyzer over it in a single pass. The result: fast, accurate, actionable findings with proof chains you can verify before deleting a single line.
+The package automatically installs the correct platform-specific native binary. No Rust toolchain, no compilation, no native addons -- just `npm install` and go.
 
-### Key strengths
+**Supported platforms:** macOS (ARM64, x64), Linux (x64/ARM64, glibc and musl), Windows (x64, ARM64). Requires Node.js >= 18.
 
-- **Rust-native speed** — parses and resolves thousands of files in seconds, powered by [oxc](https://oxc.rs)
-- **Monorepo-first** — understands pnpm/npm/yarn/bun workspaces, cross-package imports, and `exports` maps out of the box
-- **8 built-in analyzers** — unused exports, unused files, unused packages, unused dependencies, cycles, boundary violations, ownership, and impact analysis
-- **Framework-aware** — auto-detects Next.js, Vite, Vitest, Jest, and Storybook entrypoints so you don't over-report
-- **Trust model** — every finding carries a confidence level; partial-scope scans are clearly marked as advisory
-- **Explainability** — `impact` and `explain` commands let you trace proof chains before acting
-- **CI-ready** — SARIF output, deterministic mode, `--changed-since` for incremental PR checks, exit codes for gating
-- **Migrate easily** — built-in config converters for knip and dependency-cruiser
+### How it works
+
+pruneguard ships a compiled Rust binary for each platform. The JS API and CLI both spawn this binary. Locally the daemon keeps the graph warm for instant queries. In CI every invocation is a fresh one-shot run.
 
 ---
 
 ## Quick start
 
 ```sh
-# Install
-npm install -D pruneguard   # or: npx pruneguard scan
-
 # Scan your repo
 pruneguard scan
 
@@ -53,28 +47,34 @@ pruneguard init
 pruneguard [OPTIONS] <COMMAND>
 
 Commands:
-  scan [PATHS...]        Analyze the repo (default command)
-  impact <TARGET>        Compute blast radius for a file or export
-  explain <QUERY>        Show proof chain for a finding, file, or export
-  init                   Generate a default pruneguard.json
-  print-config           Display the resolved configuration
-  debug resolve          Debug module resolution
-  debug entrypoints      List detected entrypoints
-  debug runtime          Print runtime diagnostics
-  migrate knip           Convert knip config to pruneguard
-  migrate depcruise      Convert dependency-cruiser config to pruneguard
+  scan [PATHS...]             Analyze the repo (default command)
+  impact <TARGET>             Compute blast radius for a file or export
+  explain <QUERY>             Show proof chain for a finding, file, or export
+  review                      Branch review gate (blocking vs advisory findings)
+  safe-delete <TARGETS...>    Evaluate targets for safe deletion
+  fix-plan <TARGETS...>       Generate structured remediation plan
+  suggest-rules               Auto-suggest governance rules from graph analysis
+  init                        Generate a default pruneguard.json
+  print-config                Display the resolved configuration
+  debug resolve               Debug module resolution
+  debug entrypoints           List detected entrypoints
+  debug runtime               Print runtime diagnostics
+  daemon start|stop|status    Manage the background daemon
+  migrate knip                Convert knip config to pruneguard
+  migrate depcruise           Convert dependency-cruiser config to pruneguard
 
 Options:
   -c, --config <FILE>          Config file path [default: pruneguard.json]
       --format <FORMAT>        Output format: text, json, sarif, dot
       --profile <PROFILE>      Analysis profile: production, development, all
-      --changed-since <REF>    Only analyze files changed since a git ref
+      --changed-since <REF>    Only report findings for changed files
       --focus <GLOB>           Filter findings to matching files
       --severity <SEVERITY>    Minimum severity: error, warn, info
       --no-cache               Disable incremental cache
       --no-baseline            Disable baseline suppression
       --require-full-scope     Fail if scan is partial-scope
       --max-findings <N>       Cap the number of reported findings
+      --daemon <MODE>          Daemon mode: auto, off, required
   -V, --version                Print version
   -h, --help                   Print help
 ```
@@ -83,23 +83,154 @@ Options:
 
 ```sh
 # Full scan with JSON output for CI
-pruneguard scan --format json
+pruneguard --format json scan
 
-# PR check — only findings from changed files
+# PR check -- only findings from changed files
 pruneguard --changed-since origin/main scan
 
 # Deterministic CI (no cache, no baseline)
 pruneguard --no-baseline --no-cache scan
 
+# Branch review gate
+pruneguard --changed-since origin/main review
+
+# Safe-delete check before cleanup
+pruneguard safe-delete src/old.ts src/legacy/widget.ts
+
 # Focus on a specific area without narrowing analysis scope
 pruneguard --focus "packages/core/**" scan
 
 # SARIF for GitHub Code Scanning
-pruneguard scan --format sarif > results.sarif
+pruneguard --format sarif scan > results.sarif
 
 # Visualize the module graph
-pruneguard scan --format dot | dot -Tsvg -o graph.svg
+pruneguard --format dot scan | dot -Tsvg -o graph.svg
 ```
+
+---
+
+## Programmatic API
+
+All functions spawn the native binary and return typed results.
+
+```js
+import {
+  scan,
+  review,
+  safeDelete,
+  fixPlan,
+  impact,
+  explain,
+  suggestRules,
+  run,
+  binaryPath,
+  loadConfig,
+  schemaPath,
+  scanDot,
+  migrateKnip,
+  migrateDepcruise,
+} from "pruneguard";
+```
+
+### scan
+
+```js
+const report = await scan({
+  profile: "production",
+  changedSince: "origin/main",
+});
+console.log(`${report.summary.totalFindings} findings`);
+```
+
+### review
+
+```js
+const result = await review({ baseRef: "origin/main", noCache: true });
+if (result.blockingFindings.length > 0) {
+  console.error("Blocking findings exist");
+  process.exit(1);
+}
+```
+
+### safeDelete
+
+```js
+const result = await safeDelete({ targets: ["src/old.ts"] });
+console.log("Safe:", result.safe.map(e => e.target));
+console.log("Blocked:", result.blocked.map(e => e.target));
+```
+
+### fixPlan
+
+```js
+const plan = await fixPlan({ targets: ["src/old.ts"] });
+for (const action of plan.actions) {
+  console.log(`${action.kind}: ${action.targets.join(", ")}`);
+}
+```
+
+### impact
+
+```js
+const blast = await impact({ target: "src/utils/helpers.ts" });
+console.log(`Affects ${blast.affectedEntrypoints.length} entrypoints`);
+```
+
+### explain
+
+```js
+const proof = await explain({ query: "src/old.ts#deprecatedFn" });
+console.log(proof.proofs);
+```
+
+### run
+
+```js
+const result = await run(["--format", "json", "--daemon", "off", "scan"]);
+console.log(result.exitCode, result.durationMs);
+```
+
+### binaryPath
+
+```js
+console.log(binaryPath());
+// => /path/to/node_modules/@pruneguard/cli-darwin-arm64/bin/pruneguard
+```
+
+### Other functions
+
+```js
+const config = await loadConfig();
+const schema = schemaPath();
+const dot = await scanDot();
+const rules = await suggestRules();
+const knip = await migrateKnip();
+const dc = await migrateDepcruise();
+```
+
+### Error handling
+
+All functions throw `PruneguardExecutionError` with a `code` field:
+
+| Code | Meaning |
+|---|---|
+| `PRUNEGUARD_BINARY_NOT_FOUND` | Native binary not found |
+| `PRUNEGUARD_EXECUTION_FAILED` | Binary exited with unexpected code |
+| `PRUNEGUARD_JSON_PARSE_FAILED` | Output was not valid JSON |
+
+```js
+import { scan, PruneguardExecutionError } from "pruneguard";
+
+try {
+  await scan();
+} catch (err) {
+  if (err instanceof PruneguardExecutionError) {
+    console.error(err.code, err.message);
+  }
+}
+```
+
+Full TypeScript types are included via `dist/index.d.mts`.
 
 ---
 
@@ -116,47 +247,22 @@ Create `pruneguard.json` (or `.pruneguardrc.json`) in your project root. Run `pr
     "packageManager": "pnpm"
   },
 
-  "entrypoints": {
-    "auto": true,
-    "include": ["src/index.ts"],
-    "exclude": ["**/*.test.ts"]
-  },
-
   "analysis": {
     "unusedExports": "error",
     "unusedFiles": "warn",
     "unusedDependencies": "error",
-    "unusedPackages": "warn",
-    "cycles": "warn",
-    "boundaries": "error"
+    "cycles": "warn"
   },
 
   "frameworks": {
     "next": "auto",
     "vitest": "auto",
     "storybook": "auto"
-  },
-
-  "rules": {
-    "forbidden": [
-      {
-        "name": "no-cross-app-imports",
-        "severity": "error",
-        "comment": "Apps must not import from other apps",
-        "from": { "workspace": ["apps/*"] },
-        "to": { "workspace": ["apps/*"] }
-      }
-    ]
-  },
-
-  "ownership": {
-    "importCodeowners": true,
-    "unownedSeverity": "warn"
   }
 }
 ```
 
-Full schema reference is bundled at `node_modules/pruneguard/configuration_schema.json` — editors with JSON Schema support will provide autocomplete and validation automatically.
+Full schema reference is bundled at `node_modules/pruneguard/configuration_schema.json`.
 
 ---
 
@@ -171,64 +277,115 @@ Full schema reference is bundled at `node_modules/pruneguard/configuration_schem
 | **Cycles** | `cycles` | Circular dependency chains (strongly connected components) |
 | **Boundary violations** | `boundaries` | Custom forbidden/required import rules |
 | **Ownership** | `ownership` | Files without a matching team in CODEOWNERS or config |
-| **Impact** | — | Reverse-reachability blast radius (via `pruneguard impact`) |
+| **Impact** | -- | Reverse-reachability blast radius (via `pruneguard impact`) |
 
-Each finding includes a **confidence level** (high / medium / low) based on analysis scope and unresolved-specifier pressure, so you always know how much to trust a result.
+Each finding includes a **confidence level** (high / medium / low) so you always know how much to trust a result.
 
 ---
 
 ## Trust model
-
-Pruneguard is designed for safe, incremental adoption — not surprise bulk deletions.
 
 | Mode | Behavior | Use case |
 |---|---|---|
 | `pruneguard scan` | Full-repo analysis, high-confidence findings | Deletion decisions, CI gating |
 | `--focus "glob"` | Full analysis, findings filtered to matching files | Scoping reports to a team or area |
 | `scan <paths...>` | Partial-scope, findings marked advisory | Quick local checks |
-| `--changed-since ref` | Incremental, only changed files analyzed | PR review, fast CI |
+| `--changed-since ref` | Full graph, only changed-file findings reported | PR review, fast CI |
 | `--require-full-scope` | Fails if scan would be partial-scope | Strict CI enforcement |
 | `--no-baseline` | No baseline suppression | Deterministic CI, benchmarks |
 
-**Recommended deletion flow:**
+---
 
-1. `pruneguard scan --format json` — identify candidates
-2. `pruneguard impact <target>` — check blast radius
-3. `pruneguard explain <finding>` — review proof chain
-4. Delete with confidence
+## GitHub Actions
+
+### Branch review gate
+
+```yaml
+name: pruneguard
+on: [pull_request]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm install pruneguard
+      - name: Branch review
+        run: npx pruneguard --changed-since origin/main --format json review
+```
+
+### Baseline-gated CI
+
+```yaml
+name: pruneguard-baseline
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm install pruneguard
+
+      - name: Save baseline
+        if: github.ref == 'refs/heads/main'
+        run: npx pruneguard --no-cache --no-baseline --format json scan > baseline.json
+
+      - uses: actions/upload-artifact@v6
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: pruneguard-baseline
+          path: baseline.json
+
+      - uses: actions/download-artifact@v7
+        if: github.event_name == 'pull_request'
+        with:
+          name: pruneguard-baseline
+        continue-on-error: true
+
+      - name: Check for new findings
+        if: github.event_name == 'pull_request'
+        run: |
+          npx pruneguard --no-cache --no-baseline --format json scan > current.json
+          node -e "
+            const fs = require('fs');
+            if (!fs.existsSync('baseline.json')) { console.log('No baseline, skipping'); process.exit(0); }
+            const base = JSON.parse(fs.readFileSync('baseline.json','utf-8'));
+            const curr = JSON.parse(fs.readFileSync('current.json','utf-8'));
+            const ids = new Set(base.findings.map(f => f.id));
+            const n = curr.findings.filter(f => !ids.has(f.id));
+            if (n.length) { n.forEach(f => console.error(f.id+': '+f.message)); process.exit(1); }
+            console.log('No new findings.');
+          "
+```
 
 ---
 
-## Programmatic API
+## Migrating from other tools
 
-```ts
-import { scan, impact, explain, loadConfig } from "pruneguard";
-
-// Scan and get structured results
-const report = await scan({
-  profile: "production",
-  changedSince: "origin/main",
-});
-
-console.log(`${report.summary.totalFindings} findings`);
-
-// Blast radius analysis
-const blast = await impact({ target: "src/utils/helpers.ts" });
-console.log(`Affects ${blast.affectedEntrypoints.length} entrypoints`);
-
-// Explain a finding
-const proof = await explain({
-  query: "unused-export:packages/core:src/old.ts#deprecatedFn",
-});
+```sh
+pruneguard migrate knip           # reads knip.json or package.json#knip
+pruneguard migrate depcruise      # reads .dependency-cruiser.* files
 ```
 
-Full TypeScript types are included via `dist/index.d.mts`.
+Both commands emit an equivalent `pruneguard.json` with migration notes.
 
 ---
 
 ## Framework detection
-
-Pruneguard auto-detects popular frameworks and registers their entrypoints and file conventions, so test files, stories, and framework config files aren't flagged as unused.
 
 | Framework | Auto-detected via | Entrypoints added |
 |---|---|---|
@@ -239,31 +396,6 @@ Pruneguard auto-detects popular frameworks and registers their entrypoints and f
 | **Storybook** | `@storybook/*` packages | `.storybook/main.*`, `**/*.stories.*` |
 
 Override with `"frameworks": { "next": "off" }` in config.
-
----
-
-## Migrating from other tools
-
-```sh
-# From knip
-pruneguard migrate knip
-
-# From dependency-cruiser
-pruneguard migrate depcruise
-```
-
-Both commands read your existing config and emit an equivalent `pruneguard.json` with migration notes.
-
----
-
-## Output formats
-
-| Format | Flag | Use case |
-|---|---|---|
-| **Text** | `--format text` | Human-readable terminal output (default) |
-| **JSON** | `--format json` | CI pipelines, scripts, programmatic consumption |
-| **SARIF** | `--format sarif` | GitHub Code Scanning, Azure DevOps, IDE integrations |
-| **DOT** | `--format dot` | Graph visualization with Graphviz |
 
 ---
 

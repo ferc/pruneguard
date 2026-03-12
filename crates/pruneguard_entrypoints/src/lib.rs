@@ -306,25 +306,121 @@ fn extract_script_entrypoint_candidates(command: &str) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = FxHashSet::default();
 
-    for raw in command.split_whitespace() {
-        let token =
-            raw.trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '(' | ')')).trim();
-        if token.is_empty() || token.starts_with('-') || token.contains('$') {
-            continue;
+    // Split on shell operators first to handle chained commands.
+    for segment in command.split(&['&', '|', ';'][..]) {
+        let segment = segment.trim();
+        let mut tokens = segment.split_whitespace().peekable();
+        let mut skip_next_path = false;
+
+        // Detect runner prefix: `node`, `tsx`, `ts-node`, `pnpm exec`, etc.
+        // After a runner, the first non-flag token is the script path.
+        if let Some(first) = tokens.peek().copied() {
+            match first {
+                "node" | "tsx" | "ts-node" | "tsm" | "bun" => {
+                    tokens.next(); // consume the runner
+                    // Skip flags but capture file arguments after `-r`, `--require`, etc.
+                    while let Some(token) = tokens.next() {
+                        if matches!(token, "-r" | "--require" | "--loader" | "--import") {
+                            let _ = tokens.next(); // skip the module argument
+                            continue;
+                        }
+                        if token.starts_with('-') {
+                            // Some flags take a value.
+                            if token.starts_with("--require=") || token.starts_with("-r=") {
+                                continue;
+                            }
+                            if matches!(token, "-e" | "--eval" | "-p" | "--print") {
+                                skip_next_path = true;
+                                break;
+                            }
+                            continue;
+                        }
+                        // This is the script path.
+                        try_add_candidate(token, &mut candidates, &mut seen);
+                        break;
+                    }
+                    if skip_next_path {
+                        continue;
+                    }
+                    // Also check remaining tokens for additional file arguments.
+                }
+                "npx" | "bunx" => {
+                    tokens.next(); // consume the runner
+                    // Skip flags to find the package name, then look for file args after.
+                    let mut found_pkg = false;
+                    for token in tokens.by_ref() {
+                        if token.starts_with('-') {
+                            continue;
+                        }
+                        if !found_pkg {
+                            found_pkg = true;
+                            // The package name itself is not a script path.
+                            continue;
+                        }
+                        try_add_candidate(token, &mut candidates, &mut seen);
+                    }
+                    continue;
+                }
+                "pnpm" | "yarn" | "npm" => {
+                    tokens.next(); // consume the runner
+                    // These might be `pnpm exec tsx script.ts` or `pnpm run build`.
+                    // Skip workspace/filter flags.
+                    // Note: we need `while let` (not `for`) because we call
+                    // `tokens.next()` to consume flag values inside the loop.
+                    #[allow(clippy::while_let_on_iterator)]
+                    while let Some(token) = tokens.next() {
+                        if token.starts_with('-') {
+                            if matches!(token, "--filter" | "-F" | "--workspace" | "-w" | "--cwd" | "--prefix") {
+                                let _ = tokens.next();
+                            }
+                            continue;
+                        }
+                        // This is the subcommand (exec, run, dlx, or a package binary).
+                        if matches!(token, "exec" | "dlx" | "x") {
+                            // Next tokens are the command + args — recurse into them.
+                            let remaining: Vec<&str> = tokens.collect();
+                            let sub_cmd = remaining.join(" ");
+                            let sub_candidates = extract_script_entrypoint_candidates(&sub_cmd);
+                            for c in sub_candidates {
+                                if seen.insert(c.clone()) {
+                                    candidates.push(c);
+                                }
+                            }
+                        }
+                        // `pnpm run <script-name>` — no file path to extract.
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
         }
 
-        let path = Path::new(token);
-        if !looks_like_script_path(token, path) {
-            continue;
-        }
-
-        let normalized = path.components().as_path().to_string_lossy().to_string();
-        if seen.insert(normalized.clone()) {
-            candidates.push(normalized);
+        // Generic token scanning for the remaining tokens.
+        for raw in tokens {
+            let token =
+                raw.trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '(' | ')')).trim();
+            try_add_candidate(token, &mut candidates, &mut seen);
         }
     }
 
     candidates
+}
+
+fn try_add_candidate(token: &str, candidates: &mut Vec<String>, seen: &mut FxHashSet<String>) {
+    if token.is_empty() || token.starts_with('-') || token.contains('$') {
+        return;
+    }
+
+    let path = Path::new(token);
+    if !looks_like_script_path(token, path) {
+        return;
+    }
+
+    let normalized = path.components().as_path().to_string_lossy().to_string();
+    if seen.insert(normalized.clone()) {
+        candidates.push(normalized);
+    }
 }
 
 fn looks_like_script_path(token: &str, path: &Path) -> bool {
@@ -335,6 +431,8 @@ fn looks_like_script_path(token: &str, path: &Path) -> bool {
         || token.starts_with("scripts/")
         || token.starts_with("bin/")
         || token.starts_with("app/")
+        || token.starts_with("lib/")
+        || token.starts_with("tools/")
 }
 
 /// When a bin/main/exports entry points to a build output (e.g. `./dist/bin.js`),

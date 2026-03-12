@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,6 +13,62 @@ pub enum IndexError {
     Build(String),
     #[error("analysis failed: {0}")]
     Analysis(String),
+}
+
+/// Category of an invalidation trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidationKind {
+    /// A source file (.ts, .tsx, .js, .jsx, .mjs, .cjs) changed.
+    SourceFile,
+    /// A package.json manifest changed.
+    Manifest,
+    /// A tsconfig*.json changed.
+    Tsconfig,
+    /// A CODEOWNERS file changed.
+    Codeowners,
+    /// A pruneguard.json config changed.
+    Config,
+    /// A schema/version mismatch was detected.
+    SchemaMismatch,
+}
+
+impl InvalidationKind {
+    /// Classify a file path into an invalidation kind.
+    pub fn classify(path: &Path) -> Option<Self> {
+        let file_name = path.file_name()?.to_str()?;
+
+        if file_name == "pruneguard.json" {
+            return Some(Self::Config);
+        }
+        if file_name == "CODEOWNERS" {
+            return Some(Self::Codeowners);
+        }
+        if file_name == "package.json" {
+            return Some(Self::Manifest);
+        }
+        if file_name.starts_with("tsconfig")
+            && Path::new(file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        {
+            return Some(Self::Tsconfig);
+        }
+
+        let ext = path.extension()?.to_str()?;
+        match ext {
+            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Some(Self::SourceFile),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind of invalidation requires a full rebuild (not just
+    /// incremental re-extraction of a single file).
+    pub const fn requires_full_rebuild(self) -> bool {
+        matches!(
+            self,
+            Self::Manifest | Self::Tsconfig | Self::Codeowners | Self::Config | Self::SchemaMismatch
+        )
+    }
 }
 
 /// The hot in-memory index holding the built graph.
@@ -33,6 +89,10 @@ pub struct HotIndex {
     last_build: Option<Instant>,
     /// Set of files that have been invalidated since the last build.
     invalidated_files: Vec<PathBuf>,
+    /// Timestamp of the last watcher event processed.
+    last_watcher_event: Option<Instant>,
+    /// Whether a config-level change is pending (requires full rebuild).
+    config_change_pending: bool,
 }
 
 impl HotIndex {
@@ -45,6 +105,8 @@ impl HotIndex {
             generation: 0,
             last_build: None,
             invalidated_files: Vec::new(),
+            last_watcher_event: None,
+            config_change_pending: false,
         }
     }
 
@@ -95,6 +157,19 @@ impl HotIndex {
         self.build.as_ref()
     }
 
+    /// Milliseconds since the last watcher event was processed, or `None` if
+    /// no watcher events have been received.
+    pub fn watcher_lag_ms(&self) -> Option<u64> {
+        self.last_watcher_event.map(|t| {
+            u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
+        })
+    }
+
+    /// Number of files pending invalidation.
+    pub const fn pending_invalidations(&self) -> usize {
+        self.invalidated_files.len()
+    }
+
     /// Build the graph from scratch.
     ///
     /// This performs a full build using the one-shot analysis pipeline.
@@ -124,31 +199,73 @@ impl HotIndex {
         self.generation += 1;
         self.last_build = Some(Instant::now());
         self.invalidated_files.clear();
+        self.config_change_pending = false;
         Ok(())
     }
 
     /// Mark files as invalidated due to file system changes.
+    ///
+    /// Classifies each file into an [`InvalidationKind`] and triggers a
+    /// config reload when manifest, tsconfig, CODEOWNERS, or config files
+    /// change.
     pub fn invalidate_files(&mut self, files: &[PathBuf]) {
+        self.last_watcher_event = Some(Instant::now());
+
+        for file in files {
+            if let Some(kind) = InvalidationKind::classify(file)
+                && kind.requires_full_rebuild()
+            {
+                self.config_change_pending = true;
+                tracing::info!(
+                    "config-level change detected in {}: scheduling full rebuild",
+                    file.display(),
+                );
+            }
+        }
+
         self.invalidated_files.extend_from_slice(files);
         tracing::debug!(
-            "invalidated {} files (total pending: {})",
+            "invalidated {} files (total pending: {}, config_change: {})",
             files.len(),
             self.invalidated_files.len(),
+            self.config_change_pending,
         );
     }
 
     /// Rebuild the graph incorporating invalidated files.
     ///
-    /// For now, this performs a full rebuild. Future versions will
-    /// do incremental updates based on the invalidated file set.
+    /// If a config-level change is pending (manifest, tsconfig, CODEOWNERS,
+    /// or pruneguard.json), the configuration is reloaded from disk before
+    /// rebuilding.
     pub fn rebuild_changed(&mut self) -> Result<(), IndexError> {
         if self.invalidated_files.is_empty() {
             return Ok(());
         }
         tracing::info!(
-            "rebuilding graph for {} invalidated files",
+            "rebuilding graph for {} invalidated files (config_change: {})",
             self.invalidated_files.len(),
+            self.config_change_pending,
         );
+
+        // If a config-level change is pending, reload the config from disk.
+        if self.config_change_pending {
+            match pruneguard_config::PruneguardConfig::load(&self.project_root, None) {
+                Ok(new_config) => {
+                    tracing::info!("reloaded config from disk after config-level change");
+                    self.config = new_config;
+                }
+                Err(pruneguard_config::ConfigError::NotFound) => {
+                    tracing::debug!(
+                        "config file not found after config change; keeping existing config"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!("failed to reload config: {err}; keeping existing config");
+                }
+            }
+            self.config_change_pending = false;
+        }
+
         // For now, perform a full rebuild. Incremental updates will be
         // added in a future iteration.
         self.build_initial()

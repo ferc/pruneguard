@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Publish an npm package only if its version is not already on the registry.
+#
+# This script expects to publish from .release/npm/ where workspace:*
+# references have already been rewritten by stage_npm_release.mjs.
+# It will refuse to publish if any workspace: references remain.
+#
 # Usage: bash .github/scripts/publish-if-needed.sh <pkg_dir> [publish_flags...]
-# Example: bash .github/scripts/publish-if-needed.sh npm/pruneguard --provenance --access public --no-git-checks
+# Example: bash .github/scripts/publish-if-needed.sh .release/npm/pruneguard --provenance --access public --no-git-checks
 
 set -euo pipefail
 
@@ -14,34 +19,35 @@ npm_stderr=$(mktemp)
 if published=$(npm view "${name}@${version}" version 2>"$npm_stderr"); then
   if [ "$published" = "$version" ]; then
     rm -f "$npm_stderr"
-    echo "⏭ ${name}@${version} already published, skipping."
+    echo "SKIP: ${name}@${version} already published."
     exit 0
   fi
 else
   # npm view failed — log the error but continue to publish (which will
   # produce a clear error if the registry is actually unreachable).
-  echo "⚠ npm view ${name}@${version} failed:"
+  echo "WARNING: npm view ${name}@${version} failed:"
   cat "$npm_stderr" >&2
 fi
 rm -f "$npm_stderr"
 
-# Resolve workspace:* protocol — npm doesn't understand it, only pnpm does.
-# Replaces workspace:* with the package's own version (version consistency is
-# verified in CI, so all workspace packages share the same version).
+# Guard: refuse to publish if workspace: references remain.
+# The staging script should have already rewritten these.
 node -e "
   const fs = require('fs');
-  const pkgPath = './${pkg_dir}/package.json';
-  const p = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  let changed = false;
+  const p = JSON.parse(fs.readFileSync('./${pkg_dir}/package.json', 'utf8'));
+  let found = false;
   for (const field of ['dependencies','optionalDependencies','peerDependencies','devDependencies']) {
     for (const [dep, ver] of Object.entries(p[field] || {})) {
-      if (ver.startsWith('workspace:')) {
-        p[field][dep] = p.version;
-        changed = true;
+      if (typeof ver === 'string' && ver.startsWith('workspace:')) {
+        console.error('ERROR: ' + p.name + ' has workspace: reference: ' + dep + '@' + ver);
+        found = true;
       }
     }
   }
-  if (changed) { fs.writeFileSync(pkgPath, JSON.stringify(p, null, 2) + '\n'); console.log('Resolved workspace: references in ' + pkgPath); }
+  if (found) {
+    console.error('Refusing to publish — run stage_npm_release.mjs first.');
+    process.exit(1);
+  }
 "
 
 npm publish "${pkg_dir}/" "$@"

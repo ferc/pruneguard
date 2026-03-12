@@ -18,12 +18,25 @@ pub fn analyze(
     };
 
     let reachable = build.module_graph.reachable_file_ids(profile);
+
+    // Compute global unresolved pressure: if the whole graph has many unresolved
+    // specifiers we lower confidence uniformly.
+    let global_unresolved = count_global_unresolved(build);
+    let global_resolved = count_global_resolved(build);
+    #[allow(clippy::cast_precision_loss)]
+    let global_pressure_pct = if global_resolved + global_unresolved > 0 {
+        (global_unresolved as f64 / (global_resolved + global_unresolved) as f64) * 100.0
+    } else {
+        0.0
+    };
+
     let mut findings = Vec::new();
 
     for extracted_file in &build.files {
         if extracted_file.file.role.excluded_from_dead_code_by_default()
             || is_docs_path(&extracted_file.file.relative_path)
             || is_ambient_declaration_file(&extracted_file.file.relative_path)
+            || is_global_augmentation_file(&extracted_file.file.relative_path)
             || (profile == EntrypointProfile::Production
                 && extracted_file.file.role.is_development_only())
         {
@@ -45,24 +58,33 @@ pub fn analyze(
             line: None,
             description: "No active entrypoint reaches this file.".to_string(),
         }];
-        let unresolved_count = count_unresolved_specifiers(extracted_file);
-        let confidence = if unresolved_count >= 5 {
-            // Many unresolved specifiers — high chance of false positive.
+        let file_unresolved = count_unresolved_specifiers(extracted_file);
+        let file_unresolved_benign = count_benign_unresolved(extracted_file);
+        // Only count genuinely-missed specifiers toward the pressure threshold.
+        let effective_unresolved = file_unresolved.saturating_sub(file_unresolved_benign);
+
+        let confidence = if effective_unresolved >= 5 || global_pressure_pct > 15.0 {
+            // Many unresolved specifiers locally or globally — high chance of false positive.
             FindingConfidence::Low
-        } else if has_zero_incoming_edges(build, file_id) && unresolved_count == 0 {
+        } else if has_zero_incoming_edges(build, file_id) && effective_unresolved == 0 {
             // Zero incoming edges and zero unresolved specifiers — truly unreachable.
-            FindingConfidence::High
+            // But demote to Medium if global pressure is notable.
+            if global_pressure_pct > 5.0 {
+                FindingConfidence::Medium
+            } else {
+                FindingConfidence::High
+            }
         } else {
             // Some unresolved specifiers (< 5) or has some incoming edges.
             FindingConfidence::Medium
         };
-        if unresolved_count >= 5 {
+        if effective_unresolved >= 3 {
             evidence.push(Evidence {
                 kind: "unresolved-pressure".to_string(),
                 file: Some(extracted_file.file.relative_path.to_string_lossy().to_string()),
                 line: None,
                 description: format!(
-                    "{unresolved_count} unresolved specifiers may affect accuracy of this finding"
+                    "{effective_unresolved} unresolved specifiers may affect accuracy of this finding"
                 ),
             });
         }
@@ -112,11 +134,60 @@ fn count_unresolved_specifiers(file: &pruneguard_extract::ExtractedFile) -> usiz
         .count()
 }
 
+/// Count unresolved specifiers that are "benign" — i.e. they are asset imports,
+/// externalized built-ins, or unsupported specifiers that should not count toward
+/// the unresolved-pressure threshold.
+fn count_benign_unresolved(file: &pruneguard_extract::ExtractedFile) -> usize {
+    file.resolved_imports
+        .iter()
+        .chain(&file.resolved_reexports)
+        .filter(|edge| {
+            matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved)
+                && matches!(
+                    edge.unresolved_reason,
+                    Some(
+                        pruneguard_resolver::UnresolvedReason::UnsupportedSpecifier
+                            | pruneguard_resolver::UnresolvedReason::Externalized
+                    )
+                )
+        })
+        .count()
+}
+
+/// Count global unresolved specifiers across the entire build.
+const fn count_global_unresolved(build: &GraphBuildResult) -> usize {
+    build.stats.unresolved_specifiers
+}
+
+/// Count global resolved specifiers across the entire build.
+const fn count_global_resolved(build: &GraphBuildResult) -> usize {
+    build.stats.files_resolved
+}
+
 fn is_ambient_declaration_file(path: &std::path::Path) -> bool {
-    let path = path.to_string_lossy();
-    path.ends_with(".d.ts")
-        || path.ends_with(".d.mts")
-        || path.ends_with(".d.cts")
-        || path.ends_with("env.d.ts")
-        || path.ends_with("vite-env.d.ts")
+    let path_str = path.to_string_lossy();
+    path_str.ends_with(".d.ts")
+        || path_str.ends_with(".d.mts")
+        || path_str.ends_with(".d.cts")
+}
+
+/// Exclude files that are global augmentation declarations or environment shims.
+/// These are genuine source artifacts but should not be flagged as unused files
+/// because they augment the global scope rather than being imported.
+fn is_global_augmentation_file(path: &std::path::Path) -> bool {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    // Common global augmentation files.
+    matches!(
+        file_name,
+        "env.d.ts"
+            | "vite-env.d.ts"
+            | "global.d.ts"
+            | "globals.d.ts"
+            | "declarations.d.ts"
+            | "types.d.ts"
+            | "ambient.d.ts"
+            | "shims.d.ts"
+            | "react-app-env.d.ts"
+            | "next-env.d.ts"
+    )
 }

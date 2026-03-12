@@ -307,6 +307,15 @@ export type FixPlanReport = {
   confidence: "high" | "medium" | "low";
 };
 
+export type DaemonStatusReport = {
+  running: boolean;
+  pid?: number;
+  port?: number;
+  version?: string;
+  startedAt?: string;
+  projectRoot?: string;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -537,4 +546,31 @@ export async function migrateDepcruise(options: {
   const result = await runBinary(args, { cwd: options.cwd });
   requireSuccess(result);
   return parseJson<MigrationOutput>(result);
+}
+
+export async function daemonStatus(options?: {
+  cwd?: string;
+}): Promise<DaemonStatusReport> {
+  const args = ["daemon", "status"];
+
+  const result = await runBinary(args, { cwd: options?.cwd });
+  if (result.exitCode === 1 && result.stdout.includes("no running daemon")) {
+    return { running: false };
+  }
+  if (result.exitCode !== 0) {
+    return { running: false };
+  }
+
+  // Parse the text output from daemon status
+  const lines = result.stdout.trim().split("\n");
+  const report: DaemonStatusReport = { running: true };
+  for (const line of lines) {
+    const [key, ...rest] = line.split(": ");
+    const value = rest.join(": ").trim();
+    if (key === "pid") report.pid = parseInt(value, 10);
+    else if (key === "port") report.port = parseInt(value, 10);
+    else if (key === "version") report.version = value;
+    else if (key === "started_at") report.startedAt = value;
+  }
+  return report;
 }

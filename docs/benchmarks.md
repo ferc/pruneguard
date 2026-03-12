@@ -24,7 +24,26 @@ Cold one-shot times include discovery, extraction, resolution, graph build,
 analysis, and report rendering. These are the worst-case numbers for a first
 run with `--no-cache --no-baseline`.
 
-## Running Benchmarks Locally
+## Running Benchmarks
+
+### Single corpus scan
+
+```sh
+just benchmark CASE=../../path/to/repo
+```
+
+Runs a release-mode scan with `--format json --no-cache --no-baseline` on the
+given repository. The `durationMs` field in the JSON output is the primary
+measurement.
+
+### All configured corpora
+
+```sh
+just benchmark-repos
+```
+
+Runs the configured real-repo parity suite in release mode. This exercises
+knip, dependency-cruiser, oxc, and other configured corpora.
 
 ### Microbenchmarks (Rust criterion)
 
@@ -35,25 +54,6 @@ just benchmark-workspace
 Runs the Rust criterion microbenchmark suite across all crates in the
 workspace.
 
-### Single corpus scan
-
-```sh
-just benchmark ../../path/to/repo
-```
-
-Runs a release-mode scan with `--format json --no-cache --no-baseline` on the
-given repository. The `durationMs` field in the JSON output is the primary
-measurement.
-
-### Parity corpus suite
-
-```sh
-just benchmark-repos
-```
-
-Runs the configured real-repo parity suite in release mode. This exercises
-knip, dependency-cruiser, oxc, and other configured corpora.
-
 ### Fixture scans
 
 ```sh
@@ -62,7 +62,7 @@ just fixture namespace-imports
 
 Runs a single fixture case through the scan smoke test.
 
-### Interpreting Results
+## Interpreting Results
 
 The JSON report includes a `stats` object with timing and graph size metrics:
 
@@ -74,7 +74,8 @@ The JSON report includes a `stats` object with timing and graph size metrics:
     "filesCached": 800,
     "graphNodes": 1500,
     "graphEdges": 4200,
-    "unresolvedSpecifiers": 3
+    "unresolvedSpecifiers": 3,
+    "executionMode": "oneshot"
   }
 }
 ```
@@ -86,8 +87,9 @@ Key fields for benchmarking:
 - `filesCached` -- files served from cache (cache hit)
 - `graphNodes` / `graphEdges` -- graph size, correlates with analysis cost
 - `cacheHits` / `cacheMisses` -- cache effectiveness
+- `executionMode` -- "oneshot" or "daemon"
 
-### Warm vs Cold
+### Cold vs Warm
 
 To measure cold performance, always pass `--no-cache`:
 
@@ -111,5 +113,3 @@ will:
 2. Record `durationMs`, graph size, and cache metrics
 3. Fail the build if any corpus regresses beyond a configured threshold
 4. Publish trend data to a tracking dashboard
-
-Tracking issue: TBD

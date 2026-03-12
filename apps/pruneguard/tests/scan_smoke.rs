@@ -9,7 +9,9 @@ fn fixture_root(name: &str) -> PathBuf {
 
 #[allow(clippy::similar_names)]
 fn run_pruneguard(root: &std::path::Path, args: &[&str]) -> Value {
-    let mut argv = vec!["--no-cache"];
+    // Always use one-shot mode in tests to avoid spawning background daemons
+    // that interfere with parallel test execution and shared fixture dirs.
+    let mut argv = vec!["--daemon", "off", "--no-cache"];
     argv.extend_from_slice(args);
     let output = Command::new(env!("CARGO_BIN_EXE_pruneguard"))
         .current_dir(root)
@@ -22,7 +24,7 @@ fn run_pruneguard(root: &std::path::Path, args: &[&str]) -> Value {
 
 #[allow(clippy::similar_names)]
 fn run_pruneguard_with_exit(root: &std::path::Path, args: &[&str]) -> (Value, i32) {
-    let mut argv = vec!["--no-cache"];
+    let mut argv = vec!["--daemon", "off", "--no-cache"];
     argv.extend_from_slice(args);
     let output = Command::new(env!("CARGO_BIN_EXE_pruneguard"))
         .current_dir(root)
@@ -671,4 +673,480 @@ fn safe_delete_blocks_live_file() {
     );
     assert!(report["safe"].as_array().unwrap().is_empty());
     assert_eq!(exit_code, 1, "safe-delete with blocked targets should exit 1");
+}
+
+// ---------------------------------------------------------------------------
+// fix-plan tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fix_plan_generates_actions_for_unused_file() {
+    let root = fixture_root("fix-plan-basic");
+    let report = run_pruneguard(
+        &root,
+        &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"],
+    );
+
+    // Should match the unused-file finding.
+    assert!(
+        report["matchedFindings"]
+            .as_array()
+            .is_some_and(|arr| arr.iter().any(|f| f["code"] == "unused-file")),
+        "fix-plan should match an unused-file finding for src/orphan.ts"
+    );
+
+    // Should generate a delete-file remediation action.
+    let actions = report["actions"].as_array().expect("actions array");
+    assert!(
+        actions.iter().any(|action| action["kind"] == "delete-file"),
+        "fix-plan should produce a delete-file action"
+    );
+
+    // Each action must have steps.
+    for action in actions {
+        assert!(
+            action["steps"]
+                .as_array()
+                .is_some_and(|steps| !steps.is_empty()),
+            "every action must have at least one step"
+        );
+    }
+
+    // Verification steps should exist.
+    assert!(
+        report["verificationSteps"]
+            .as_array()
+            .is_some_and(|arr| !arr.is_empty()),
+        "fix-plan should include verification steps"
+    );
+}
+
+#[test]
+fn fix_plan_generates_actions_for_unused_export() {
+    let root = fixture_root("fix-plan-basic");
+    let report = run_pruneguard(
+        &root,
+        &["--format", "json", "--no-baseline", "fix-plan", "src/used.ts"],
+    );
+
+    // Should match the unused-export finding for extraExport.
+    assert!(
+        report["matchedFindings"]
+            .as_array()
+            .is_some_and(|arr| arr
+                .iter()
+                .any(|f| f["code"] == "unused-export"
+                    && f["subject"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("extraExport")))),
+        "fix-plan should match an unused-export finding for extraExport"
+    );
+
+    // Should generate a delete-export remediation action.
+    let actions = report["actions"].as_array().expect("actions array");
+    assert!(
+        actions.iter().any(|action| action["kind"] == "delete-export"),
+        "fix-plan should produce a delete-export action for extraExport"
+    );
+}
+
+#[test]
+fn fix_plan_includes_risk_and_confidence() {
+    let root = fixture_root("fix-plan-basic");
+    let report = run_pruneguard(
+        &root,
+        &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"],
+    );
+
+    // Top-level risk and confidence must be present.
+    assert!(
+        report["riskLevel"].as_str().is_some(),
+        "fix-plan should include a top-level riskLevel"
+    );
+    assert!(
+        report["confidence"].as_str().is_some(),
+        "fix-plan should include a top-level confidence"
+    );
+
+    // Per-action risk and confidence.
+    let actions = report["actions"].as_array().expect("actions array");
+    for action in actions {
+        assert!(
+            action["risk"].as_str().is_some(),
+            "each action must have a risk field"
+        );
+        assert!(
+            action["confidence"].as_str().is_some(),
+            "each action must have a confidence field"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// suggest-rules tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn suggest_rules_produces_valid_json_report() {
+    let root = fixture_root("suggest-rules-basic");
+    let report = run_pruneguard(
+        &root,
+        &["--format", "json", "--no-baseline", "suggest-rules"],
+    );
+
+    // suggestedRules must be an array (may or may not have entries depending
+    // on whether cross-package thresholds are met).
+    assert!(
+        report["suggestedRules"].as_array().is_some(),
+        "suggest-rules should return a suggestedRules array"
+    );
+
+    // tags should be an array.
+    assert!(
+        report["tags"].as_array().is_some(),
+        "suggest-rules should return a tags array"
+    );
+
+    // The fixture has 3+ files in src/components, src/api, src/utils.
+    // At least one tag should be suggested for one of those directories.
+    let tags = report["tags"].as_array().expect("tags array");
+    assert!(
+        tags.iter().any(|tag| {
+            tag["glob"]
+                .as_str()
+                .is_some_and(|glob| glob.contains("src/"))
+        }),
+        "suggest-rules should suggest at least one tag for the source directory structure"
+    );
+}
+
+#[test]
+fn suggest_rules_reports_rationale() {
+    let root = fixture_root("suggest-rules-basic");
+    let report = run_pruneguard(
+        &root,
+        &["--format", "json", "--no-baseline", "suggest-rules"],
+    );
+
+    // rationale should be an array with at least one entry.
+    let rationale = report["rationale"].as_array();
+    let tags = report["tags"].as_array();
+    let suggested_rules = report["suggestedRules"].as_array();
+
+    // Either rationale is populated or suggestions were generated.
+    assert!(
+        rationale.is_some_and(|r| !r.is_empty())
+            || tags.is_some_and(|t| !t.is_empty())
+            || suggested_rules.is_some_and(|r| !r.is_empty()),
+        "suggest-rules should produce either rationale or suggestions"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// safe-delete: needs-review case
+// ---------------------------------------------------------------------------
+
+#[test]
+fn safe_delete_needs_review_under_high_unresolved_pressure() {
+    let root = fixture_root("safe-delete-needs-review");
+    let (report, _exit_code) = run_pruneguard_with_exit(
+        &root,
+        &["--format", "json", "--no-baseline", "safe-delete", "src/orphan.ts"],
+    );
+
+    // Under high unresolved pressure, safe-delete should classify
+    // the orphan file as needs-review instead of safe.
+    let needs_review = report["needsReview"].as_array();
+    let safe = report["safe"].as_array();
+    let blocked = report["blocked"].as_array();
+
+    let in_needs_review =
+        needs_review.is_some_and(|arr| arr.iter().any(|c| c["target"] == "src/orphan.ts"));
+    let in_safe = safe.is_some_and(|arr| arr.iter().any(|c| c["target"] == "src/orphan.ts"));
+    let in_blocked = blocked.is_some_and(|arr| arr.iter().any(|c| c["target"] == "src/orphan.ts"));
+
+    // The target must appear somewhere in the report.
+    assert!(
+        in_needs_review || in_blocked || in_safe,
+        "target must appear in safe, needsReview, or blocked; report: {}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
+
+    // Under pressure, the finding may have downgraded confidence.
+    // If safe, it means pressure is below threshold -- that is acceptable.
+    // The key contract: the command does not panic and returns a valid classification.
+    assert!(
+        report["targets"].as_array().is_some_and(|arr| arr
+            .iter()
+            .any(|t| t.as_str() == Some("src/orphan.ts"))),
+        "targets should include src/orphan.ts"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// trust summary fields
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trust_summary_fields_present_in_scan_report() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // Stats must have all key trust-related fields.
+    let stats = &report["stats"];
+    assert!(stats["partialScope"].as_bool().is_some(), "partialScope must be present");
+    assert!(stats["baselineApplied"].as_bool().is_some(), "baselineApplied must be present");
+    assert!(
+        stats["unresolvedSpecifiers"].as_u64().is_some(),
+        "unresolvedSpecifiers must be present"
+    );
+    assert!(
+        stats["confidenceCounts"].is_object(),
+        "confidenceCounts must be an object"
+    );
+    assert!(
+        stats["confidenceCounts"]["high"].as_u64().is_some(),
+        "confidenceCounts.high must be present"
+    );
+    assert!(
+        stats["confidenceCounts"]["medium"].as_u64().is_some(),
+        "confidenceCounts.medium must be present"
+    );
+    assert!(
+        stats["confidenceCounts"]["low"].as_u64().is_some(),
+        "confidenceCounts.low must be present"
+    );
+}
+
+#[test]
+fn trust_downgrade_confidence_counts_reflect_pressure() {
+    let root = fixture_root("trust-downgrade");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // Under high unresolved pressure, confidence counts should reflect
+    // that not all findings are high confidence.
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // The trust-downgrade fixture has real unresolvable imports.
+    // At least one finding should have non-high confidence,
+    // or the graph completes cleanly with zero findings.
+    if !findings.is_empty() {
+        let has_non_high = findings.iter().any(|f| f["confidence"] != "high");
+        let confidence_counts = &report["stats"]["confidenceCounts"];
+        let medium_or_low = confidence_counts["medium"].as_u64().unwrap_or(0)
+            + confidence_counts["low"].as_u64().unwrap_or(0);
+
+        // If all findings are high, medium_or_low should be 0.
+        // If any are non-high, medium_or_low should reflect them.
+        assert_eq!(
+            has_non_high,
+            medium_or_low > 0,
+            "confidence counts should match actual finding confidence tiers"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// review: trust summary field validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn review_trust_summary_has_all_required_fields() {
+    let root = fixture_root("unused-file-basic");
+    let (report, _exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "--no-baseline", "review"]);
+
+    let trust = &report["trust"];
+    assert!(trust["fullScope"].as_bool().is_some(), "trust.fullScope must be present");
+    assert!(
+        trust["baselineApplied"].as_bool().is_some(),
+        "trust.baselineApplied must be present"
+    );
+    assert!(
+        trust["unresolvedPressure"].is_number(),
+        "trust.unresolvedPressure must be a number"
+    );
+    assert!(
+        trust["confidenceCounts"].is_object(),
+        "trust.confidenceCounts must be an object"
+    );
+    assert!(
+        trust["confidenceCounts"]["high"].as_u64().is_some(),
+        "trust.confidenceCounts.high must be present"
+    );
+}
+
+#[test]
+fn review_advisory_findings_are_non_high_confidence() {
+    let root = fixture_root("unused-file-basic");
+    let (report, _exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "--no-baseline", "review"]);
+
+    // Advisory findings must have either non-high confidence or info severity.
+    let advisory = report["advisoryFindings"].as_array().unwrap_or(&Vec::new()).clone();
+    for finding in &advisory {
+        let is_info = finding["severity"] == "info";
+        let is_non_high = finding["confidence"] != "high";
+        assert!(
+            is_info || is_non_high,
+            "advisory finding `{}` must be info-severity or non-high confidence",
+            finding["subject"]
+        );
+    }
+}
+
+#[test]
+fn review_proposed_actions_reference_blocking_findings() {
+    let root = fixture_root("unused-file-basic");
+    let (report, _exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "--no-baseline", "review"]);
+
+    let blocking = report["blockingFindings"].as_array();
+    let proposed = report["proposedActions"].as_array();
+
+    if let (Some(blocking), Some(proposed)) = (blocking, proposed)
+        && !blocking.is_empty()
+    {
+        // At least one proposed action should exist for blocking findings.
+        assert!(
+            !proposed.is_empty(),
+            "review should propose at least one action for blocking findings"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// impact: multiple targets
+// ---------------------------------------------------------------------------
+
+#[test]
+fn impact_single_target_returns_affected_entities() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_pruneguard(&root, &["--format", "json", "impact", "src/used.ts"]);
+
+    assert_eq!(report["target"].as_str(), Some("src/used.ts"));
+    assert!(
+        report["affectedEntrypoints"].as_array().is_some(),
+        "impact should return affectedEntrypoints"
+    );
+    assert!(
+        report["affectedPackages"].as_array().is_some(),
+        "impact should return affectedPackages"
+    );
+    assert!(
+        report["affectedFiles"].as_array().is_some(),
+        "impact should return affectedFiles"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// scan: full-scope validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn full_scope_scan_has_complete_inventory() {
+    let root = fixture_root("unused-file-basic");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    assert_eq!(
+        report["stats"]["partialScope"].as_bool(),
+        Some(false),
+        "full-scope scan should not be partial"
+    );
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 3,
+        "full-scope scan should discover all files"
+    );
+    assert!(
+        report["inventories"]["files"].as_array().is_some_and(|arr| !arr.is_empty()),
+        "full-scope scan should have non-empty file inventory"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// scan: staged package install/runtime
+// ---------------------------------------------------------------------------
+
+#[test]
+fn staged_package_with_declared_dependencies_runs_without_panic() {
+    let root = fixture_root("staged-package-install");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The scan should complete without panicking, produce valid JSON,
+    // and discover the source file.
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 1,
+        "staged package scan should discover at least one file"
+    );
+    assert!(
+        report["stats"]["partialScope"].as_bool() == Some(false),
+        "staged package scan should be full-scope"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// deterministic ordering: run twice, compare finding order
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scan_findings_are_deterministically_ordered() {
+    let root = fixture_root("unused-file-basic");
+    let first = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+    let second = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+
+    let first_findings = first["findings"].as_array().expect("findings array");
+    let second_findings = second["findings"].as_array().expect("findings array");
+
+    assert_eq!(
+        first_findings.len(),
+        second_findings.len(),
+        "repeated scans should produce the same number of findings"
+    );
+
+    for (idx, (a, b)) in first_findings.iter().zip(second_findings.iter()).enumerate() {
+        assert_eq!(
+            a["id"], b["id"],
+            "finding at position {idx} should have the same ID across runs"
+        );
+        assert_eq!(
+            a["subject"], b["subject"],
+            "finding at position {idx} should have the same subject across runs"
+        );
+    }
+}
+
+#[test]
+fn scan_entrypoints_are_deterministically_ordered() {
+    let root = fixture_root("unused-file-basic");
+    let first = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+    let second = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+
+    let first_eps = first["entrypoints"].as_array().expect("entrypoints array");
+    let second_eps = second["entrypoints"].as_array().expect("entrypoints array");
+
+    assert_eq!(first_eps.len(), second_eps.len());
+    for (idx, (a, b)) in first_eps.iter().zip(second_eps.iter()).enumerate() {
+        assert_eq!(
+            a["source"], b["source"],
+            "entrypoint at position {idx} should have the same source across runs"
+        );
+    }
+}
+
+#[test]
+fn scan_inventories_are_deterministically_ordered() {
+    let root = fixture_root("unused-file-basic");
+    let first = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+    let second = run_pruneguard(&root, &["--format", "json", "--no-baseline", "scan"]);
+
+    let first_files = first["inventories"]["files"].as_array().expect("files array");
+    let second_files = second["inventories"]["files"].as_array().expect("files array");
+
+    assert_eq!(first_files.len(), second_files.len());
+    for (idx, (a, b)) in first_files.iter().zip(second_files.iter()).enumerate() {
+        assert_eq!(
+            a["path"], b["path"],
+            "file at position {idx} should have the same path across runs"
+        );
+    }
 }

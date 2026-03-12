@@ -552,6 +552,9 @@ pub struct SuggestRulesReport {
     /// Hotspot files with high edge traffic.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<Hotspot>,
+    /// Recommended governance actions ordered by priority.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub governance_actions: Vec<GovernanceAction>,
     /// Rationale explaining the suggestions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rationale: Vec<String>,
@@ -574,6 +577,9 @@ pub struct SuggestedRule {
     /// Evidence supporting the suggestion.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<String>,
+    /// Rationale explaining why this specific rule was suggested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rationale: Option<String>,
 }
 
 /// Kind of suggested rule.
@@ -584,6 +590,8 @@ pub enum SuggestedRuleKind {
     Required,
     TagAssignment,
     OwnershipBoundary,
+    ReachabilityFence,
+    LayerEnforcement,
 }
 
 /// A suggested tag for directory grouping.
@@ -594,6 +602,9 @@ pub struct SuggestedTag {
     pub name: String,
     /// Glob pattern for the tag.
     pub glob: String,
+    /// Source of the tag inference (e.g. "directory-cluster", "workspace", "package", "ownership").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// Why this tag is suggested.
     pub rationale: String,
 }
@@ -608,6 +619,9 @@ pub struct OwnershipHint {
     pub suggested_owner: String,
     /// Number of cross-team edges.
     pub cross_team_edges: usize,
+    /// Packages touched by cross-team edges from this area.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub touched_packages: Vec<String>,
     /// Rationale for the suggestion.
     pub rationale: String,
 }
@@ -618,6 +632,12 @@ pub struct OwnershipHint {
 pub struct Hotspot {
     /// File path.
     pub file: String,
+    /// Workspace containing this file, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Package containing this file, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
     /// Cross-package import count.
     pub cross_package_imports: usize,
     /// Cross-owner import count.
@@ -626,12 +646,96 @@ pub struct Hotspot {
     pub incoming_edges: usize,
     /// Outgoing edge count.
     pub outgoing_edges: usize,
+    /// Hotspot rank (1 = highest traffic).
+    pub rank: usize,
+    /// Distinct teams that touch this file via imports (source or target).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teams_involved: Vec<String>,
     /// Suggestion for addressing this hotspot.
     pub suggestion: String,
 }
 
+/// A recommended governance action with priority ordering.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GovernanceAction {
+    /// Priority rank (1 = most impactful).
+    pub priority: usize,
+    /// Kind of governance action.
+    pub kind: GovernanceActionKind,
+    /// Human-readable description of what to do.
+    pub description: String,
+    /// Estimated effort level.
+    pub effort: EffortLevel,
+    /// Expected impact on governance coverage.
+    pub impact: ImpactLevel,
+    /// Concrete configuration fragment or steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_fragment: Option<serde_json::Value>,
+}
+
+/// Kind of governance action.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum GovernanceActionKind {
+    AddBoundaryRule,
+    AssignOwnership,
+    IntroduceTags,
+    SplitHotspot,
+    AddReachabilityFence,
+    EnforceLayering,
+}
+
+/// Estimated effort level.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EffortLevel {
+    Low,
+    Medium,
+    High,
+}
+
+/// Expected impact level.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ImpactLevel {
+    Low,
+    Medium,
+    High,
+}
+
 impl SuggestRulesReport {
     /// Generate the JSON Schema for the suggest-rules report format.
+    pub fn json_schema() -> schemars::schema::RootSchema {
+        schemars::schema_for!(Self)
+    }
+}
+
+/// Daemon status report for querying daemon health from JS or CLI.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonStatusReport {
+    /// Whether a daemon process is currently running.
+    pub running: bool,
+    /// Process ID of the running daemon, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// TCP port the daemon is listening on, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    /// Version of the running daemon binary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// ISO-8601 timestamp when the daemon started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    /// Absolute path to the project root the daemon is serving.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+}
+
+impl DaemonStatusReport {
+    /// Generate the JSON Schema for the daemon status report format.
     pub fn json_schema() -> schemars::schema::RootSchema {
         schemars::schema_for!(Self)
     }

@@ -209,12 +209,33 @@ export function resolutionInfo(): ResolutionInfo {
   };
 }
 
-export function run(args: string[], options?: { cwd?: string }): Promise<CommandResult> {
+/**
+ * Returns `true` if the current process is running in a CI environment.
+ *
+ * Checks the common `CI` env var used by GitHub Actions, GitLab CI,
+ * CircleCI, Travis CI, Jenkins, and most other CI providers.
+ */
+export function isCI(): boolean {
+  const ci = process.env.CI;
+  return ci !== undefined && ci !== "" && ci !== "0" && ci.toLowerCase() !== "false";
+}
+
+export function run(args: string[], options?: { cwd?: string; daemon?: "auto" | "off" | "required" }): Promise<CommandResult> {
   const binary = binaryPath();
   const start = performance.now();
 
+  // Inject --daemon flag if not already specified.
+  const hasExplicitDaemon = args.some((arg) => arg === "--daemon" || arg.startsWith("--daemon="));
+  const finalArgs = hasExplicitDaemon
+    ? args
+    : [
+        "--daemon",
+        options?.daemon ?? (isCI() ? "off" : "auto"),
+        ...args,
+      ];
+
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, {
+    const child = spawn(binary, finalArgs, {
       cwd: options?.cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });

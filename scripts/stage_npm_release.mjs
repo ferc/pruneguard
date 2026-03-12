@@ -7,6 +7,9 @@
  * references to concrete semver, and injects shared metadata into platform
  * packages.
  *
+ * .release/npm/ is the ONLY source of truth for npm pack and publish.
+ * The repo-local npm/ packages exist only for local development (pnpm workspace).
+ *
  * Usage:
  *   node scripts/stage_npm_release.mjs
  *   node scripts/stage_npm_release.mjs --version 0.3.0   # override version
@@ -14,14 +17,25 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const NPM_SRC = join(ROOT, "npm");
 const RELEASE_DIR = join(ROOT, ".release", "npm");
 
 // Build artifacts that must never appear in staged output
-const BANNED_ENTRIES = [".tsbuildinfo", ".turbo", "node_modules", ".DS_Store"];
+const BANNED_ENTRIES = [".tsbuildinfo", ".turbo", "node_modules", ".DS_Store", ".gitkeep"];
+
+// Patterns that must never appear in staged package.json values
+const BANNED_PATTERNS = [
+  /workspace:/,         // pnpm workspace protocol
+  /file:/,              // local file references
+  /link:/,              // pnpm link protocol
+  /\.\.\/\.\.\//,       // relative parent paths (../../)
+  /\/Users\//,          // absolute macOS paths
+  /\/home\//,           // absolute Linux paths
+  /[A-Z]:\\/,           // absolute Windows paths
+];
 
 // ---------------------------------------------------------------------------
 // Parse args
@@ -51,7 +65,7 @@ const version = versionOverride ?? rootPkg.version;
 
 if (verifyOnly) {
   console.log(`Verifying staged packages in ${RELEASE_DIR}`);
-  const errors = validateStagedOutput(version);
+  const errors = validateStagedOutput(version, { strict: true });
   if (errors.length > 0) {
     for (const err of errors) console.error(`ERROR: ${err}`);
     process.exit(1);
@@ -122,7 +136,7 @@ for (const field of ["dependencies", "optionalDependencies", "peerDependencies",
 }
 
 writeFileSync(join(rootDst, "package.json"), JSON.stringify(stagedRootPkg, null, 2) + "\n");
-console.log(`  ✓ pruneguard — workspace:* → ${version}`);
+console.log(`  staged pruneguard — workspace:* -> ${version}`);
 
 // ---------------------------------------------------------------------------
 // Stage platform packages (npm/cli-* -> .release/npm/cli-*)
@@ -163,7 +177,7 @@ for (const dir of platformDirs) {
   };
 
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-  console.log(`  ✓ ${pkg.name}@${version}`);
+  console.log(`  staged ${pkg.name}@${version}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,10 +238,72 @@ function walkEntryNames(dir) {
 }
 
 /**
+ * Scan a package.json object for banned patterns in string values.
+ * Returns an array of error strings.
+ */
+function checkForBannedPatterns(pkg, label) {
+  const errs = [];
+  const stringFields = [
+    "dependencies", "optionalDependencies", "peerDependencies", "devDependencies",
+    "bin", "main", "module", "types",
+  ];
+
+  // Check dependency-like fields
+  for (const field of stringFields) {
+    const val = pkg[field];
+    if (!val) continue;
+
+    if (typeof val === "string") {
+      for (const pattern of BANNED_PATTERNS) {
+        if (pattern.test(val)) {
+          errs.push(`${label}: field "${field}" contains banned pattern ${pattern}: "${val}"`);
+        }
+      }
+    } else if (typeof val === "object") {
+      for (const [key, v] of Object.entries(val)) {
+        if (typeof v !== "string") continue;
+        for (const pattern of BANNED_PATTERNS) {
+          if (pattern.test(v)) {
+            errs.push(`${label}: ${field}.${key} contains banned pattern ${pattern}: "${v}"`);
+          }
+        }
+      }
+    }
+  }
+
+  // Check exports field recursively
+  if (pkg.exports) {
+    const checkExports = (obj, path) => {
+      if (typeof obj === "string") {
+        for (const pattern of BANNED_PATTERNS) {
+          if (pattern.test(obj)) {
+            errs.push(`${label}: exports${path} contains banned pattern ${pattern}: "${obj}"`);
+          }
+        }
+      } else if (typeof obj === "object" && obj !== null) {
+        for (const [k, v] of Object.entries(obj)) {
+          checkExports(v, `${path}.${k}`);
+        }
+      }
+    };
+    checkExports(pkg.exports, "");
+  }
+
+  return errs;
+}
+
+/**
  * Validate the staged output in RELEASE_DIR. Returns an array of error
  * strings (empty = pass).
+ *
+ * @param {string} ver - Expected version string.
+ * @param {object} [options]
+ * @param {boolean} [options.strict=false] - When true, also verify that build
+ *   artifacts (dist/, schemas) exist in staged output. Used in --verify mode
+ *   after all build artifacts have been copied into .release/npm/.
  */
-function validateStagedOutput(ver) {
+function validateStagedOutput(ver, options = {}) {
+  const strict = options.strict ?? false;
   const errs = [];
 
   if (!existsSync(RELEASE_DIR)) {
@@ -257,7 +333,12 @@ function validateStagedOutput(ver) {
       }
     }
 
-    // Must have a bin field (via files referencing bin/)
+    // Version must match
+    if (pkg.version !== ver) {
+      errs.push(`${dir}: version "${pkg.version}" does not match expected "${ver}"`);
+    }
+
+    // Must have a bin entry in files array
     if (!pkg.files || !pkg.files.some((f) => f.startsWith("bin/"))) {
       errs.push(`${dir}: no bin entry in "files" array`);
     }
@@ -266,10 +347,21 @@ function validateStagedOutput(ver) {
     const dirPath = join(RELEASE_DIR, dir);
     for (const entry of readdirSync(dirPath)) {
       if (entry === "package.json" || entry === "bin") continue;
-      const fullPath = join(dirPath, entry);
       // Any other file that looks like a binary is a problem
       if (entry === "pruneguard" || entry === "pruneguard.exe") {
         errs.push(`${dir}: binary "${entry}" found outside bin/ directory`);
+      }
+    }
+
+    // Check for banned patterns in package.json
+    errs.push(...checkForBannedPatterns(pkg, dir));
+
+    // Verify no workspace: references
+    for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "devDependencies"]) {
+      for (const [dep, v] of Object.entries(pkg[field] || {})) {
+        if (typeof v === "string" && v.startsWith("workspace:")) {
+          errs.push(`${dir}: has workspace: reference: ${dep}@${v}`);
+        }
       }
     }
   }
@@ -283,10 +375,15 @@ function validateStagedOutput(ver) {
 
   const stagedRoot = JSON.parse(readFileSync(rootPkgPath, "utf8"));
 
+  // Version must match
+  if (stagedRoot.version !== ver) {
+    errs.push(`Root package version "${stagedRoot.version}" does not match expected "${ver}"`);
+  }
+
   // Verify no workspace: references remain
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies", "devDependencies"]) {
     for (const [dep, v] of Object.entries(stagedRoot[field] || {})) {
-      if (v.startsWith("workspace:")) {
+      if (typeof v === "string" && v.startsWith("workspace:")) {
         errs.push(`Root package still has workspace: reference: ${dep}@${v}`);
       }
     }
@@ -298,6 +395,17 @@ function validateStagedOutput(ver) {
       const resolvedBin = join(RELEASE_DIR, "pruneguard", binPath);
       if (!existsSync(resolvedBin)) {
         errs.push(`Root package bin "${cmd}" points to non-existent file: ${binPath}`);
+      }
+    }
+  }
+
+  // Verify "files" entries reference existing files/dirs (strict mode only,
+  // since build artifacts like dist/ may not exist until after build-js)
+  if (strict && stagedRoot.files) {
+    for (const fileEntry of stagedRoot.files) {
+      const resolvedEntry = join(RELEASE_DIR, "pruneguard", fileEntry);
+      if (!existsSync(resolvedEntry)) {
+        errs.push(`Root package "files" entry "${fileEntry}" does not exist in staged output`);
       }
     }
   }
@@ -319,11 +427,31 @@ function validateStagedOutput(ver) {
     );
   }
 
+  // Verify all optionalDependency versions match the root version
+  for (const [dep, v] of Object.entries(stagedRoot.optionalDependencies || {})) {
+    if (v !== ver) {
+      errs.push(`Root package optionalDependency "${dep}" has version "${v}" but expected "${ver}"`);
+    }
+  }
+
+  // Check for banned patterns in root package.json
+  errs.push(...checkForBannedPatterns(stagedRoot, "pruneguard"));
+
   // --- Check for banned artifacts across ALL staged packages ---
   const allEntryNames = walkEntryNames(RELEASE_DIR);
   for (const banned of BANNED_ENTRIES) {
     if (allEntryNames.includes(banned)) {
       errs.push(`Banned artifact "${banned}" found in staged output`);
+    }
+  }
+
+  // --- Verify staged platform packages contain ONLY package.json + bin/ ---
+  for (const dir of stagedPlatformDirs) {
+    const dirPath = join(RELEASE_DIR, dir);
+    const entries = readdirSync(dirPath);
+    const unexpected = entries.filter((e) => e !== "package.json" && e !== "bin");
+    for (const entry of unexpected) {
+      errs.push(`${dir}: unexpected entry "${entry}" in staged platform package (only package.json and bin/ allowed)`);
     }
   }
 

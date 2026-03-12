@@ -23,9 +23,11 @@ jobs:
       - run: pnpm --dir apps/pruneguard build-js
       - run: cargo run -p pruneguard --bin generate_schemas
 
+      # Stage release packages (.release/npm/ is the sole source of truth)
       - name: Stage release packages
         run: node scripts/stage_npm_release.mjs
 
+      # Copy local binary into the staged platform package
       - name: Stage platform binary into release package
         run: |
           ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
@@ -42,6 +44,11 @@ jobs:
           cp target/release/pruneguard ".release/npm/${PLATFORM_DIR}/bin/"
           chmod +x ".release/npm/${PLATFORM_DIR}/bin/pruneguard"
 
+      # Run staged-package integrity check
+      - name: Verify staged package integrity
+        run: node scripts/stage_npm_release.mjs --verify
+
+      # Pack ONLY from .release/npm/ and smoke test
       - name: Pack and smoke test
         run: |
           PACK_DIR="/tmp/pruneguard-pack"
@@ -61,23 +68,62 @@ jobs:
             fi
           fi
 
-          # Pack staged packages
+          # Pack staged packages (from .release/npm/ ONLY)
           npm pack --pack-destination "$PACK_DIR" ".release/npm/${PLATFORM_DIR}"
           npm pack --pack-destination "$PACK_DIR" ".release/npm/pruneguard"
 
-          # Install into temp project
+          # Validate tarball contents: no workspace: references
+          echo "--- Validating tarball contents ---"
+          for tgz in "$PACK_DIR"/*.tgz; do
+            echo "  tarball: $(basename "$tgz")"
+            tar -xzf "$tgz" -C "$PACK_DIR" package/package.json 2>/dev/null || true
+            if [ -f "$PACK_DIR/package/package.json" ]; then
+              if grep -q '"workspace:' "$PACK_DIR/package/package.json"; then
+                echo "ERROR: workspace: reference found in packed tarball $(basename "$tgz")"
+                exit 1
+              fi
+              echo "    no workspace: references"
+              rm -rf "$PACK_DIR/package"
+            fi
+          done
+
+          # Install into clean temp project
           cd "$SMOKE_DIR"
           npm init -y
           PLATFORM_TGZ=$(ls "$PACK_DIR"/pruneguard-cli-*.tgz | head -n1)
           ROOT_TGZ=$(ls "$PACK_DIR"/pruneguard-0*.tgz | head -n1)
           npm install "$PLATFORM_TGZ" "$ROOT_TGZ"
 
-          # Verify
-          node -e "import('pruneguard').then(m => { console.log('binaryPath:', m.binaryPath()); console.log('scan:', typeof m.scan); })"
+          # Test: binaryPath() resolves to installed binary
+          echo "--- Test: binaryPath() ---"
+          node -e "
+            import('pruneguard').then(m => {
+              const bp = m.binaryPath();
+              console.log('binaryPath:', bp);
+              if (!bp) { console.error('FAIL: binaryPath() returned falsy'); process.exit(1); }
+              console.log('PASS');
+            }).catch(e => { console.error('FAIL:', e.message); process.exit(1); });
+          "
+
+          # Test: run(['--help']) returns exit 0
+          echo "--- Test: run(['--help']) ---"
+          node -e "
+            import('pruneguard').then(async m => {
+              const result = await m.run(['--help']);
+              if (result.exitCode !== 0) {
+                console.error('FAIL: exit code', result.exitCode);
+                process.exit(1);
+              }
+              console.log('PASS: exit code 0');
+            }).catch(e => { console.error('FAIL:', e.message); process.exit(1); });
+          "
+
+          # Test: npx pruneguard --help
+          echo "--- Test: npx pruneguard --help ---"
           npx pruneguard --help
 
-          # Scan verification on fixture project
-          echo "--- Verifying scan on fixture project ---"
+          # Test: scan on fixture project
+          echo "--- Test: scan on fixture project ---"
           mkdir -p "$SMOKE_DIR/fixture/src"
           cat > "$SMOKE_DIR/fixture/package.json" <<'FIXTURE_PKG'
           { "name": "fixture", "version": "0.0.0", "private": true }
@@ -92,13 +138,18 @@ jobs:
           cat > "$SMOKE_DIR/fixture/src/unused.ts" <<'FIXTURE_UNUSED'
           export function neverCalled() { return "dead code"; }
           FIXTURE_UNUSED
+
           echo "  -> CLI scan"
-          CLI_OUT=$(cd "$SMOKE_DIR/fixture" && npx pruneguard --format json --no-cache --no-baseline scan)
+          CLI_OUT=$(cd "$SMOKE_DIR/fixture" && npx pruneguard --format json --no-cache --no-baseline scan) || [ $? -eq 1 ]
           echo "$CLI_OUT" | node -e "
             let buf=''; process.stdin.on('data',c=>buf+=c); process.stdin.on('end',()=>{
               const j=JSON.parse(buf);
               if(!j.findings||j.findings.length===0){console.error('Expected findings in CLI output');process.exit(1);}
               console.log('CLI scan found',j.findings.length,'findings');
             });"
+
           echo "  -> JS scan() API"
           node -e "import('pruneguard').then(m => m.scan({ cwd: '$SMOKE_DIR/fixture' }).then(r => { if (r.findings.length === 0) { console.error('Expected findings'); process.exit(1); } console.log('scan() found', r.findings.length, 'findings'); }))"
+
+          echo ""
+          echo "=== All release-smoke tests passed ==="

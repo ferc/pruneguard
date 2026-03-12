@@ -386,22 +386,31 @@ pub fn review(
         recommendations.push("No new findings. Branch is clean.".to_string());
     }
 
-    let proposed_actions = blocking_findings
+    let mut proposed_actions: Vec<RemediationAction> = blocking_findings
         .iter()
         .filter_map(|finding| {
-            finding.primary_action_kind.map(|kind| RemediationAction {
+            let kind = finding.primary_action_kind?;
+            let steps = generate_remediation_steps(kind, &finding.subject);
+            let preconditions = generate_preconditions(kind, &finding.subject);
+            let verification = generate_verification_steps(kind, &finding.subject);
+            let risk = risk_for_action(kind);
+            Some(RemediationAction {
                 id: format!("review-{}", finding.id),
                 kind,
                 targets: vec![finding.subject.clone()],
                 why: finding.message.clone(),
-                preconditions: Vec::new(),
-                steps: Vec::new(),
-                verification: Vec::new(),
-                risk: RiskLevel::Low,
+                preconditions,
+                steps,
+                verification,
+                risk,
                 confidence: finding.confidence,
             })
         })
         .collect();
+
+    // Apply ranking policy: sort by minimal blast radius first, then high
+    // confidence first, then low unresolved pressure first.
+    rank_remediation_actions(&mut proposed_actions);
 
     Ok(ReviewReport {
         base_ref: options.base_ref.clone(),
@@ -523,14 +532,21 @@ pub fn safe_delete(
         };
 
         if has_reverse_impact {
-            blocked.push(SafeDeleteCandidate {
-                target: target.clone(),
-                confidence: None,
-                reasons: vec![format!(
-                    "`{target}` has reverse impact — other files or entrypoints depend on it."
-                )],
-            });
+            let mut reasons = vec![format!(
+                "`{target}` has reverse impact — other files or entrypoints depend on it."
+            )];
             if let Ok(ir) = &impact_result {
+                if !ir.affected_entrypoints.is_empty() {
+                    reasons.push(format!(
+                        "Affected entrypoints: {}",
+                        ir.affected_entrypoints
+                            .iter()
+                            .take(5)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
                 all_evidence.push(pruneguard_report::Evidence {
                     kind: "impact".to_string(),
                     file: Some(target.clone()),
@@ -542,26 +558,51 @@ pub fn safe_delete(
                     ),
                 });
             }
+            blocked.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: None,
+                reasons,
+            });
             continue;
         }
 
         let all_high_confidence =
             related_findings.iter().all(|f| f.confidence == FindingConfidence::High);
+        let any_low_confidence =
+            related_findings.iter().any(|f| f.confidence == FindingConfidence::Low);
 
         if high_pressure {
             needs_review.push(SafeDeleteCandidate {
                 target: target.clone(),
-                confidence: Some(FindingConfidence::Medium),
-                reasons: vec![format!(
-                    "Unresolved pressure is {:.1}% — cannot guarantee safety.",
-                    unresolved_pressure * 100.0
-                )],
+                confidence: Some(FindingConfidence::Low),
+                reasons: vec![
+                    format!(
+                        "Unresolved pressure is {:.1}% — cannot guarantee safety.",
+                        unresolved_pressure * 100.0
+                    ),
+                    "Resolve unresolved specifiers and re-run safe-delete for a definitive answer."
+                        .to_string(),
+                ],
+            });
+        } else if any_low_confidence {
+            needs_review.push(SafeDeleteCandidate {
+                target: target.clone(),
+                confidence: Some(FindingConfidence::Low),
+                reasons: vec![
+                    "At least one related finding has low confidence — manual review required."
+                        .to_string(),
+                    "Consider running `pruneguard explain` on the target for more context."
+                        .to_string(),
+                ],
             });
         } else if all_high_confidence {
             safe.push(SafeDeleteCandidate {
                 target: target.clone(),
                 confidence: Some(FindingConfidence::High),
-                reasons: Vec::new(),
+                reasons: vec![
+                    "No reverse impact detected and all related findings have high confidence."
+                        .to_string(),
+                ],
             });
             deletion_order.push(target.clone());
         } else {
@@ -575,6 +616,11 @@ pub fn safe_delete(
             });
         }
     }
+
+    // Compute a stable deletion order: files with fewer dependencies on other
+    // targets (leaves) should be deleted first to avoid breaking intermediate
+    // references during batch deletion.
+    compute_deletion_order(&mut deletion_order, &execution.build);
 
     Ok(SafeDeleteReport {
         targets: targets.to_vec(),
@@ -644,23 +690,26 @@ pub fn fix_plan(
         };
 
         let steps = generate_remediation_steps(kind, &finding.subject);
-        let verification = vec![format!(
-            "Run `pruneguard scan` to verify `{}` is resolved.",
-            finding.subject
-        )];
+        let preconditions = generate_preconditions(kind, &finding.subject);
+        let verification = generate_verification_steps(kind, &finding.subject);
 
         actions.push(RemediationAction {
             id: format!("fix-{}", finding.id),
             kind,
             targets: vec![finding.subject.clone()],
             why: finding.message.clone(),
-            preconditions: Vec::new(),
+            preconditions,
             steps,
             verification,
             risk: risk_for_action(kind),
             confidence: finding.confidence,
         });
     }
+
+    // Apply ranking policy: minimal blast radius first, high confidence first,
+    // low unresolved pressure first, boundary/ownership fixes after dead-code
+    // cleanup.
+    rank_remediation_actions(&mut actions);
 
     let risk_level = actions
         .iter()
@@ -685,6 +734,7 @@ pub fn fix_plan(
     let verification_steps = vec![
         "Run `pruneguard scan` to verify all findings are resolved.".to_string(),
         "Run your test suite to confirm no regressions.".to_string(),
+        "Run `pruneguard review` to confirm no new blocking findings.".to_string(),
     ];
 
     Ok(FixPlanReport {
@@ -785,6 +835,205 @@ const fn risk_for_action(kind: RemediationActionKind) -> RiskLevel {
         | RemediationActionKind::AssignOwner
         | RemediationActionKind::AcknowledgeBaseline => RiskLevel::Low,
     }
+}
+
+/// Generate preconditions for a given remediation action kind.
+fn generate_preconditions(kind: RemediationActionKind, subject: &str) -> Vec<String> {
+    let file_path = subject.split('#').next().unwrap_or(subject);
+    match kind {
+        RemediationActionKind::DeleteFile => vec![
+            format!("Verify `{file_path}` is not referenced by dynamic imports or require calls that the analyzer cannot trace."),
+            "Confirm no runtime reflection or string-based module loading references this file.".to_string(),
+        ],
+        RemediationActionKind::DeleteExport => vec![
+            format!("Verify the export in `{subject}` is not consumed through re-export barrel files the analyzer may not fully resolve."),
+            "Check that no test files outside the analysis scope depend on this export.".to_string(),
+        ],
+        RemediationActionKind::RemoveDependency => vec![
+            format!("Verify `{subject}` is not loaded by a build tool, test runner, or script runner that bypasses module imports."),
+            "Check scripts in package.json for indirect references.".to_string(),
+        ],
+        RemediationActionKind::BreakCycle => vec![
+            format!("Identify which edge in the cycle involving `{subject}` is the weakest (least semantic coupling)."),
+            "Ensure the refactor does not introduce a new cycle elsewhere.".to_string(),
+        ],
+        RemediationActionKind::UpdateBoundaryRule => vec![
+            format!("Review whether the boundary violation for `{subject}` represents an intentional architectural exception."),
+            "Consider whether the rule itself needs updating rather than the code.".to_string(),
+        ],
+        RemediationActionKind::AssignOwner => vec![
+            format!("Identify the team or individual responsible for `{subject}`."),
+            "Check CODEOWNERS file or git blame for historical ownership signals.".to_string(),
+        ],
+        RemediationActionKind::MoveImport
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::SplitPackage
+        | RemediationActionKind::AcknowledgeBaseline => vec![
+            format!("Review the current state of `{subject}` before applying the action."),
+        ],
+    }
+}
+
+/// Generate verification steps for a given remediation action kind.
+fn generate_verification_steps(kind: RemediationActionKind, subject: &str) -> Vec<String> {
+    let mut steps = vec![format!(
+        "Run `pruneguard scan` and verify `{subject}` no longer appears in findings."
+    )];
+
+    match kind {
+        RemediationActionKind::DeleteFile => {
+            steps.push("Run your test suite to confirm no import errors.".to_string());
+            steps.push("Run your build to confirm no compilation errors.".to_string());
+        }
+        RemediationActionKind::DeleteExport => {
+            steps.push("Run your TypeScript compiler (tsc --noEmit) to verify no type errors.".to_string());
+            steps.push("Run your test suite to confirm no regressions.".to_string());
+        }
+        RemediationActionKind::RemoveDependency => {
+            steps.push("Run `npm install` / `pnpm install` to update the lockfile.".to_string());
+            steps.push("Run your build and test suite to confirm no missing modules.".to_string());
+        }
+        RemediationActionKind::BreakCycle => {
+            steps.push("Run `pruneguard scan` and verify the cycle finding is gone.".to_string());
+            steps.push("Run `pruneguard impact <refactored-file>` to confirm blast radius is acceptable.".to_string());
+        }
+        RemediationActionKind::UpdateBoundaryRule => {
+            steps.push("Run `pruneguard scan` and verify no boundary violations remain.".to_string());
+        }
+        RemediationActionKind::AssignOwner => {
+            steps.push("Run `pruneguard scan` and verify no ownership findings remain for this path.".to_string());
+        }
+        _ => {
+            steps.push("Run your test suite to confirm no regressions.".to_string());
+        }
+    }
+
+    steps
+}
+
+/// Rank remediation actions according to the plan ranking policy:
+/// 1. Minimal blast radius first (delete-export < delete-file < remove-dep < break-cycle)
+/// 2. High confidence first
+/// 3. Low risk first
+/// 4. Boundary/ownership fixes after dead-code cleanup
+fn rank_remediation_actions(actions: &mut [RemediationAction]) {
+    actions.sort_by(|a, b| {
+        // Phase ordering: dead-code cleanup before governance fixes
+        let phase_a = action_phase(a.kind);
+        let phase_b = action_phase(b.kind);
+        phase_a
+            .cmp(&phase_b)
+            // Within same phase: minimal blast radius first
+            .then_with(|| blast_radius_rank(a.kind).cmp(&blast_radius_rank(b.kind)))
+            // Then high confidence first
+            .then_with(|| confidence_rank(a.confidence).cmp(&confidence_rank(b.confidence)))
+            // Then low risk first
+            .then_with(|| risk_rank(a.risk).cmp(&risk_rank(b.risk)))
+    });
+}
+
+/// Return a phase number for ordering: dead-code cleanup (0) before governance (1).
+const fn action_phase(kind: RemediationActionKind) -> u8 {
+    match kind {
+        RemediationActionKind::DeleteExport
+        | RemediationActionKind::DeleteFile
+        | RemediationActionKind::RemoveDependency => 0,
+        RemediationActionKind::BreakCycle
+        | RemediationActionKind::MoveImport
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::SplitPackage => 1,
+        RemediationActionKind::UpdateBoundaryRule
+        | RemediationActionKind::AssignOwner
+        | RemediationActionKind::AcknowledgeBaseline => 2,
+    }
+}
+
+/// Blast radius rank: lower number = smaller blast radius = do first.
+const fn blast_radius_rank(kind: RemediationActionKind) -> u8 {
+    match kind {
+        RemediationActionKind::DeleteExport => 0,
+        RemediationActionKind::DeleteFile => 1,
+        RemediationActionKind::RemoveDependency => 2,
+        RemediationActionKind::AcknowledgeBaseline => 3,
+        RemediationActionKind::UpdateBoundaryRule
+        | RemediationActionKind::AssignOwner
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::MoveImport => 4,
+        RemediationActionKind::BreakCycle => 5,
+        RemediationActionKind::SplitPackage => 6,
+    }
+}
+
+const fn confidence_rank(confidence: FindingConfidence) -> u8 {
+    match confidence {
+        FindingConfidence::High => 0,
+        FindingConfidence::Medium => 1,
+        FindingConfidence::Low => 2,
+    }
+}
+
+const fn risk_rank(risk: RiskLevel) -> u8 {
+    match risk {
+        RiskLevel::Low => 0,
+        RiskLevel::Medium => 1,
+        RiskLevel::High => 2,
+    }
+}
+
+/// Compute a stable deletion order for safe-delete targets.
+///
+/// Files that are depended upon by other safe-delete targets should be deleted
+/// last — so we delete "importers first, leaves last". This prevents broken
+/// intermediate references during batch deletion. Within the same dependency
+/// depth, we sort alphabetically for determinism.
+fn compute_deletion_order(order: &mut Vec<String>, build: &GraphBuildResult) {
+    use petgraph::visit::EdgeRef;
+
+    let safe_set: BTreeSet<&str> = order.iter().map(String::as_str).collect();
+    if safe_set.len() <= 1 {
+        return;
+    }
+
+    // For each target, count how many other safe-set targets import it (reverse
+    // edges within the safe set). Targets with zero reverse-safe-set edges are
+    // "leaves" — nothing in the safe set depends on them. We delete non-leaves
+    // (importers) first, leaves last.
+    let mut reverse_counts: Vec<(String, usize)> = order
+        .iter()
+        .map(|target| {
+            let count = build
+                .find_file(target)
+                .and_then(|file| {
+                    let file_id = build.module_graph.file_id(&file.file.path.to_string_lossy())?;
+                    let (node_index, _) = build.module_graph.file_node_by_id(file_id)?;
+                    // Count incoming edges from other safe-set files.
+                    Some(
+                        build
+                            .module_graph
+                            .graph
+                            .edges_directed(node_index, petgraph::Direction::Incoming)
+                            .filter(|edge| {
+                                if let ModuleNode::File { relative_path, .. } =
+                                    &build.module_graph.graph[edge.source()]
+                                {
+                                    safe_set.contains(relative_path.as_str())
+                                } else {
+                                    false
+                                }
+                            })
+                            .count(),
+                    )
+                })
+                .unwrap_or(0);
+            (target.clone(), count)
+        })
+        .collect();
+
+    // Sort: targets with the most reverse-safe-set edges (most depended upon)
+    // go last. Targets depended on by nothing in the safe set go first.
+    // Tie-break alphabetically for determinism.
+    reverse_counts.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    *order = reverse_counts.into_iter().map(|(target, _)| target).collect();
 }
 
 /// Debug: resolve a specifier from a file.

@@ -114,6 +114,54 @@ impl PackageManifest {
         files.dedup();
         files
     }
+
+    /// Return all subpath patterns defined in the exports map.
+    /// E.g. for `"exports": { ".": ..., "./utils": ... }` this returns `[".", "./utils"]`.
+    pub fn exports_subpaths(&self) -> Vec<String> {
+        let Some(exports) = &self.exports else {
+            return Vec::new();
+        };
+        let mut subpaths = Vec::new();
+        collect_exports_subpaths(exports, &mut subpaths);
+        subpaths.sort();
+        subpaths.dedup();
+        subpaths
+    }
+
+    /// Check whether the exports map defines a `types` condition for any subpath.
+    pub fn exports_has_types_condition(&self) -> bool {
+        self.exports.as_ref().is_some_and(|exports| exports_contains_condition(exports, "types"))
+    }
+
+    /// Check whether the exports map defines a specific subpath (exact or wildcard).
+    pub fn exports_defines_subpath(&self, subpath: &str) -> bool {
+        let Some(exports) = &self.exports else {
+            return false;
+        };
+        match exports {
+            serde_json::Value::Object(map) => {
+                let is_subpath_map = map.keys().any(|k| k.starts_with('.'));
+                if !is_subpath_map {
+                    // Condition-only map, applies to "."
+                    return subpath == ".";
+                }
+                // Exact match.
+                if map.contains_key(subpath) {
+                    return true;
+                }
+                // Wildcard/pattern match.
+                map.keys().any(|pattern| {
+                    if let Some(prefix) = pattern.strip_suffix('*') {
+                        subpath.starts_with(prefix)
+                    } else {
+                        false
+                    }
+                })
+            }
+            serde_json::Value::String(_) => subpath == ".",
+            _ => false,
+        }
+    }
 }
 
 fn collect_export_paths(value: &serde_json::Value, output: &mut Vec<String>) {
@@ -129,11 +177,48 @@ fn collect_export_paths(value: &serde_json::Value, output: &mut Vec<String>) {
             }
         }
         serde_json::Value::Object(map) => {
-            for value in map.values() {
+            for (key, value) in map {
+                // Skip wildcard patterns in subpath exports — they are glob patterns,
+                // not concrete file paths.
+                if key.contains('*') {
+                    continue;
+                }
                 collect_export_paths(value, output);
             }
         }
         serde_json::Value::Bool(_) | serde_json::Value::Null | serde_json::Value::Number(_) => {}
+    }
+}
+
+/// Collect subpath patterns from an exports map.
+fn collect_exports_subpaths(value: &serde_json::Value, output: &mut Vec<String>) {
+    if let serde_json::Value::Object(map) = value {
+        let is_subpath_map = map.keys().any(|k| k.starts_with('.'));
+        if is_subpath_map {
+            for key in map.keys() {
+                if key.starts_with('.') {
+                    output.push(key.clone());
+                }
+            }
+        }
+        // If this is a condition map (keys are "import", "require", etc.),
+        // don't recurse — conditions are not subpaths.
+    }
+}
+
+/// Check if any branch of the exports value uses a particular condition name.
+fn exports_contains_condition(value: &serde_json::Value, condition: &str) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.contains_key(condition) {
+                return true;
+            }
+            map.values().any(|v| exports_contains_condition(v, condition))
+        }
+        serde_json::Value::Array(arr) => {
+            arr.iter().any(|v| exports_contains_condition(v, condition))
+        }
+        _ => false,
     }
 }
 

@@ -509,6 +509,8 @@ fn resolve_edge(
             outcome: ResolutionOutcome::ResolvedToFile,
             unresolved_reason: None,
             via_exports: module.via_exports,
+            exports_subpath: module.exports_subpath,
+            exports_condition: module.exports_condition,
             line: Some(line),
         },
         Ok(module) => ResolvedEdge {
@@ -521,6 +523,8 @@ fn resolve_edge(
             outcome: ResolutionOutcome::ResolvedToDependency,
             unresolved_reason: None,
             via_exports: module.via_exports,
+            exports_subpath: module.exports_subpath,
+            exports_condition: module.exports_condition,
             line: Some(line),
         },
         Err(err) => ResolvedEdge {
@@ -536,6 +540,8 @@ fn resolve_edge(
             },
             unresolved_reason: err.reason(),
             via_exports: false,
+            exports_subpath: None,
+            exports_condition: None,
             line: Some(line),
         },
     }

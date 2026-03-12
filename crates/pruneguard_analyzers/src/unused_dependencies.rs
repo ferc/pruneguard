@@ -214,6 +214,7 @@ fn declared_dependencies<'a>(
 /// Dependencies that are consumed by the build toolchain or runtime environment
 /// rather than imported in source code.  These will never resolve through the
 /// module graph, so flagging them as unused is a false positive.
+#[allow(clippy::too_many_lines)]
 fn is_build_tool_dependency(dep: &str) -> bool {
     // @types/* packages are consumed by the TypeScript compiler, not imported.
     if dep.starts_with("@types/") {
@@ -253,6 +254,36 @@ fn is_build_tool_dependency(dep: &str) -> bool {
         return true;
     }
 
+    // PostCSS plugins.
+    if dep.starts_with("postcss-") {
+        return true;
+    }
+
+    // Rollup plugins.
+    if dep.starts_with("rollup-plugin-") || dep.starts_with("@rollup/plugin-") {
+        return true;
+    }
+
+    // Webpack loaders and plugins.
+    if dep.ends_with("-loader") || dep.starts_with("webpack-") {
+        return true;
+    }
+
+    // Stylelint plugins and configs.
+    if dep.starts_with("stylelint-") {
+        return true;
+    }
+
+    // Commitlint configs and plugins.
+    if dep.starts_with("@commitlint/") || dep.starts_with("commitlint-") {
+        return true;
+    }
+
+    // Semantic-release plugins.
+    if dep.starts_with("@semantic-release/") || dep.starts_with("semantic-release-") {
+        return true;
+    }
+
     matches!(
         dep,
         // Language / compiler
@@ -268,11 +299,13 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "cssnano"
             | "sass"
             | "less"
+            | "lightningcss"
             // Bundler plugins (loaded by config, not imported)
             | "@vitejs/plugin-react"
             | "@vitejs/plugin-react-swc"
             | "@vitejs/plugin-vue"
             | "vite-tsconfig-paths"
+            | "vite-plugin-dts"
             | "@tanstack/router-plugin"
             | "@tanstack/router-vite-plugin"
             | "@content-collections/core"
@@ -281,14 +314,34 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "@next/bundle-analyzer"
             | "@sentry/esbuild-plugin"
             | "@sentry/nextjs"
+            | "esbuild"
+            | "swc"
+            | "@swc/core"
+            | "@swc/cli"
+            | "terser"
+            | "rollup"
+            | "webpack"
+            | "webpack-cli"
+            | "webpack-dev-server"
             // Test runners & frameworks (invoked by config, not imported in source)
             | "@playwright/test"
             | "playwright"
             | "cypress"
+            | "@cypress/code-coverage"
+            | "c8"
+            | "nyc"
+            | "istanbul"
             // Linting / formatting (invoked by scripts or config, not imported)
             | "eslint"
             | "prettier"
             | "stylelint"
+            | "oxlint"
+            | "biome"
+            | "@biomejs/biome"
+            | "lint-staged"
+            | "husky"
+            | "simple-git-hooks"
+            | "lefthook"
             // Script runners (invoked via scripts, not imported)
             | "tsx"
             | "ts-node"
@@ -296,6 +349,22 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "nodemon"
             | "concurrently"
             | "wait-on"
+            | "npm-run-all"
+            | "npm-run-all2"
+            | "cross-env"
+            | "dotenv-cli"
+            | "env-cmd"
+            // Documentation tools
+            | "typedoc"
+            | "jsdoc"
+            // Release / versioning tools
+            | "changesets"
+            | "@changesets/cli"
+            | "@changesets/changelog-github"
+            | "standard-version"
+            | "release-it"
+            | "np"
+            | "semantic-release"
     )
 }
 
@@ -305,6 +374,8 @@ fn is_build_tool_dependency(dep: &str) -> bool {
 /// - `<pkg> <args>` (binary at start of script value)
 /// - `pnpm exec <pkg>`, `npx <pkg>`, `yarn exec <pkg>`
 /// - `node_modules/.bin/<pkg>`
+/// - `node -r <pkg>`, `node --require <pkg>`
+/// - `pnpm --filter <ws> run <script>` (workspace-invoked scripts)
 fn scripts_reference_dependency(
     manifest: &pruneguard_manifest::PackageManifest,
     dependency: &str,
@@ -365,9 +436,30 @@ fn script_references_bin(script: &str, bin_name: &str) -> bool {
                     return token == bin_name;
                 }
             }
-            "pnpm" | "yarn" | "npm" => {
-                if let Some(second) = tokens.next() {
-                    if second == "exec" || second == "run" || second == "dlx" {
+            "pnpm" | "yarn" | "npm" | "bun" => {
+                // Consume flags like --filter, --workspace, -w, etc.
+                let mut subcommand = None;
+                while let Some(token) = tokens.next() {
+                    if token.starts_with('-') {
+                        // Some flags take a value (e.g. `--filter <ws>`).
+                        if matches!(
+                            token,
+                            "--filter"
+                                | "-F"
+                                | "--workspace"
+                                | "-w"
+                                | "--cwd"
+                                | "--prefix"
+                        ) {
+                            let _ = tokens.next(); // consume the flag value
+                        }
+                        continue;
+                    }
+                    subcommand = Some(token);
+                    break;
+                }
+                if let Some(sub) = subcommand {
+                    if sub == "exec" || sub == "run" || sub == "dlx" || sub == "x" {
                         // Next non-flag token is the package/binary name.
                         for token in tokens {
                             if token.starts_with('-') {
@@ -375,8 +467,30 @@ fn script_references_bin(script: &str, bin_name: &str) -> bool {
                             }
                             return token == bin_name;
                         }
-                    } else if second == bin_name {
+                    } else if sub == bin_name {
                         return true;
+                    }
+                }
+            }
+            "node" => {
+                // Handle `node -r <pkg>`, `node --require <pkg>`,
+                // `node --loader <pkg>`, `node --import <pkg>`.
+                while let Some(token) = tokens.next() {
+                    if matches!(token, "-r" | "--require" | "--loader" | "--import") {
+                        if let Some(pkg) = tokens.next() {
+                            // The required module might be the dependency itself
+                            // or a subpath like `pkg/register`.
+                            let required_pkg = pkg.split('/').next().unwrap_or(pkg);
+                            if required_pkg == bin_name {
+                                return true;
+                            }
+                        }
+                    } else if token.starts_with("--require=") || token.starts_with("-r=") {
+                        let value = token.split('=').nth(1).unwrap_or("");
+                        let required_pkg = value.split('/').next().unwrap_or(value);
+                        if required_pkg == bin_name {
+                            return true;
+                        }
                     }
                 }
             }

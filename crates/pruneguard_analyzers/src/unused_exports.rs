@@ -79,6 +79,17 @@ pub fn analyze(
         }
     }
 
+    // Compute global unresolved pressure for confidence demotion.
+    #[allow(clippy::cast_precision_loss)]
+    let global_pressure_pct = if build.stats.files_resolved + build.stats.unresolved_specifiers > 0
+    {
+        (build.stats.unresolved_specifiers as f64
+            / (build.stats.files_resolved + build.stats.unresolved_specifiers) as f64)
+            * 100.0
+    } else {
+        0.0
+    };
+
     let mut findings = Vec::new();
     for export in build.symbol_graph.exports.values() {
         if !reachable_files.contains(&export.file) {
@@ -97,18 +108,36 @@ pub fn analyze(
             continue;
         }
 
+        // Skip ambient declaration files — their exports augment the global scope.
+        if is_ambient_declaration(relative_path) {
+            continue;
+        }
+
         if live.is_export_live(export.file, &export.name, export.is_type) {
             continue;
         }
 
+        // If the export is a value export whose name is "default" in a file that has
+        // an `export * from` re-export targeting it, the name might be consumed through
+        // the star re-export rather than directly.  (We already handle this in the
+        // LiveDemand propagation, but this is a safety check.)
+        if export.name == "default" && live.is_all_live(export.file, false) {
+            continue;
+        }
+
         let subject = format!("{relative_path}#{}", export.name);
-        let unresolved_count = file_unresolved_count(build, export.file);
-        let confidence = if unresolved_count >= 5 {
+        let (unresolved_count, benign_unresolved) = file_unresolved_counts(build, export.file);
+        let effective_unresolved = unresolved_count.saturating_sub(benign_unresolved);
+        let confidence = if effective_unresolved >= 5 || global_pressure_pct > 15.0 {
             // Many unresolved specifiers — high chance of false positive.
             FindingConfidence::Low
-        } else if unresolved_count == 0 && !live.has_any_demand(export.file) {
+        } else if effective_unresolved == 0 && !live.has_any_demand(export.file) {
             // Truly isolated unused export: no unresolved specifiers and no demand on the file.
-            FindingConfidence::High
+            if global_pressure_pct > 5.0 {
+                FindingConfidence::Medium
+            } else {
+                FindingConfidence::High
+            }
         } else {
             // Some unresolved specifiers (< 5) or file has demand but this export is unused.
             FindingConfidence::Medium
@@ -119,13 +148,13 @@ pub fn analyze(
             line: None,
             description: "No reachable import or re-export demand reaches this export.".to_string(),
         }];
-        if unresolved_count >= 5 {
+        if effective_unresolved >= 3 {
             evidence.push(Evidence {
                 kind: "unresolved-pressure".to_string(),
                 file: Some(relative_path.clone()),
                 line: None,
                 description: format!(
-                    "{unresolved_count} unresolved specifiers may affect accuracy of this finding"
+                    "{effective_unresolved} unresolved specifiers may affect accuracy of this finding"
                 ),
             });
         }
@@ -147,20 +176,39 @@ pub fn analyze(
     findings
 }
 
-fn file_unresolved_count(build: &GraphBuildResult, file_id: FileId) -> usize {
+/// Return (`total_unresolved`, `benign_unresolved`) for a file.
+fn file_unresolved_counts(build: &GraphBuildResult, file_id: FileId) -> (usize, usize) {
     let Some((_, ModuleNode::File { path, .. })) = build.module_graph.file_node_by_id(file_id)
     else {
-        return 1;
+        return (1, 0);
     };
     let Some(file) = build.find_file(path) else {
-        return 1;
+        return (1, 0);
     };
 
-    file.resolved_imports
-        .iter()
-        .chain(&file.resolved_reexports)
-        .filter(|edge| matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved))
-        .count()
+    let mut total = 0;
+    let mut benign = 0;
+    for edge in file.resolved_imports.iter().chain(&file.resolved_reexports) {
+        if matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved) {
+            total += 1;
+            if matches!(
+                edge.unresolved_reason,
+                Some(
+                    pruneguard_resolver::UnresolvedReason::UnsupportedSpecifier
+                        | pruneguard_resolver::UnresolvedReason::Externalized
+                )
+            ) {
+                benign += 1;
+            }
+        }
+    }
+    (total, benign)
+}
+
+fn is_ambient_declaration(relative_path: &str) -> bool {
+    relative_path.ends_with(".d.ts")
+        || relative_path.ends_with(".d.mts")
+        || relative_path.ends_with(".d.cts")
 }
 
 fn active_entrypoint_files(
@@ -227,7 +275,13 @@ impl LiveDemand {
     }
 
     fn is_export_live(&self, file: FileId, name: &str, is_type: bool) -> bool {
+        // A value export is also considered live if there is type-only demand for it
+        // (e.g. `import type { MyEnum } from './enums'` keeps the value alive because
+        // TypeScript emits the value at runtime).
+        // A type export is live if there is value demand (the consumer may be re-exporting
+        // the type under a value import specifier).
         self.is_named_live(file, name, is_type)
+            || self.is_named_live(file, name, !is_type)
     }
 
     fn has_any_demand(&self, file: FileId) -> bool {

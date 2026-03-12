@@ -126,6 +126,17 @@ pub struct DaemonStatusInfo {
     pub graph_nodes: usize,
     /// Number of edges in the module graph.
     pub graph_edges: usize,
+    /// Execution mode of the daemon.
+    pub execution_mode: String,
+    /// Current generation (rebuild counter) of the index.
+    pub generation: u64,
+    /// Milliseconds of watcher lag (time since last fs event was processed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_lag_ms: Option<u64>,
+    /// Number of files pending invalidation.
+    pub pending_invalidations: usize,
+    /// Uptime of the daemon in seconds.
+    pub uptime_secs: u64,
 }
 
 /// Read a length-prefixed JSON frame from a tokio `AsyncRead`.

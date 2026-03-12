@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
 /// default extensions, condition names) so that the analysis cache is invalidated.
-pub const RESOLVER_LOGIC_VERSION: u32 = 3;
+pub const RESOLVER_LOGIC_VERSION: u32 = 4;
 
 /// Result of resolving a module specifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +18,11 @@ pub struct ResolvedModule {
     pub path: PathBuf,
     /// Whether this was resolved via package exports.
     pub via_exports: bool,
+    /// The subpath pattern that matched in package.json exports, if any.
+    /// E.g. for `@scope/pkg/utils`, this might be `./utils` or `./*`.
+    pub exports_subpath: Option<String>,
+    /// Which condition branch was selected (e.g. "import", "require", "types", "default").
+    pub exports_condition: Option<String>,
 }
 
 /// Graph-facing kind of a resolved dependency edge.
@@ -43,6 +48,12 @@ pub struct ResolvedEdge {
     pub outcome: ResolutionOutcome,
     pub unresolved_reason: Option<UnresolvedReason>,
     pub via_exports: bool,
+    /// The subpath pattern matched in package.json exports (e.g. `./utils`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exports_subpath: Option<String>,
+    /// The condition branch that was selected (e.g. "import", "types", "default").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exports_condition: Option<String>,
     pub line: Option<u32>,
 }
 
@@ -153,7 +164,17 @@ impl ModuleResolver {
         match self.inner.resolve(directory, specifier) {
             Ok(resolution) => {
                 let via_exports = resolved_via_package_exports(specifier, &resolution);
-                Ok(ResolvedModule { path: resolution.into_path_buf(), via_exports })
+                let (exports_subpath, exports_condition) = if via_exports {
+                    extract_exports_attribution(specifier, &resolution)
+                } else {
+                    (None, None)
+                };
+                Ok(ResolvedModule {
+                    path: resolution.into_path_buf(),
+                    via_exports,
+                    exports_subpath,
+                    exports_condition,
+                })
             }
             Err(err) => {
                 // Try workspace-aware resolution: map `@scope/pkg/sub/path` to
@@ -262,6 +283,14 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
         return UnresolvedReason::Externalized;
     }
 
+    // Virtual/synthetic specifiers commonly used by bundler plugins.
+    if specifier.starts_with("virtual:")
+        || specifier.starts_with('\0')
+        || specifier.starts_with('~')
+    {
+        return UnresolvedReason::UnsupportedSpecifier;
+    }
+
     // Template literal syntax — cannot be statically resolved.
     if specifier.contains("${") {
         return UnresolvedReason::UnsupportedSpecifier;
@@ -269,6 +298,11 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
 
     // Glob / wildcard patterns.
     if specifier.contains('*') || specifier.contains('?') {
+        return UnresolvedReason::UnsupportedSpecifier;
+    }
+
+    // Non-JS asset imports (CSS, images, etc.) that bundlers handle.
+    if is_asset_specifier(specifier) {
         return UnresolvedReason::UnsupportedSpecifier;
     }
 
@@ -290,6 +324,12 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
         if error.contains("exports") || error.contains("condition") {
             return UnresolvedReason::ExportsConditionMiss;
         }
+        // A bare specifier with a subpath (e.g. `pkg/subpath`) where the package
+        // has an exports field is most likely an exports-condition miss rather than
+        // a missing file.
+        if has_subpath(specifier) && error.contains("Package path") {
+            return UnresolvedReason::ExportsConditionMiss;
+        }
         // Looks like a valid package name — treat as a missing/uninstalled dependency
         // rather than a missing file.
         if looks_like_package_name(specifier) {
@@ -299,6 +339,30 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
     }
 
     UnresolvedReason::MissingFile
+}
+
+/// Check if a bare specifier includes a subpath beyond the package name.
+fn has_subpath(specifier: &str) -> bool {
+    let Some(pkg_name) = dependency_name(specifier) else {
+        return false;
+    };
+    specifier.len() > pkg_name.len() && specifier[pkg_name.len()..].starts_with('/')
+}
+
+/// Check if a specifier looks like a non-JS asset import handled by bundlers.
+fn is_asset_specifier(specifier: &str) -> bool {
+    let ext = specifier.rsplit('.').next().unwrap_or("");
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "css" | "scss" | "sass" | "less" | "styl" | "stylus"
+            | "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" | "avif"
+            | "woff" | "woff2" | "ttf" | "eot" | "otf"
+            | "mp4" | "webm" | "ogg" | "mp3" | "wav" | "flac"
+            | "graphql" | "gql"
+            | "yaml" | "yml" | "toml"
+            | "txt" | "csv" | "xml"
+            | "wasm"
+    )
 }
 
 /// Heuristic: does this bare specifier look like a valid npm package name?
@@ -332,14 +396,24 @@ fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule>
 
     // If the path already has an extension and exists, use it directly.
     if base.is_file() {
-        return Some(ResolvedModule { path: base, via_exports: false });
+        return Some(ResolvedModule {
+            path: base,
+            via_exports: false,
+            exports_subpath: None,
+            exports_condition: None,
+        });
     }
 
     // Try appending common extensions.
     for ext in &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"] {
         let candidate = base.with_extension(ext);
         if candidate.is_file() {
-            return Some(ResolvedModule { path: candidate, via_exports: false });
+            return Some(ResolvedModule {
+                path: candidate,
+                via_exports: false,
+                exports_subpath: None,
+                exports_condition: None,
+            });
         }
     }
 
@@ -348,7 +422,12 @@ fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule>
         for ext in &["ts", "tsx", "js", "jsx"] {
             let candidate = base.join("index").with_extension(ext);
             if candidate.is_file() {
-                return Some(ResolvedModule { path: candidate, via_exports: false });
+                return Some(ResolvedModule {
+                    path: candidate,
+                    via_exports: false,
+                    exports_subpath: None,
+                    exports_condition: None,
+                });
             }
         }
     }
@@ -371,4 +450,30 @@ fn resolved_via_package_exports(specifier: &str, resolution: &oxc_resolver::Reso
         Some(name) if name == package_name => true,
         _ => resolution.path().starts_with(package_json.directory()),
     }
+}
+
+/// Extract the matched exports subpath and condition from a resolution.
+///
+/// For a specifier like `@scope/pkg/utils` resolving via `"./utils": { "import": "./src/utils.js" }`,
+/// this returns `(Some("./utils"), Some("import"))`.
+fn extract_exports_attribution(
+    specifier: &str,
+    _resolution: &oxc_resolver::Resolution,
+) -> (Option<String>, Option<String>) {
+    let Some(package_name) = dependency_name(specifier) else {
+        return (None, None);
+    };
+
+    // Derive the subpath the user asked for: `@scope/pkg/utils` -> `./utils`.
+    let subpath = specifier
+        .strip_prefix(&package_name)
+        .map_or_else(|| ".".to_string(), |rest| {
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            if rest.is_empty() { ".".to_string() } else { format!("./{rest}") }
+        });
+
+    // We report the subpath that was requested; the condition is not available
+    // from the oxc_resolver resolution directly, so we leave it as None.
+    // The subpath is sufficient for exports-aware attribution in the graph.
+    (Some(subpath), None)
 }

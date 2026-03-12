@@ -229,7 +229,7 @@ async fn dispatch_request(
     index: &Arc<Mutex<HotIndex>>,
     shutdown_tx: &watch::Sender<bool>,
     project_root: &Path,
-    _started_at: Instant,
+    started_at: Instant,
 ) -> DaemonResponse {
     match request {
         DaemonRequest::Scan { paths, changed_since, focus } => {
@@ -277,6 +277,7 @@ async fn dispatch_request(
         }
         DaemonRequest::Status => {
             let idx = index.lock().await;
+            let uptime_secs = started_at.elapsed().as_secs();
             let info = DaemonStatusInfo {
                 project_root: project_root.display().to_string(),
                 running: true,
@@ -288,6 +289,11 @@ async fn dispatch_request(
                 watched_files: idx.tracked_files(),
                 graph_nodes: idx.graph_nodes(),
                 graph_edges: idx.graph_edges(),
+                execution_mode: "daemon".to_string(),
+                generation: idx.generation(),
+                watcher_lag_ms: idx.watcher_lag_ms(),
+                pending_invalidations: idx.pending_invalidations(),
+                uptime_secs,
             };
             DaemonResponse::Status { info }
         }
