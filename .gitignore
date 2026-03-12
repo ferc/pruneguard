@@ -9,11 +9,11 @@ npm/*/node_modules/
 # Build output
 dist/
 *.wasm
-npm/oxgraph/*.tgz
+npm/pruneguard/*.tgz
 
 # Cache
-.oxgraph-cache/
-.oxgraph/
+.pruneguard-cache/
+.pruneguard/
 
 # OS
 .DS_Store

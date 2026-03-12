@@ -17,14 +17,27 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r build
-      - run: mkdir -p /tmp/oxgraph-pack && npm pack --pack-destination /tmp/oxgraph-pack
-        working-directory: npm/oxgraph
+      - run: cargo build -p pruneguard --release
+      - run: pnpm --dir apps/pruneguard build-js
+      - name: Stage platform binary
+        run: |
+          PLATFORM_DIR="npm/cli-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')"
+          if [ "$(uname -s)" = "Linux" ]; then
+            if ldd --version 2>&1 | grep -q musl; then
+              PLATFORM_DIR="${PLATFORM_DIR}-musl"
+            else
+              PLATFORM_DIR="${PLATFORM_DIR}-gnu"
+            fi
+          fi
+          mkdir -p "${PLATFORM_DIR}/bin"
+          cp target/release/pruneguard "${PLATFORM_DIR}/bin/"
+      - run: mkdir -p /tmp/pruneguard-pack && npm pack --pack-destination /tmp/pruneguard-pack
+        working-directory: npm/pruneguard
       - run: |
-          mkdir -p /tmp/oxgraph-pack-smoke
-          cd /tmp/oxgraph-pack-smoke
-          TARBALL="$(ls /tmp/oxgraph-pack/oxgraph-*.tgz | head -n 1)"
+          mkdir -p /tmp/pruneguard-pack-smoke
+          cd /tmp/pruneguard-pack-smoke
+          TARBALL="$(ls /tmp/pruneguard-pack/pruneguard-*.tgz | head -n 1)"
           npm init -y
           npm install "$TARBALL"
-          node -e "import('oxgraph').then((mod) => { if (typeof mod.scan !== 'function') process.exit(1); console.log(typeof mod.scan); })"
-          npx oxgraph --help
+          node -e "import('pruneguard').then((mod) => { if (typeof mod.binaryPath !== 'function' || typeof mod.scan !== 'function') process.exit(1); console.log('binaryPath:', typeof mod.binaryPath, 'scan:', typeof mod.scan); })"
+          npx pruneguard --help

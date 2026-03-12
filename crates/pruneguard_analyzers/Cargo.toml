@@ -1,0 +1,37 @@
+[package]
+name = "pruneguard_analyzers"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Analysis passes for unused code, cycles, boundaries, and impact"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_graph = { workspace = true }
+pruneguard_config = { workspace = true }
+pruneguard_discovery = { workspace = true }
+pruneguard_entrypoints = { workspace = true }
+pruneguard_fs = { workspace = true }
+pruneguard_extract = { workspace = true }
+pruneguard_manifest = { workspace = true }
+pruneguard_report = { workspace = true }
+pruneguard_resolver = { workspace = true }
+pruneguard_rules = { workspace = true }
+
+compact_str = { workspace = true }
+globset = { workspace = true }
+petgraph = { workspace = true }
+rustc-hash = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

@@ -1,0 +1,10 @@
+{
+  "name": "@pruneguard/cli-linux-x64-gnu",
+  "version": "0.1.0",
+  "description": "pruneguard platform binary for Linux x64 (glibc)",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "files": ["bin/pruneguard"]
+}

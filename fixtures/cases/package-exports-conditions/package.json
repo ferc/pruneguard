@@ -1,0 +1,14 @@
+{
+  "name": "package-exports-conditions",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "import": "./src/index.mjs",
+      "require": "./src/index.cjs"
+    },
+    "./utils": {
+      "import": "./src/utils.mjs"
+    }
+  }
+}

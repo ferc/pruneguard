@@ -1,10 +1,10 @@
 # Config
 
-`oxgraph` reads JSON config in this order:
+`pruneguard` reads JSON config in this order:
 
 1. explicit `--config`
-2. `oxgraph.json`
-3. `.oxgraphrc.json`
+2. `pruneguard.json`
+3. `.pruneguardrc.json`
 
 Supported top-level areas in the current implementation:
 

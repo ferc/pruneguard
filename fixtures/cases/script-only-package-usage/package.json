@@ -1,0 +1,11 @@
+{
+  "name": "script-only-package-usage",
+  "version": "0.0.0",
+  "dependencies": {
+    "eslint": "*",
+    "lodash": "*"
+  },
+  "scripts": {
+    "lint": "eslint src/"
+  }
+}

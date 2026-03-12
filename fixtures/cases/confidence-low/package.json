@@ -1,0 +1,11 @@
+{
+  "name": "confidence-low",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "unknown-pkg-a": "1.0.0",
+    "unknown-pkg-b": "1.0.0",
+    "unknown-pkg-c": "1.0.0"
+  }
+}

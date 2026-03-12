@@ -1,0 +1,9 @@
+{
+  "name": "@workspace/app",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@workspace/lib": "0.0.0"
+  }
+}

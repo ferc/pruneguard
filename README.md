@@ -1,4 +1,4 @@
-# oxgraph
+# pruneguard
 
 Repo truth engine for JS/TS monorepos.
 
@@ -9,44 +9,44 @@ ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
 ## Install
 
 ```sh
-npm install oxgraph
+npm install pruneguard
 ```
 
 ## Usage
 
 ```sh
 # Full scan
-oxgraph scan
+pruneguard scan
 
 # Focus findings to a slice of the repo
-oxgraph --focus "src/**" scan
+pruneguard --focus "src/**" scan
 
 # Changed-since review for CI/agents
-oxgraph --changed-since origin/main scan
+pruneguard --changed-since origin/main scan
 
 # Deterministic CI/parity run without baseline influence
-oxgraph --no-baseline --no-cache scan
+pruneguard --no-baseline --no-cache scan
 
 # Fail advisory dead-code scans in automation
-oxgraph --require-full-scope scan
+pruneguard --require-full-scope scan
 
 # Partial-scope scan (advisory for dead-code findings)
-oxgraph scan src/components/Button.tsx src/lib/utils.ts
+pruneguard scan src/components/Button.tsx src/lib/utils.ts
 
 # With config
-oxgraph --config oxgraph.json scan
+pruneguard --config pruneguard.json scan
 
 # Blast radius
-oxgraph impact src/utils/helpers.ts
+pruneguard impact src/utils/helpers.ts
 
 # Explain a finding
-oxgraph explain unused-export:packages/core:src/old.ts#deprecatedFn
+pruneguard explain unused-export:packages/core:src/old.ts#deprecatedFn
 
 # Generate config
-oxgraph init
+pruneguard init
 
 # Debug resolution
-oxgraph debug resolve ./utils --from src/index.ts
+pruneguard debug resolve ./utils --from src/index.ts
 ```
 
 Dead-code trust model:
@@ -60,11 +60,11 @@ Dead-code trust model:
 
 ## Configuration
 
-Create `oxgraph.json`:
+Create `pruneguard.json`:
 
 ```json
 {
-  "$schema": "./node_modules/oxgraph/configuration_schema.json",
+  "$schema": "./node_modules/pruneguard/configuration_schema.json",
   "workspaces": {
     "packageManager": "pnpm",
     "roots": ["apps/*", "packages/*"]

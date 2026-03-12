@@ -1,0 +1,21 @@
+[package]
+name = "pruneguard_git"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Git-aware change scoping for pruneguard"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+miette = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

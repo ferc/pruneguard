@@ -1,0 +1,9 @@
+{
+  "ownership": {
+    "teams": {
+      "platform": {
+        "paths": ["src/platform/**"]
+      }
+    }
+  }
+}

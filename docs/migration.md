@@ -1,12 +1,12 @@
 # Migration
 
-`oxgraph migrate knip [file]`:
+`pruneguard migrate knip [file]`:
 
 - loads the explicit file if provided
 - otherwise looks for `knip.json`
 - otherwise looks for `package.json#knip`
 
-`oxgraph migrate depcruise [file]`:
+`pruneguard migrate depcruise [file]`:
 
 - loads the explicit file if provided
 - otherwise searches the common `.dependency-cruiser.*` filenames

@@ -3,13 +3,13 @@ resolver = "3"
 members = ["apps/*", "crates/*"]
 
 [workspace.package]
-authors = ["oxgraph contributors"]
+authors = ["pruneguard contributors"]
 categories = ["development-tools"]
 edition = "2024"
-homepage = "https://github.com/user/oxgraph"
+homepage = "https://github.com/user/pruneguard"
 keywords = ["javascript", "typescript", "monorepo", "graph", "unused-code"]
 license = "MIT"
-repository = "https://github.com/user/oxgraph"
+repository = "https://github.com/user/pruneguard"
 rust-version = "1.92.0"
 description = "Repo truth engine for JS/TS monorepos"
 
@@ -37,20 +37,20 @@ print_stderr = "warn"
 
 [workspace.dependencies]
 # Internal crates
-oxgraph_config = { path = "crates/oxgraph_config" }
-oxgraph_fs = { path = "crates/oxgraph_fs" }
-oxgraph_manifest = { path = "crates/oxgraph_manifest" }
-oxgraph_discovery = { path = "crates/oxgraph_discovery" }
-oxgraph_resolver = { path = "crates/oxgraph_resolver" }
-oxgraph_extract = { path = "crates/oxgraph_extract" }
-oxgraph_graph = { path = "crates/oxgraph_graph" }
-oxgraph_entrypoints = { path = "crates/oxgraph_entrypoints" }
-oxgraph_frameworks = { path = "crates/oxgraph_frameworks" }
-oxgraph_analyzers = { path = "crates/oxgraph_analyzers" }
-oxgraph_rules = { path = "crates/oxgraph_rules" }
-oxgraph_report = { path = "crates/oxgraph_report" }
-oxgraph_cache = { path = "crates/oxgraph_cache" }
-oxgraph_git = { path = "crates/oxgraph_git" }
+pruneguard_config = { path = "crates/pruneguard_config" }
+pruneguard_fs = { path = "crates/pruneguard_fs" }
+pruneguard_manifest = { path = "crates/pruneguard_manifest" }
+pruneguard_discovery = { path = "crates/pruneguard_discovery" }
+pruneguard_resolver = { path = "crates/pruneguard_resolver" }
+pruneguard_extract = { path = "crates/pruneguard_extract" }
+pruneguard_graph = { path = "crates/pruneguard_graph" }
+pruneguard_entrypoints = { path = "crates/pruneguard_entrypoints" }
+pruneguard_frameworks = { path = "crates/pruneguard_frameworks" }
+pruneguard_analyzers = { path = "crates/pruneguard_analyzers" }
+pruneguard_rules = { path = "crates/pruneguard_rules" }
+pruneguard_report = { path = "crates/pruneguard_report" }
+pruneguard_cache = { path = "crates/pruneguard_cache" }
+pruneguard_git = { path = "crates/pruneguard_git" }
 
 # Oxc crates
 oxc_parser = "0.117.0"

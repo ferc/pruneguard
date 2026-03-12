@@ -1,0 +1,9 @@
+{
+  "name": "@pruneguard/cli-darwin-arm64",
+  "version": "0.1.0",
+  "description": "pruneguard platform binary for macOS ARM64",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/pruneguard"]
+}

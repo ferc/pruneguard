@@ -19,4 +19,4 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: cargo test -p oxgraph --test parity_smoke -- --ignored --nocapture
+      - run: cargo test -p pruneguard --test parity_smoke -- --ignored --nocapture

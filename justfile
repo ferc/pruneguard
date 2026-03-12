@@ -1,4 +1,4 @@
-# oxgraph development commands
+# pruneguard development commands
 
 # Run all checks (format, check, test, lint)
 ready: fmt check test lint
@@ -12,9 +12,9 @@ fmt:
 check:
     cargo check --workspace
 
-# Check the N-API feature build without packaging
+# Check the N-API feature build (internal only)
 check-napi:
-    cargo check -p oxgraph --features napi
+    cargo check -p pruneguard --features napi
 
 # Run all tests
 test:
@@ -26,24 +26,24 @@ lint:
 
 # Build release binary
 build:
-    cargo build --release -p oxgraph
+    cargo build --release -p pruneguard
 
-# Run oxgraph on a target directory
+# Run pruneguard on a target directory
 run *args:
-    cargo run -p oxgraph -- {{args}}
+    cargo run -p pruneguard -- {{args}}
 
 # Generate JSON schemas
 schemas:
-    cargo run -p oxgraph --bin generate_schemas
+    cargo run -p pruneguard --bin generate_schemas
 
 # Verify generated schemas are committed
 schemas-check:
-    cargo run -p oxgraph --bin generate_schemas
-    git diff --exit-code -- npm/oxgraph/configuration_schema.json npm/oxgraph/report_schema.json
+    cargo run -p pruneguard --bin generate_schemas
+    git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
 
 # Build the JS wrapper only
 build-js:
-    pnpm --dir apps/oxgraph build-js
+    pnpm --dir apps/pruneguard build-js
 
 # Watch for changes and re-check
 watch cmd="check":
@@ -55,28 +55,33 @@ benchmark-workspace:
 
 # Run one named corpus scan in release mode
 benchmark CASE:
-    cargo run --release -p oxgraph --bin oxgraph -- --format json --no-cache --no-baseline scan {{CASE}}
+    cargo run --release -p pruneguard --bin pruneguard -- --format json --no-cache --no-baseline scan {{CASE}}
 
 # Run configured corpus scans in release mode
 benchmark-repos:
-    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+    cargo test -p pruneguard parity_smoke -- --ignored --nocapture
 
 # Run one fixture scan smoke
 fixture CASE:
-    cargo test -p oxgraph scan_smoke -- --nocapture {{CASE}}
+    cargo test -p pruneguard scan_smoke -- --nocapture {{CASE}}
 
 # Run real-repo smoke on configured corpora
 smoke-repos:
-    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+    cargo test -p pruneguard parity_smoke -- --ignored --nocapture
 
-# Run package smoke locally
+# Run package smoke locally (builds binary + JS, stages platform binary, packs and tests)
 pack-smoke:
-    mkdir -p /tmp/oxgraph-pack
-    npm_config_cache=/tmp/oxgraph-npm-cache npm pack --prefix npm/oxgraph --pack-destination /tmp/oxgraph-pack
+    cargo build --release -p pruneguard
+    pnpm --dir apps/pruneguard build-js
+    cargo run -p pruneguard --bin generate_schemas
+    mkdir -p npm/cli-darwin-arm64/bin
+    cp target/release/pruneguard npm/cli-darwin-arm64/bin/ 2>/dev/null || true
+    mkdir -p /tmp/pruneguard-pack
+    npm_config_cache=/tmp/pruneguard-npm-cache npm pack --prefix npm/pruneguard --pack-destination /tmp/pruneguard-pack
 
 # Alias for parity harness
 parity:
-    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+    cargo test -p pruneguard parity_smoke -- --ignored --nocapture
 
 parity-repos:
-    cargo test -p oxgraph parity_smoke -- --ignored --nocapture
+    cargo test -p pruneguard parity_smoke -- --ignored --nocapture

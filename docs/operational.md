@@ -2,7 +2,7 @@
 
 Operational defaults:
 
-- cache path: `.oxgraph/cache.redb`
+- cache path: `.pruneguard/cache.redb`
 - baseline search order:
   - config directory `baseline.json`
   - project root `baseline.json`
@@ -32,8 +32,8 @@ just benchmark ../../claude-attack
 just benchmark-repos
 just parity
 just smoke-repos
-pnpm --dir apps/oxgraph build-js
-cargo check -p oxgraph --features napi
+pnpm --dir apps/pruneguard build-js
+cargo check -p pruneguard --features napi
 pnpm -r build
-npm pack --prefix npm/oxgraph --pack-destination /tmp/oxgraph-pack
+npm pack --prefix npm/pruneguard --pack-destination /tmp/pruneguard-pack
 ```

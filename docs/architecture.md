@@ -1,6 +1,6 @@
 # Architecture
 
-`oxgraph` builds one repository graph and reuses it for every analysis:
+`pruneguard` builds one repository graph and reuses it for every analysis:
 
 1. discovery
 2. file collection and classification

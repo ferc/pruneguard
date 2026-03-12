@@ -1,0 +1,9 @@
+{
+  "name": "confidence-medium",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "plugin-system": "1.0.0"
+  }
+}

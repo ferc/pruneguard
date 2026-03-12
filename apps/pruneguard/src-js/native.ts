@@ -1,0 +1,50 @@
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
+type NativeBinding = {
+  scan_json(options: unknown): string;
+  scan_dot_text(options: unknown): string;
+  impact_json(options: unknown): string;
+  explain_json(options: unknown): string;
+  load_config_json(cwd?: string, config?: string): string;
+  debug_resolve_text(options: unknown): string;
+  debug_entrypoints_json(options: unknown): string;
+  migrate_knip_json(options: unknown): string;
+  migrate_depcruise_json(options: unknown): string;
+};
+
+function loadNative(): NativeBinding {
+  const platform = `${process.platform}-${process.arch}`;
+  const candidates = [
+    "@pruneguard/binding",
+    "../pruneguard.node",
+    `../pruneguard.${platform}.node`,
+    `../binding.${platform}.node`,
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      return require(candidate) as NativeBinding;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(
+    "Failed to load the pruneguard native binding. Run the package build first.",
+  );
+}
+
+let cachedNative: NativeBinding | undefined;
+
+function getNative(): NativeBinding {
+  cachedNative ??= loadNative();
+  return cachedNative;
+}
+
+export const native = new Proxy({} as NativeBinding, {
+  get(_target, property) {
+    return Reflect.get(getNative(), property);
+  },
+});

@@ -1087,245 +1087,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxgraph"
-version = "0.1.0"
-dependencies = [
- "bpaf",
- "globset",
- "insta",
- "miette",
- "napi",
- "napi-build",
- "napi-derive",
- "oxgraph_analyzers",
- "oxgraph_cache",
- "oxgraph_config",
- "oxgraph_discovery",
- "oxgraph_entrypoints",
- "oxgraph_extract",
- "oxgraph_frameworks",
- "oxgraph_fs",
- "oxgraph_git",
- "oxgraph_graph",
- "oxgraph_manifest",
- "oxgraph_report",
- "oxgraph_resolver",
- "oxgraph_rules",
- "petgraph",
- "rayon",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "oxgraph_analyzers"
-version = "0.1.0"
-dependencies = [
- "compact_str 0.8.1",
- "globset",
- "insta",
- "oxgraph_config",
- "oxgraph_discovery",
- "oxgraph_entrypoints",
- "oxgraph_extract",
- "oxgraph_fs",
- "oxgraph_graph",
- "oxgraph_manifest",
- "oxgraph_report",
- "oxgraph_resolver",
- "oxgraph_rules",
- "petgraph",
- "rustc-hash",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_cache"
-version = "0.1.0"
-dependencies = [
- "redb",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_config"
-version = "0.1.0"
-dependencies = [
- "globset",
- "insta",
- "miette",
- "rustc-hash",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "oxgraph_discovery"
-version = "0.1.0"
-dependencies = [
- "glob",
- "globset",
- "miette",
- "oxgraph_config",
- "oxgraph_fs",
- "oxgraph_manifest",
- "rustc-hash",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_entrypoints"
-version = "0.1.0"
-dependencies = [
- "glob",
- "globset",
- "oxgraph_config",
- "oxgraph_frameworks",
- "oxgraph_fs",
- "oxgraph_manifest",
- "rustc-hash",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_extract"
-version = "0.1.0"
-dependencies = [
- "compact_str 0.8.1",
- "oxc_allocator",
- "oxc_ast",
- "oxc_diagnostics",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_syntax",
- "oxgraph_fs",
- "oxgraph_resolver",
- "rustc-hash",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_frameworks"
-version = "0.1.0"
-dependencies = [
- "globset",
- "oxgraph_config",
- "oxgraph_manifest",
- "rustc-hash",
- "serde",
-]
-
-[[package]]
-name = "oxgraph_fs"
-version = "0.1.0"
-dependencies = [
- "globset",
- "ignore",
- "rustc-hash",
- "serde",
- "walkdir",
-]
-
-[[package]]
-name = "oxgraph_git"
-version = "0.1.0"
-dependencies = [
- "miette",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "oxgraph_graph"
-version = "0.1.0"
-dependencies = [
- "compact_str 0.8.1",
- "globset",
- "insta",
- "miette",
- "oxgraph_cache",
- "oxgraph_config",
- "oxgraph_discovery",
- "oxgraph_entrypoints",
- "oxgraph_extract",
- "oxgraph_frameworks",
- "oxgraph_fs",
- "oxgraph_manifest",
- "oxgraph_report",
- "oxgraph_resolver",
- "petgraph",
- "rustc-hash",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_manifest"
-version = "0.1.0"
-dependencies = [
- "compact_str 0.8.1",
- "rustc-hash",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "oxgraph_report"
-version = "0.1.0"
-dependencies = [
- "compact_str 0.8.1",
- "insta",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "oxgraph_resolver"
-version = "0.1.0"
-dependencies = [
- "miette",
- "oxc_resolver",
- "oxgraph_config",
- "rustc-hash",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "oxgraph_rules"
-version = "0.1.0"
-dependencies = [
- "globset",
- "miette",
- "oxgraph_config",
- "oxgraph_entrypoints",
- "oxgraph_graph",
- "oxgraph_report",
- "oxgraph_resolver",
- "petgraph",
- "rustc-hash",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "papaya"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1469,6 +1230,245 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pruneguard"
+version = "0.1.0"
+dependencies = [
+ "bpaf",
+ "globset",
+ "insta",
+ "miette",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "petgraph",
+ "pruneguard_analyzers",
+ "pruneguard_cache",
+ "pruneguard_config",
+ "pruneguard_discovery",
+ "pruneguard_entrypoints",
+ "pruneguard_extract",
+ "pruneguard_frameworks",
+ "pruneguard_fs",
+ "pruneguard_git",
+ "pruneguard_graph",
+ "pruneguard_manifest",
+ "pruneguard_report",
+ "pruneguard_resolver",
+ "pruneguard_rules",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "pruneguard_analyzers"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "globset",
+ "insta",
+ "petgraph",
+ "pruneguard_config",
+ "pruneguard_discovery",
+ "pruneguard_entrypoints",
+ "pruneguard_extract",
+ "pruneguard_fs",
+ "pruneguard_graph",
+ "pruneguard_manifest",
+ "pruneguard_report",
+ "pruneguard_resolver",
+ "pruneguard_rules",
+ "rustc-hash",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_cache"
+version = "0.1.0"
+dependencies = [
+ "redb",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_config"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "insta",
+ "miette",
+ "rustc-hash",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "pruneguard_discovery"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "globset",
+ "miette",
+ "pruneguard_config",
+ "pruneguard_fs",
+ "pruneguard_manifest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_entrypoints"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "globset",
+ "pruneguard_config",
+ "pruneguard_frameworks",
+ "pruneguard_fs",
+ "pruneguard_manifest",
+ "rustc-hash",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_extract"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_diagnostics",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_syntax",
+ "pruneguard_fs",
+ "pruneguard_resolver",
+ "rustc-hash",
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_frameworks"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "pruneguard_config",
+ "pruneguard_manifest",
+ "rustc-hash",
+ "serde",
+]
+
+[[package]]
+name = "pruneguard_fs"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "ignore",
+ "rustc-hash",
+ "serde",
+ "walkdir",
+]
+
+[[package]]
+name = "pruneguard_git"
+version = "0.1.0"
+dependencies = [
+ "miette",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "pruneguard_graph"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "globset",
+ "insta",
+ "miette",
+ "petgraph",
+ "pruneguard_cache",
+ "pruneguard_config",
+ "pruneguard_discovery",
+ "pruneguard_entrypoints",
+ "pruneguard_extract",
+ "pruneguard_frameworks",
+ "pruneguard_fs",
+ "pruneguard_manifest",
+ "pruneguard_report",
+ "pruneguard_resolver",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_manifest"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "pruneguard_report"
+version = "0.1.0"
+dependencies = [
+ "compact_str 0.8.1",
+ "insta",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pruneguard_resolver"
+version = "0.1.0"
+dependencies = [
+ "miette",
+ "oxc_resolver",
+ "pruneguard_config",
+ "rustc-hash",
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_rules"
+version = "0.1.0"
+dependencies = [
+ "globset",
+ "miette",
+ "petgraph",
+ "pruneguard_config",
+ "pruneguard_entrypoints",
+ "pruneguard_graph",
+ "pruneguard_report",
+ "pruneguard_resolver",
+ "rustc-hash",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

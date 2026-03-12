@@ -33,7 +33,7 @@ importers:
         specifier: 4.0.18
         version: 4.0.18
 
-  apps/oxgraph:
+  apps/pruneguard:
     devDependencies:
       '@napi-rs/cli':
         specifier: 'catalog:'
@@ -45,7 +45,23 @@ importers:
         specifier: 'catalog:'
         version: 4.0.18
 
-  npm/oxgraph: {}
+  npm/cli-darwin-arm64: {}
+
+  npm/cli-darwin-x64: {}
+
+  npm/cli-linux-arm64-gnu: {}
+
+  npm/cli-linux-arm64-musl: {}
+
+  npm/cli-linux-x64-gnu: {}
+
+  npm/cli-linux-x64-musl: {}
+
+  npm/cli-win32-arm64-msvc: {}
+
+  npm/cli-win32-x64-msvc: {}
+
+  npm/pruneguard: {}
 
 packages:
 

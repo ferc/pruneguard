@@ -1,0 +1,23 @@
+[package]
+name = "pruneguard_fs"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "File system abstraction for pruneguard"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ignore = { workspace = true }
+walkdir = { workspace = true }
+globset = { workspace = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true }

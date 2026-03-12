@@ -1,0 +1,65 @@
+[package]
+name = "pruneguard"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Repo truth engine for JS/TS monorepos"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "pruneguard"
+path = "src/main.rs"
+test = false
+doctest = false
+
+[dependencies]
+pruneguard_config = { workspace = true }
+pruneguard_fs = { workspace = true }
+pruneguard_manifest = { workspace = true }
+pruneguard_discovery = { workspace = true }
+pruneguard_resolver = { workspace = true }
+pruneguard_extract = { workspace = true }
+pruneguard_graph = { workspace = true }
+pruneguard_entrypoints = { workspace = true }
+pruneguard_frameworks = { workspace = true }
+pruneguard_analyzers = { workspace = true }
+pruneguard_rules = { workspace = true }
+pruneguard_report = { workspace = true }
+pruneguard_cache = { workspace = true }
+pruneguard_git = { workspace = true }
+
+bpaf = { workspace = true }
+miette = { workspace = true }
+rayon = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+petgraph = { workspace = true }
+globset = { workspace = true }
+napi = { workspace = true, optional = true }
+napi-derive = { workspace = true, optional = true }
+
+[build-dependencies]
+napi-build = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+
+[features]
+default = []
+napi = ["dep:napi", "dep:napi-derive"]

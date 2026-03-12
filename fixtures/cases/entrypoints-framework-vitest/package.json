@@ -1,0 +1,9 @@
+{
+  "name": "entrypoints-framework-vitest",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vitest": "1.0.0"
+  }
+}

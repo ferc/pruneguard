@@ -22,9 +22,8 @@ jobs:
       - run: cargo check --workspace
       - run: cargo clippy --workspace -- --deny warnings
       - run: cargo test --workspace
-      - run: pnpm --dir apps/oxgraph build-js
-      - run: cargo check -p oxgraph --features napi
-      - run: cargo run -p oxgraph --bin generate_schemas
-      - run: git diff --exit-code -- npm/oxgraph/configuration_schema.json npm/oxgraph/report_schema.json
-      - run: mkdir -p /tmp/oxgraph-pack && npm pack --pack-destination /tmp/oxgraph-pack
-        working-directory: npm/oxgraph
+      - run: pnpm --dir apps/pruneguard build-js
+      - run: cargo run -p pruneguard --bin generate_schemas
+      - run: git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
+      - run: mkdir -p /tmp/pruneguard-pack && npm pack --pack-destination /tmp/pruneguard-pack
+        working-directory: npm/pruneguard

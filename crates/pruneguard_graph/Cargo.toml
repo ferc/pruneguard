@@ -1,0 +1,40 @@
+[package]
+name = "pruneguard_graph"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Module and symbol graph engine for pruneguard"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_config = { workspace = true }
+pruneguard_discovery = { workspace = true }
+pruneguard_entrypoints = { workspace = true }
+pruneguard_extract = { workspace = true }
+pruneguard_fs = { workspace = true }
+pruneguard_frameworks = { workspace = true }
+pruneguard_manifest = { workspace = true }
+pruneguard_report = { workspace = true }
+pruneguard_resolver = { workspace = true }
+pruneguard_cache = { workspace = true }
+
+globset = { workspace = true }
+miette = { workspace = true }
+petgraph = { workspace = true }
+rustc-hash = { workspace = true }
+compact_str = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

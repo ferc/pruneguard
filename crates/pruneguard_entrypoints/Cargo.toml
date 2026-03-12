@@ -1,0 +1,27 @@
+[package]
+name = "pruneguard_entrypoints"
+version = "0.1.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Entrypoint detection and profile classification for pruneguard"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_config = { workspace = true }
+pruneguard_fs = { workspace = true }
+pruneguard_manifest = { workspace = true }
+pruneguard_frameworks = { workspace = true }
+
+glob = { workspace = true }
+globset = { workspace = true }
+rustc-hash = { workspace = true }
+tracing = { workspace = true }
