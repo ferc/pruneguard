@@ -23,6 +23,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo check --workspace
       - run: cargo clippy --workspace -- --deny warnings
+      - name: Clippy suppression audit
+        run: ./scripts/lint_audit.sh
       - run: cargo test --workspace
       - run: pnpm --dir apps/pruneguard build-js
       - run: cargo run -p pruneguard --bin generate_schemas
