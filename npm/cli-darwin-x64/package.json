@@ -1,6 +1,6 @@
 {
   "name": "@pruneguard/cli-darwin-x64",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "pruneguard platform binary for macOS x64",
   "license": "MIT",
   "os": [
