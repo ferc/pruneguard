@@ -8,34 +8,14 @@ ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
 
 ## Why pruneguard
 
-| | pruneguard | knip | dependency-cruiser |
-|---|---|---|---|
-| **Engine** | Rust native binary | Node.js | Node.js |
-| Unused exports + files + deps | Yes | Yes | Partial |
-| Cycles + boundary rules | Yes | No / Yes | Yes / Yes |
-| Confidence scoring (high/medium/low) | Yes | No | No |
-| Branch review gate (`review`) | Built-in | Manual scripting | Manual scripting |
-| Safe-delete evaluation | Built-in | No | No |
-| Fix-plan remediation | Built-in | No | No |
-| Blast-radius analysis (`impact`) | Built-in | No | No |
-| Proof chains (`explain`) | Built-in | No | No |
-| SARIF output | Yes | No | No |
-| Deterministic ordering | Yes | No | Partial |
-| Config migration from competitors | Yes | N/A | N/A |
-
-**When to choose pruneguard:** You want a single tool that combines dead-code
-detection with graph-based architectural rules, produces machine-readable output
-with confidence scores, and ships commands (`review`, `safe-delete`, `fix-plan`)
-that CI pipelines and AI agents can consume directly.
-
-**When to choose knip:** You need broad framework plugin coverage (Angular,
-Gatsby, Storybook, etc.) and are primarily focused on unused-code detection
-without architectural boundary enforcement.
-
-**When to choose dependency-cruiser:** You need a mature rule authoring
-ecosystem for dependency validation and do not need unused-code detection.
-
-See [docs/competitive.md](docs/competitive.md) for the full comparison.
+- **Rust native binary** -- fast full-repo graph builds
+- Unused exports, files, and dependencies detection
+- Cycle detection and boundary rules
+- Confidence scoring (high / medium / low)
+- Built-in branch review gate (`review`)
+- Safe-delete evaluation and fix-plan remediation
+- Blast-radius analysis (`impact`) and proof chains (`explain`)
+- SARIF output and deterministic ordering
 
 ## Quick start
 
@@ -119,9 +99,6 @@ pruneguard debug runtime                        # Print binary/platform info
 # Daemon
 pruneguard daemon start|stop|status      # Manage the background daemon
 
-# Migration
-pruneguard migrate knip [file]           # Convert knip config
-pruneguard migrate depcruise [file]      # Convert dependency-cruiser config
 ```
 
 ### Global flags
@@ -302,8 +279,6 @@ import {
   loadConfig,
   schemaPath,
   scanDot,
-  migrateKnip,
-  migrateDepcruise,
   resolutionInfo,
   debugResolve,
   debugEntrypoints,
@@ -330,14 +305,6 @@ console.log(schemaPath());
 // Graphviz DOT output
 const dot = await scanDot();
 
-// Migrate from knip
-const knipMigration = await migrateKnip();
-console.log(knipMigration.config, knipMigration.warnings);
-
-// Migrate from dependency-cruiser
-const dcMigration = await migrateDepcruise();
-console.log(dcMigration.config, dcMigration.warnings);
-
 // Binary resolution diagnostics
 const info = resolutionInfo();
 console.log(info.source, info.platform);
@@ -359,8 +326,6 @@ console.log(info.source, info.platform);
 | `binaryPath` | `() => string` | Path to the resolved native binary |
 | `run` | `(args, options?) => Promise<CommandResult>` | Run arbitrary CLI args |
 | `scanDot` | `(options?) => Promise<string>` | Graphviz DOT output |
-| `migrateKnip` | `(options?) => Promise<MigrationOutput>` | Migrate from knip config |
-| `migrateDepcruise` | `(options?) => Promise<MigrationOutput>` | Migrate from dependency-cruiser config |
 
 ### Error handling
 
@@ -572,9 +537,8 @@ See [docs/config.md](docs/config.md) for the full configuration reference.
 | [JS API reference](docs/js-api.md) | Complete typed API documentation |
 | [Agent integration](docs/agent-integration.md) | AI agent workflows with review + safe-delete + fix-plan |
 | [Recipes](docs/recipes.md) | Copy-paste automation examples |
-| [Migration](docs/migration.md) | Migrate from knip or dependency-cruiser |
+| [Migration](docs/migration.md) | Migrate from other tools |
 | [Architecture](docs/architecture.md) | Internal design and pipeline stages |
-| [Competitive positioning](docs/competitive.md) | Detailed comparison with knip and dependency-cruiser |
 | [Performance](docs/performance.md) | Performance model, cache behavior, benchmarking |
 | [Benchmarks](docs/benchmarks.md) | Target latencies and benchmark methodology |
 
