@@ -100,8 +100,7 @@ impl AnalysisCache {
     }
 
     fn open_db(db_path: &Path) -> Result<Self, CacheError> {
-        let db =
-            Database::create(db_path).map_err(|err| CacheError::OpenError(err.to_string()))?;
+        let db = Database::create(db_path).map_err(|err| CacheError::OpenError(err.to_string()))?;
 
         let write_txn = db.begin_write().map_err(|err| CacheError::OpenError(err.to_string()))?;
         write_txn.open_table(META_TABLE).map_err(|err| CacheError::OpenError(err.to_string()))?;
