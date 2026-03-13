@@ -81,13 +81,27 @@ pub enum CacheError {
 
 impl AnalysisCache {
     /// Open or create the cache database.
+    /// If the database is corrupted, it is deleted and recreated.
     pub fn open(project_root: &Path) -> Result<Self, CacheError> {
         let cache_dir = project_root.join(".pruneguard");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|err| CacheError::OpenError(err.to_string()))?;
         let db_path = cache_dir.join("cache.redb");
+
+        match Self::open_db(&db_path) {
+            Ok(cache) => Ok(cache),
+            Err(_) if db_path.exists() => {
+                // Database is corrupted — delete and recreate.
+                let _ = std::fs::remove_file(&db_path);
+                Self::open_db(&db_path)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn open_db(db_path: &Path) -> Result<Self, CacheError> {
         let db =
-            Database::create(&db_path).map_err(|err| CacheError::OpenError(err.to_string()))?;
+            Database::create(db_path).map_err(|err| CacheError::OpenError(err.to_string()))?;
 
         let write_txn = db.begin_write().map_err(|err| CacheError::OpenError(err.to_string()))?;
         write_txn.open_table(META_TABLE).map_err(|err| CacheError::OpenError(err.to_string()))?;
@@ -103,7 +117,7 @@ impl AnalysisCache {
             .map_err(|err| CacheError::OpenError(err.to_string()))?;
         write_txn.commit().map_err(|err| CacheError::OpenError(err.to_string()))?;
 
-        Ok(Self { db, db_path })
+        Ok(Self { db, db_path: db_path.to_path_buf() })
     }
 
     pub fn path(&self) -> &Path {

@@ -6,6 +6,9 @@ set -euo pipefail
 echo "pre-commit: cargo fmt --all --check"
 cargo fmt --all --check
 
+echo "pre-commit: cargo check --workspace"
+cargo check --workspace
+
 echo "pre-commit: cargo clippy --workspace -- --deny warnings"
 cargo clippy --workspace -- --deny warnings
 
