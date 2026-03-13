@@ -1386,6 +1386,7 @@ version = "0.3.1"
 dependencies = [
  "compact_str 0.8.1",
  "globset",
+ "ignore",
  "insta",
  "petgraph",
  "pruneguard_config",

@@ -62,6 +62,14 @@ pub fn analyze(
         }
     }
 
+    // Scan CSS/SCSS/SASS/LESS files for @import references to npm packages.
+    // These files are not parsed by the JS/TS extractor, so any packages loaded
+    // exclusively via CSS @import would otherwise be falsely flagged as unused.
+    let css_used_by_workspace = collect_css_dependency_references(build);
+    for (workspace, deps) in &css_used_by_workspace {
+        used_prod_by_workspace.entry(workspace.clone()).or_default().extend(deps.iter().cloned());
+    }
+
     let mut findings = Vec::new();
     for workspace in build.discovery.workspaces.values() {
         let workspace_name = workspace.name.clone();
@@ -90,6 +98,13 @@ pub fn analyze(
             // Skip build-tool dependencies that are used by the toolchain rather
             // than imported in source code.
             if is_build_tool_dependency(dependency) {
+                continue;
+            }
+
+            // Skip framework-implicit runtime dependencies.  For example,
+            // `react-dom` is never directly imported in user code but is
+            // required at runtime by any React-based framework.
+            if is_framework_implicit_dependency(dependency, &workspace.manifest) {
                 continue;
             }
 
@@ -220,10 +235,15 @@ fn declared_dependencies<'a>(
 
     if profile != EntrypointProfile::Production {
         for (dependency, kind) in dev_labels {
+            // A devDependency is "used" if it is imported from either
+            // development-profile OR production-profile reachable files.
+            // A devDep imported in production code is misclassified (should
+            // be a regular dependency) but it is certainly not unused.
             dependencies.push((
                 dependency,
                 kind,
-                used_dev.is_some_and(|deps| deps.contains(dependency)),
+                used_dev.is_some_and(|deps| deps.contains(dependency))
+                    || used_prod.is_some_and(|deps| deps.contains(dependency)),
             ));
         }
     }
@@ -318,6 +338,7 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "@tailwindcss/forms"
             | "@tailwindcss/container-queries"
             | "@tailwindcss/vite"
+            | "@tailwindcss/postcss"
             | "cssnano"
             | "sass"
             | "less"
@@ -388,6 +409,125 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "np"
             | "semantic-release"
     )
+}
+
+/// Dependencies that are implicitly required at runtime when a framework or
+/// library is present.  These are never directly imported in user code but
+/// must exist in `node_modules` for the framework to function.
+fn is_framework_implicit_dependency(
+    dep: &str,
+    manifest: &pruneguard_manifest::PackageManifest,
+) -> bool {
+    let has_dep = |name: &str| -> bool {
+        manifest.dependencies.as_ref().is_some_and(|deps| deps.contains_key(name))
+            || manifest.dev_dependencies.as_ref().is_some_and(|deps| deps.contains_key(name))
+            || manifest.peer_dependencies.as_ref().is_some_and(|deps| deps.contains_key(name))
+    };
+
+    match dep {
+        // react-dom is the DOM renderer for React — required by every React
+        // framework (Next.js, Vite+React, TanStack Start, Remix, CRA, etc.)
+        // but never directly imported in user code with modern JSX transforms.
+        "react-dom" => has_dep("react") || has_dep("next") || has_dep("@tanstack/react-start"),
+        _ => false,
+    }
+}
+
+/// Scan CSS/SCSS/SASS/LESS files in the project for `@import` statements that
+/// reference npm packages.  Returns a map of workspace name → set of used
+/// package names discovered in stylesheets.
+fn collect_css_dependency_references(
+    build: &GraphBuildResult,
+) -> FxHashMap<String, FxHashSet<String>> {
+    let mut result: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+    let css_extensions = ["css", "scss", "sass", "less", "styl"];
+
+    for workspace in build.discovery.workspaces.values() {
+        // Walk CSS files using the ignore crate to respect .gitignore.
+        let mut walk_builder = ignore::WalkBuilder::new(&workspace.root);
+        walk_builder.hidden(false).git_ignore(true).git_global(true).git_exclude(true);
+
+        for entry in walk_builder.build().flatten() {
+            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                continue;
+            }
+            let path = entry.into_path();
+            let is_css = path
+                .extension()
+                .and_then(|ext: &std::ffi::OsStr| ext.to_str())
+                .is_some_and(|ext| css_extensions.contains(&ext));
+            if !is_css {
+                continue;
+            }
+            // Skip node_modules and build output directories.
+            let path_str = path.to_string_lossy();
+            if path_str.contains("node_modules") || path_str.contains("/dist/") {
+                continue;
+            }
+
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for dep in extract_css_import_packages(&content) {
+                result.entry(workspace.name.clone()).or_default().insert(dep);
+            }
+        }
+    }
+
+    result
+}
+
+/// Extract npm package names from CSS `@import` statements.
+///
+/// Handles:
+/// - `@import "package-name";`
+/// - `@import 'package-name';`
+/// - `@import "package-name/subpath";`
+/// - `@import "@scope/package-name";`
+/// - `@import url("package-name");`
+fn extract_css_import_packages(source: &str) -> Vec<String> {
+    let mut packages = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("@import") && !trimmed.starts_with("@use") {
+            continue;
+        }
+
+        // Extract the value between quotes.
+        let value = trimmed.split('"').nth(1).or_else(|| trimmed.split('\'').nth(1));
+        let Some(value) = value else {
+            continue;
+        };
+
+        // Skip relative imports and URLs.
+        if value.starts_with('.') || value.starts_with('/') || value.starts_with("http") {
+            continue;
+        }
+        // Strip url() wrapper if present.
+        let value = value.strip_prefix("url(").unwrap_or(value);
+        let value = value.strip_suffix(')').unwrap_or(value);
+
+        // Extract the package name (handle scoped packages).
+        if let Some(pkg) = css_import_to_package_name(value) {
+            packages.push(pkg);
+        }
+    }
+    packages
+}
+
+/// Map a CSS import specifier to an npm package name.
+fn css_import_to_package_name(specifier: &str) -> Option<String> {
+    if specifier.is_empty() || specifier.starts_with('.') || specifier.starts_with('/') {
+        return None;
+    }
+    let mut parts = specifier.split('/');
+    let first = parts.next()?;
+    if first.starts_with('@') {
+        let second = parts.next()?;
+        Some(format!("{first}/{second}"))
+    } else {
+        Some(first.to_string())
+    }
 }
 
 /// Check if any package.json script directly references a dependency by name.

@@ -231,13 +231,18 @@ fn extract_workspace_globs(
             if let Some(workspaces) = &manifest.workspaces {
                 return workspaces.patterns().to_vec();
             }
+            // Fall back to lerna.json packages
+            if let Some(globs) = parse_lerna_packages(project_root) {
+                return globs;
+            }
             Vec::new()
         }
         PackageManager::Npm | PackageManager::Yarn | PackageManager::Bun => {
             if let Some(workspaces) = &manifest.workspaces {
                 workspaces.patterns().to_vec()
             } else {
-                Vec::new()
+                // Lerna monorepos may not declare npm workspaces
+                parse_lerna_packages(project_root).unwrap_or_default()
             }
         }
     }
@@ -265,6 +270,16 @@ fn parse_pnpm_workspace(content: &str) -> Option<Vec<String>> {
         }
     }
 
+    if globs.is_empty() { None } else { Some(globs) }
+}
+
+/// Parse a `lerna.json` file for package globs.
+fn parse_lerna_packages(project_root: &Path) -> Option<Vec<String>> {
+    let lerna_path = project_root.join("lerna.json");
+    let content = std::fs::read_to_string(lerna_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let packages = json.get("packages")?.as_array()?;
+    let globs: Vec<String> = packages.iter().filter_map(|v| v.as_str().map(String::from)).collect();
     if globs.is_empty() { None } else { Some(globs) }
 }
 

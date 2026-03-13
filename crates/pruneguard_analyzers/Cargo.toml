@@ -29,6 +29,7 @@ pruneguard_rules = { workspace = true }
 
 compact_str = { workspace = true }
 globset = { workspace = true }
+ignore = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }

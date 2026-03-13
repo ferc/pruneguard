@@ -261,6 +261,10 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -
         || path.contains("/__generated__/")
         || file_name.ends_with(".generated.ts")
         || file_name.ends_with(".generated.js")
+        || file_name.ends_with(".gen.ts")
+        || file_name.ends_with(".gen.tsx")
+        || file_name.ends_with(".gen.js")
+        || file_name.ends_with(".gen.jsx")
     {
         return FileRole::Generated;
     }
@@ -270,6 +274,25 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -
         || path.contains("/coverage/")
         || path.contains("/storybook-static/")
         || path.contains("/.next/")
+        || path.contains("/.nuxt/")
+        || path.contains("/.output/")
+        || path.contains("/.svelte-kit/")
+        || path.contains("/.mastra/")
+        || path.contains("/.turbo/")
+        || path.contains("/.vercel/")
+        || path.contains("/.astro/")
+        || path.contains("/.angular/")
+        || path.contains("/.cache/")
+        || path.starts_with(".next/")
+        || path.starts_with(".nuxt/")
+        || path.starts_with(".output/")
+        || path.starts_with(".svelte-kit/")
+        || path.starts_with(".mastra/")
+        || path.starts_with(".turbo/")
+        || path.starts_with(".vercel/")
+        || path.starts_with(".astro/")
+        || path.starts_with(".angular/")
+        || path.starts_with(".cache/")
     {
         return FileRole::BuildOutput;
     }

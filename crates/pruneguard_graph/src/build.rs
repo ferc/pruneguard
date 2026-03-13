@@ -503,7 +503,11 @@ fn resolve_edge(
             from: from.to_path_buf(),
             specifier: specifier.to_string(),
             to_file: Some(module.path),
-            to_dependency: None,
+            // When a bare specifier (e.g. `@wordwar/core`) resolves to a file
+            // inside the repo (cross-workspace import), also record the
+            // dependency name so the unused-dependency analyzer knows the
+            // declared package.json dependency is in use.
+            to_dependency: dependency_name(specifier),
             kind,
             outcome: ResolutionOutcome::ResolvedToFile,
             unresolved_reason: None,
