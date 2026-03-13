@@ -145,6 +145,9 @@ pub struct ModuleResolver {
     /// External packages from framework config adapters.
     /// Specifiers matching these names are treated as external dependencies.
     config_externals: FxHashSet<String>,
+    /// Specifier patterns that should be treated as resolved (e.g. virtual modules).
+    /// Matching specifiers will not be counted as unresolved.
+    ignore_unresolved: Vec<String>,
 }
 
 impl ModuleResolver {
@@ -211,6 +214,7 @@ impl ModuleResolver {
             workspace_main_fields: FxHashMap::default(),
             config_aliases: Vec::new(),
             config_externals: FxHashSet::default(),
+            ignore_unresolved: Vec::new(),
         }
     }
 
@@ -258,9 +262,33 @@ impl ModuleResolver {
         self.config_externals = externals.into_iter().collect();
     }
 
+    /// Register specifier patterns that should be treated as resolved.
+    ///
+    /// Matching specifiers (by prefix) will not be counted as unresolved,
+    /// which is useful for virtual modules, framework-specific aliases, etc.
+    pub fn set_ignore_unresolved(&mut self, patterns: Vec<String>) {
+        self.ignore_unresolved = patterns;
+    }
+
+    /// Check if a specifier matches any ignore_unresolved pattern.
+    pub fn is_ignored_unresolved(&self, specifier: &str) -> bool {
+        self.ignore_unresolved.iter().any(|pattern| {
+            specifier == pattern || specifier.starts_with(pattern)
+        })
+    }
+
     /// Resolve a module specifier from a given file.
     pub fn resolve(&self, specifier: &str, from: &Path) -> Result<ResolvedModule, ResolveError> {
-        // Check config-derived externals first.
+        // Check ignore_unresolved patterns first — treat matching specifiers as external.
+        if self.is_ignored_unresolved(specifier) {
+            return Err(ResolveError::NotFound {
+                specifier: specifier.to_string(),
+                from: from.to_path_buf(),
+                reason: Some(UnresolvedReason::Externalized),
+            });
+        }
+
+        // Check config-derived externals.
         if let Some(pkg) = dependency_name(specifier)
             && self.config_externals.contains(&pkg)
         {

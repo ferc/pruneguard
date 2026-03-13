@@ -50,6 +50,8 @@ pub struct ConfigInputs {
     pub auto_import_roots: Vec<PathBuf>,
     /// Confidence level for this adapter's outputs.
     pub confidence: AdapterConfidence,
+    /// Specifier patterns to treat as resolved (e.g. virtual modules, framework aliases).
+    pub ignore_unresolved: Vec<String>,
 }
 
 /// A path alias mapping (e.g. `@/` -> `./src/`).
@@ -79,6 +81,7 @@ impl ConfigInputs {
         self.setup_files.extend(other.setup_files);
         self.global_setup_files.extend(other.global_setup_files);
         self.auto_import_roots.extend(other.auto_import_roots);
+        self.ignore_unresolved.extend(other.ignore_unresolved);
         // Keep the first non-default confidence.
         if self.confidence == AdapterConfidence::High && other.confidence != AdapterConfidence::High
         {
@@ -241,6 +244,9 @@ impl ConfigAdapter for ViteAdapter {
         if let Some(kind) = find_value(values, "test.include") {
             inputs.test_patterns.extend(strings_from_array(kind));
         }
+
+        // Vite virtual modules — plugins commonly use virtual: prefix.
+        inputs.ignore_unresolved.push("virtual:".to_string());
 
         inputs
     }
@@ -757,6 +763,17 @@ impl ConfigAdapter for NuxtAdapter {
             inputs.externals.extend(strings_from_array(kind));
         }
 
+        // Nuxt virtual modules — these specifiers should not be counted as unresolved.
+        inputs.ignore_unresolved.extend([
+            "#imports".to_string(),
+            "#components".to_string(),
+            "#app".to_string(),
+            "#build".to_string(),
+            "nuxt/dist/".to_string(),
+            "~~/".to_string(),
+            "@@/".to_string(),
+        ]);
+
         inputs
     }
 }
@@ -824,6 +841,12 @@ impl ConfigAdapter for AstroAdapter {
             }
         }
 
+        // Astro virtual modules.
+        inputs.ignore_unresolved.extend([
+            "astro:".to_string(),
+            "virtual:".to_string(),
+        ]);
+
         inputs
     }
 }
@@ -881,6 +904,14 @@ impl ConfigAdapter for SvelteKitAdapter {
                 });
             }
         }
+
+        // SvelteKit virtual modules.
+        inputs.ignore_unresolved.extend([
+            "$app/".to_string(),
+            "$env/".to_string(),
+            "$lib/".to_string(),
+            "$service-worker".to_string(),
+        ]);
 
         inputs
     }

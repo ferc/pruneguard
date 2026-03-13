@@ -125,6 +125,16 @@ pub fn analyze(
                 _ => "export",
             };
 
+            // Demote confidence for files that are glob/context expansion targets.
+            let is_glob_target = build
+                .glob_expanded_targets
+                .contains(&extracted_file.file.path);
+            let confidence = if is_glob_target {
+                FindingConfidence::Low
+            } else {
+                FindingConfidence::Medium
+            };
+
             for dead_member in &dead_members {
                 let evidence = vec![Evidence {
                     kind: "unused-member".to_string(),
@@ -143,7 +153,7 @@ pub fn analyze(
                     "unused-member",
                     finding_severity,
                     FindingCategory::UnusedMember,
-                    FindingConfidence::Medium,
+                    confidence,
                     format!(
                         "{}.{}",
                         relative_path.to_string_lossy(),

@@ -110,7 +110,7 @@ pub fn analyze(
             continue;
         }
 
-        let Some((_, ModuleNode::File { relative_path, workspace, package, role, .. })) =
+        let Some((_, ModuleNode::File { path: abs_path, relative_path, workspace, package, role, .. })) =
             build.module_graph.file_node_by_id(export.file)
         else {
             continue;
@@ -151,9 +151,18 @@ pub fn analyze(
         let effective_unresolved = unresolved_count.saturating_sub(benign_unresolved);
         let neighbor_pressure = neighbor_unresolved_pressure(build, export.file);
 
+        // Demote confidence when the file is a target of glob/context expansion —
+        // its liveness depends on heuristic pattern matching.
+        let is_glob_target = build
+            .glob_expanded_targets
+            .contains(std::path::Path::new(abs_path));
+
         let confidence =
             if effective_unresolved >= 5 || global_pressure_pct > 15 || neighbor_pressure >= 8 {
                 FindingConfidence::Low
+            } else if is_glob_target {
+                // Glob/context expansion targets get at most Medium confidence.
+                FindingConfidence::Medium
             } else if effective_unresolved == 0
                 && !live.has_any_demand(export.file)
                 && neighbor_pressure == 0
