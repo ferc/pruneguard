@@ -1,4 +1,6 @@
 use petgraph::visit::EdgeRef;
+use rustc_hash::FxHashSet;
+
 use pruneguard_config::AnalysisSeverity;
 use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_fs::is_docs_path;
@@ -12,12 +14,11 @@ pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,
     profile: EntrypointProfile,
+    reachable: &FxHashSet<pruneguard_graph::FileId>,
 ) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
         return Vec::new();
     };
-
-    let reachable = build.module_graph.reachable_file_ids(profile);
 
     // Compute global unresolved pressure: if the whole graph has many unresolved
     // specifiers we lower confidence uniformly.

@@ -14,13 +14,12 @@ pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,
     profile: EntrypointProfile,
+    reachable_prod: &FxHashSet<pruneguard_graph::FileId>,
+    reachable_dev: &FxHashSet<pruneguard_graph::FileId>,
 ) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
         return Vec::new();
     };
-
-    let reachable_prod = build.module_graph.reachable_file_ids(EntrypointProfile::Production);
-    let reachable_dev = build.module_graph.reachable_file_ids(EntrypointProfile::Development);
     let mut used_prod_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     let mut used_dev_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
 

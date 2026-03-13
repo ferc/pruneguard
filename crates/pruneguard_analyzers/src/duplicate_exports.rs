@@ -22,10 +22,7 @@ use crate::{make_finding, severity};
 /// 3. Group entries by `(source_file, original_name)`.  Any origin symbol that
 ///    is publicly reachable via more than one re-export path is a collision.
 /// 4. Emit a finding for each collision.
-pub fn analyze(
-    build: &GraphBuildResult,
-    level: AnalysisSeverity,
-) -> Vec<Finding> {
+pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
         return Vec::new();
     };
@@ -58,9 +55,7 @@ pub fn analyze(
         // Deduplicate: the same reexporter re-exporting under the same name
         // (e.g. from two identical edges) should not inflate the count.
         let mut unique_paths: Vec<&(FileId, String)> = reexporters.iter().collect();
-        unique_paths.sort_by(|a, b| {
-            a.0 .0.cmp(&b.0 .0).then_with(|| a.1.cmp(&b.1))
-        });
+        unique_paths.sort_by(|a, b| a.0.0.cmp(&b.0.0).then_with(|| a.1.cmp(&b.1)));
         unique_paths.dedup();
 
         if unique_paths.len() < 2 {
@@ -91,16 +86,13 @@ pub fn analyze(
                 kind: "reexport-path".to_string(),
                 file: Some(reexporter_path),
                 line: None,
-                description: format!(
-                    "Re-exports `{original_name}` as `{exported_name}`"
-                ),
+                description: format!("Re-exports `{original_name}` as `{exported_name}`"),
             });
         }
 
         let paths_joined = path_descriptions.join(", ");
-        let message = format!(
-            "Symbol `{original_name}` is re-exported from multiple paths: {paths_joined}"
-        );
+        let message =
+            format!("Symbol `{original_name}` is re-exported from multiple paths: {paths_joined}");
 
         findings.push(make_finding(
             "duplicate-export",

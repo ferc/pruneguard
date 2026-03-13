@@ -297,9 +297,9 @@ impl ModuleResolver {
 
     /// Check if a specifier matches any ignore_unresolved pattern.
     pub fn is_ignored_unresolved(&self, specifier: &str) -> bool {
-        self.ignore_unresolved.iter().any(|pattern| {
-            specifier == pattern || specifier.starts_with(pattern)
-        })
+        self.ignore_unresolved
+            .iter()
+            .any(|pattern| specifier == pattern || specifier.starts_with(pattern))
     }
 
     /// Resolve a module specifier from a given file.
@@ -501,10 +501,8 @@ impl ModuleResolver {
     /// it specifies an alternative main entry point.
     fn resolve_via_browser_field(&self, specifier: &str, from: &Path) -> Option<ResolvedModule> {
         // Find which workspace the importing file belongs to.
-        let (pkg_name, workspace_root) = self
-            .workspace_roots
-            .iter()
-            .find(|(_, root)| from.starts_with(root))?;
+        let (pkg_name, workspace_root) =
+            self.workspace_roots.iter().find(|(_, root)| from.starts_with(root))?;
         let browser = self.workspace_browser.get(pkg_name)?.as_ref()?;
 
         match browser {

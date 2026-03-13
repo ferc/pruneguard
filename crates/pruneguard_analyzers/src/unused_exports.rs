@@ -16,12 +16,11 @@ pub fn analyze(
     level: AnalysisSeverity,
     profile: EntrypointProfile,
     ignore_exports_used_in_file: bool,
+    reachable_files: &FxHashSet<pruneguard_graph::FileId>,
 ) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
         return Vec::new();
     };
-
-    let reachable_files = build.module_graph.reachable_file_ids(profile);
     let active_entrypoints = active_entrypoint_files(build, profile);
 
     let mut live = LiveDemand::default();
@@ -110,8 +109,10 @@ pub fn analyze(
             continue;
         }
 
-        let Some((_, ModuleNode::File { path: abs_path, relative_path, workspace, package, role, .. })) =
-            build.module_graph.file_node_by_id(export.file)
+        let Some((
+            _,
+            ModuleNode::File { path: abs_path, relative_path, workspace, package, role, .. },
+        )) = build.module_graph.file_node_by_id(export.file)
         else {
             continue;
         };
@@ -153,9 +154,7 @@ pub fn analyze(
 
         // Demote confidence when the file is a target of glob/context expansion —
         // its liveness depends on heuristic pattern matching.
-        let is_glob_target = build
-            .glob_expanded_targets
-            .contains(std::path::Path::new(abs_path));
+        let is_glob_target = build.glob_expanded_targets.contains(std::path::Path::new(abs_path));
 
         let confidence =
             if effective_unresolved >= 5 || global_pressure_pct > 15 || neighbor_pressure >= 8 {

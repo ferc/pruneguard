@@ -1587,6 +1587,7 @@ dependencies = [
  "pruneguard_manifest",
  "pruneguard_report",
  "pruneguard_resolver",
+ "rayon",
  "regex-lite",
  "rustc-hash",
  "serde",

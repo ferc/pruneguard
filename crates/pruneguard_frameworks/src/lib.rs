@@ -824,11 +824,7 @@ impl FrameworkPack for VitestPack {
     }
 
     fn auto_loaded_patterns(&self) -> Vec<String> {
-        vec![
-            "**/*.test.*".to_string(),
-            "**/*.spec.*".to_string(),
-            "**/__tests__/**".to_string(),
-        ]
+        vec!["**/*.test.*".to_string(), "**/*.spec.*".to_string(), "**/__tests__/**".to_string()]
     }
 }
 
@@ -2892,12 +2888,9 @@ impl FrameworkPack for TriggerDevPack {
         let mut entries = Vec::new();
 
         // trigger.config.ts is an entrypoint itself
-        for name in &[
-            "trigger.config.ts",
-            "trigger.config.js",
-            "trigger.config.mts",
-            "trigger.config.mjs",
-        ] {
+        for name in
+            &["trigger.config.ts", "trigger.config.js", "trigger.config.mts", "trigger.config.mjs"]
+        {
             let path = workspace_root.join(name);
             if path.exists() {
                 entries.push(path);
@@ -2928,12 +2921,9 @@ impl FrameworkPack for TriggerDevPack {
     fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
         let mut seeds = Vec::new();
 
-        for name in &[
-            "trigger.config.ts",
-            "trigger.config.js",
-            "trigger.config.mts",
-            "trigger.config.mjs",
-        ] {
+        for name in
+            &["trigger.config.ts", "trigger.config.js", "trigger.config.mts", "trigger.config.mjs"]
+        {
             let path = workspace_root.join(name);
             if path.exists() {
                 seeds.push(FrameworkEntrypointSeed {

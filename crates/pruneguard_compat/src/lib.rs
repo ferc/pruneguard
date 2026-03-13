@@ -229,7 +229,9 @@ impl CompatibilityReport {
             "gatsby" => Some("Gatsby"),
             "@redwoodjs/core" | "@redwoodjs/web" | "redwood.toml" => Some("RedwoodJS"),
             "@ember/core" | "ember-cli" | "ember-source" | "@glimmer/component" => Some("Ember"),
-            "@capacitor/core" | "@capacitor/cli" | "capacitor.config.ts"
+            "@capacitor/core"
+            | "@capacitor/cli"
+            | "capacitor.config.ts"
             | "capacitor.config.json" => Some("Capacitor"),
             "@ionic/angular" | "@ionic/react" | "@ionic/vue" | "@ionic/core"
             | "ionic.config.json" => Some("Ionic"),
@@ -355,18 +357,16 @@ fn trust_note_for_unsupported(name: &str) -> Option<String> {
         "Ember" => {
             Some("Ember route conventions and service injection may not be detected".to_string())
         }
-        "Ionic" => Some(
-            "Ionic page routing and lazy-loaded modules may not be detected".to_string(),
-        ),
-        "Capacitor" => Some(
-            "Capacitor plugin auto-registration may create implicit dependencies".to_string(),
-        ),
-        "Electron" => Some(
-            "Electron main/renderer process separation may not be modeled".to_string(),
-        ),
-        "Tauri" => {
-            Some("Tauri command handlers and IPC bridges may not be detected".to_string())
+        "Ionic" => {
+            Some("Ionic page routing and lazy-loaded modules may not be detected".to_string())
         }
+        "Capacitor" => {
+            Some("Capacitor plugin auto-registration may create implicit dependencies".to_string())
+        }
+        "Electron" => {
+            Some("Electron main/renderer process separation may not be modeled".to_string())
+        }
+        "Tauri" => Some("Tauri command handlers and IPC bridges may not be detected".to_string()),
         "SolidJS" => Some(
             "SolidJS has partial support; some reactive primitives may not be tracked".to_string(),
         ),
@@ -388,10 +388,7 @@ mod tests {
         for (name, version) in deps {
             dep_map.insert((*name).to_string(), (*version).to_string());
         }
-        PackageManifest {
-            dependencies: Some(dep_map),
-            ..PackageManifest::default()
-        }
+        PackageManifest { dependencies: Some(dep_map), ..PackageManifest::default() }
     }
 
     fn make_finding(subject: &str, confidence: FindingConfidence) -> Finding {
@@ -420,18 +417,13 @@ mod tests {
         let manifest = make_manifest_with_deps(&[("@redwoodjs/core", "^5.0.0")]);
         let report = CompatibilityReport::compute(&[], &[], &manifest, None);
         assert!(!report.unsupported_signals.is_empty());
-        assert!(report
-            .unsupported_signals
-            .iter()
-            .any(|s| s.signal == "@redwoodjs/core"));
+        assert!(report.unsupported_signals.iter().any(|s| s.signal == "@redwoodjs/core"));
     }
 
     #[test]
     fn detects_multiple_unsupported_signals() {
-        let manifest = make_manifest_with_deps(&[
-            ("electron", "^28.0.0"),
-            ("@redwoodjs/core", "^5.0.0"),
-        ]);
+        let manifest =
+            make_manifest_with_deps(&[("electron", "^28.0.0"), ("@redwoodjs/core", "^5.0.0")]);
         let report = CompatibilityReport::compute(&[], &[], &manifest, None);
         assert!(report.unsupported_signals.len() >= 2);
     }
@@ -503,10 +495,8 @@ mod tests {
 
     #[test]
     fn unsupported_framework_names_deduplicates() {
-        let manifest = make_manifest_with_deps(&[
-            ("@redwoodjs/core", "^5.0.0"),
-            ("@redwoodjs/web", "^5.0.0"),
-        ]);
+        let manifest =
+            make_manifest_with_deps(&[("@redwoodjs/core", "^5.0.0"), ("@redwoodjs/web", "^5.0.0")]);
         let report = CompatibilityReport::compute(&[], &[], &manifest, None);
         let names = report.unsupported_framework_names();
         assert_eq!(names, vec!["RedwoodJS"]);

@@ -34,17 +34,37 @@ pub fn run_analyzers(
 ) -> (Vec<Finding>, usize) {
     let mut findings = Vec::new();
 
-    findings.extend(unused_files::analyze(build, config.analysis.unused_files, profile));
+    let reachable = build.module_graph.reachable_file_ids(profile);
+    let reachable_prod = if profile == EntrypointProfile::Production {
+        reachable.clone()
+    } else {
+        build.module_graph.reachable_file_ids(EntrypointProfile::Production)
+    };
+    let reachable_dev = if profile == EntrypointProfile::Development {
+        reachable.clone()
+    } else {
+        build.module_graph.reachable_file_ids(EntrypointProfile::Development)
+    };
+
+    findings.extend(unused_files::analyze(
+        build,
+        config.analysis.unused_files,
+        profile,
+        &reachable,
+    ));
     findings.extend(unused_exports::analyze(
         build,
         config.analysis.unused_exports,
         profile,
         config.analysis.ignore_exports_used_in_file,
+        &reachable,
     ));
     findings.extend(unused_dependencies::analyze(
         build,
         config.analysis.unused_dependencies,
         profile,
+        &reachable_prod,
+        &reachable_dev,
     ));
     findings.extend(unused_packages::analyze(build, config.analysis.unused_packages, profile));
     findings.extend(cycles::analyze(build, config.analysis.cycles));

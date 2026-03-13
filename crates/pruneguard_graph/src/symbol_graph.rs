@@ -242,12 +242,7 @@ impl SymbolGraph {
     }
 
     /// Record a same-file reference to an export.
-    pub fn add_same_file_ref(
-        &mut self,
-        file: FileId,
-        export_name: CompactString,
-        ref_line: u32,
-    ) {
+    pub fn add_same_file_ref(&mut self, file: FileId, export_name: CompactString, ref_line: u32) {
         self.same_file_refs.push(SameFileRef { file, export_name, ref_line });
     }
 
@@ -311,9 +306,7 @@ impl SymbolGraph {
 
     /// Get dead (unused) members for a given file.
     pub fn dead_members(&self, file: FileId) -> impl Iterator<Item = &MemberExportNode> {
-        self.member_exports
-            .iter()
-            .filter(move |m| m.file == file && !m.is_live)
+        self.member_exports.iter().filter(move |m| m.file == file && !m.is_live)
     }
 
     /// Get all members for a specific export.
@@ -323,16 +316,12 @@ impl SymbolGraph {
         parent_export: &str,
     ) -> impl Iterator<Item = &MemberExportNode> {
         let parent = CompactString::new(parent_export);
-        self.member_exports
-            .iter()
-            .filter(move |m| m.file == file && m.parent_export == parent)
+        self.member_exports.iter().filter(move |m| m.file == file && m.parent_export == parent)
     }
 
     /// Check if an export has any same-file references.
     pub fn has_same_file_refs(&self, file: FileId, export_name: &str) -> bool {
-        self.same_file_refs
-            .iter()
-            .any(|r| r.file == file && r.export_name == export_name)
+        self.same_file_refs.iter().any(|r| r.file == file && r.export_name == export_name)
     }
 
     /// Propagate liveness through all edges.
@@ -345,11 +334,8 @@ impl SymbolGraph {
     /// 5. For each namespace alias chain, mark the corresponding member as live.
     pub fn propagate_liveness(&mut self) {
         // Step 1: import edges -> mark target exports live.
-        let import_targets: Vec<(FileId, CompactString)> = self
-            .import_edges
-            .iter()
-            .map(|e| (e.source, e.export_name.clone()))
-            .collect();
+        let import_targets: Vec<(FileId, CompactString)> =
+            self.import_edges.iter().map(|e| (e.source, e.export_name.clone())).collect();
         for (file, name) in import_targets {
             if let Some(node) = self.exports.get_mut(&(file, name)) {
                 node.is_live = true;
@@ -367,10 +353,8 @@ impl SymbolGraph {
                 let original_name = self.reexport_edges[i].original_name.clone();
                 let is_star = self.reexport_edges[i].is_star;
 
-                let reexported_is_live = self
-                    .exports
-                    .get(&(reexporter, exported_name))
-                    .is_some_and(|n| n.is_live);
+                let reexported_is_live =
+                    self.exports.get(&(reexporter, exported_name)).is_some_and(|n| n.is_live);
 
                 if reexported_is_live {
                     if is_star {
@@ -389,9 +373,7 @@ impl SymbolGraph {
                                 }
                             }
                         }
-                    } else if let Some(node) =
-                        self.exports.get_mut(&(source, original_name))
-                    {
+                    } else if let Some(node) = self.exports.get_mut(&(source, original_name)) {
                         if !node.is_live {
                             node.is_live = true;
                             changed = true;
@@ -419,11 +401,8 @@ impl SymbolGraph {
         }
 
         // Step 4: same-file refs -> mark exports live.
-        let same_file_targets: Vec<(FileId, CompactString)> = self
-            .same_file_refs
-            .iter()
-            .map(|r| (r.file, r.export_name.clone()))
-            .collect();
+        let same_file_targets: Vec<(FileId, CompactString)> =
+            self.same_file_refs.iter().map(|r| (r.file, r.export_name.clone())).collect();
         for (file, name) in same_file_targets {
             if let Some(node) = self.exports.get_mut(&(file, name)) {
                 node.is_live = true;

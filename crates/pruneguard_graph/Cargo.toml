@@ -28,6 +28,7 @@ pruneguard_resolver = { workspace = true }
 pruneguard_cache = { workspace = true }
 pruneguard_config_readers = { workspace = true }
 
+rayon = { workspace = true }
 globset = { workspace = true }
 regex-lite = { workspace = true }
 miette = { workspace = true }

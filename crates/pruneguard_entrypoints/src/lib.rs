@@ -115,7 +115,8 @@ fn derive_surface_kind(kind: EntrypointKind, source: &str) -> EntrypointSurfaceK
                 .and_then(|rest| rest.split(':').next())
                 .unwrap_or("");
             match fw_name {
-                "vitest" | "jest" | "playwright" | "playwright-ct" | "playwright-test" | "cypress" => EntrypointSurfaceKind::Test,
+                "vitest" | "jest" | "playwright" | "playwright-ct" | "playwright-test"
+                | "cypress" => EntrypointSurfaceKind::Test,
                 "storybook" => EntrypointSurfaceKind::Story,
                 _ => EntrypointSurfaceKind::FrameworkConvention,
             }
@@ -290,11 +291,7 @@ pub fn detect_entrypoints(
                     let compiled_patterns: Vec<_> = auto_patterns
                         .iter()
                         .filter_map(|p| {
-                            let adj = if p.ends_with("/**") {
-                                format!("{p}/*")
-                            } else {
-                                p.clone()
-                            };
+                            let adj = if p.ends_with("/**") { format!("{p}/*") } else { p.clone() };
                             Glob::new(&adj).ok().map(|g| (p.clone(), g.compile_matcher()))
                         })
                         .collect();
@@ -648,11 +645,8 @@ fn resolve_dist_to_source(workspace_root: &Path, file: &str) -> Option<PathBuf> 
 fn compile_auto_load_globset(patterns: &[String]) -> Option<GlobSet> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        let adjusted = if pattern.ends_with("/**") {
-            format!("{pattern}/*")
-        } else {
-            pattern.clone()
-        };
+        let adjusted =
+            if pattern.ends_with("/**") { format!("{pattern}/*") } else { pattern.clone() };
         if let Ok(glob) = Glob::new(&adjusted) {
             builder.add(glob);
         }

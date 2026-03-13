@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+
+use rayon::prelude::*;
 
 use compact_str::CompactString;
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -10,7 +13,9 @@ use pruneguard_cache::{
     PathIndexEntry,
 };
 use pruneguard_config::{EntrypointsConfig, PruneguardConfig};
-use pruneguard_config_readers::{detect_route_entrypoints, extract_all_inputs, read_workspace_configs};
+use pruneguard_config_readers::{
+    detect_route_entrypoints, extract_all_inputs, read_workspace_configs,
+};
 use pruneguard_discovery::{DiscoveryResult, discover};
 use pruneguard_entrypoints::{
     EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, EntrypointSurfaceKind,
@@ -72,9 +77,7 @@ impl GraphBuildResult {
             return self.files.get(idx);
         }
         // Slow fallback for suffix matches (rare).
-        self.files.iter().find(|file| {
-            file.file.relative_path.to_string_lossy().ends_with(query)
-        })
+        self.files.iter().find(|file| file.file.relative_path.to_string_lossy().ends_with(query))
     }
 }
 
@@ -101,7 +104,6 @@ pub fn build_graph_with_options(
     let discovery_cwd = scan_roots.first().map_or_else(|| cwd.to_path_buf(), Clone::clone);
     let discovery = discover(&discovery_cwd, config)?;
     let exclude_matcher = compile_globset(&config.entrypoints.exclude);
-
 
     let mut files = discovery.collect_files(config);
     let total_discovered_files = files.len();
@@ -186,7 +188,6 @@ pub fn build_graph_with_options(
         .iter()
         .map(|(name, workspace)| (name.clone(), hash_json(&workspace.manifest)))
         .collect::<FxHashMap<_, _>>();
-    let mut cache_counters = CacheCounters::default();
     let mut extracted_files = files.into_iter().map(ExtractedFile::new).collect::<Vec<_>>();
     let repo_files =
         extracted_files.iter().map(|file| file.file.path.clone()).collect::<FxHashSet<_>>();
@@ -202,8 +203,9 @@ pub fn build_graph_with_options(
         }
     }
 
-    for extracted_file in &mut extracted_files {
-        if let Some(cache) = options.cache {
+    // Phase 1: Record path index entries (sequential, cache writes)
+    if let Some(cache) = options.cache {
+        for extracted_file in &extracted_files {
             let manifest_hash = extracted_file
                 .file
                 .workspace
@@ -219,32 +221,45 @@ pub fn build_graph_with_options(
                 manifest_hash,
             });
         }
-
-        let hashes = CacheHashes {
-            manifest: extracted_file
-                .file
-                .workspace
-                .as_ref()
-                .and_then(|workspace| manifest_hashes.get(workspace))
-                .copied()
-                .unwrap_or(0),
-            ..base_hashes
-        };
-        populate_extracted_file(
-            extracted_file,
-            &resolver,
-            &repo_files,
-            options.cache,
-            &mut cache_counters,
-            hashes,
-        )?;
     }
 
-    let packs = built_in_packs();
-    let all_file_paths: Vec<PathBuf> = extracted_files
-        .iter()
-        .map(|f| f.file.path.clone())
+    // Phase 2: Extract and resolve file facts (parallel)
+    let cache_counters_mutex = Mutex::new(CacheCounters::default());
+    let errors: Vec<miette::Report> = extracted_files
+        .par_iter_mut()
+        .filter_map(|extracted_file| {
+            let hashes = CacheHashes {
+                manifest: extracted_file
+                    .file
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| manifest_hashes.get(workspace))
+                    .copied()
+                    .unwrap_or(0),
+                ..base_hashes
+            };
+            match populate_extracted_file(
+                extracted_file,
+                &resolver,
+                &repo_files,
+                options.cache,
+                &cache_counters_mutex,
+                hashes,
+            ) {
+                Ok(()) => None,
+                Err(e) => Some(e),
+            }
+        })
         .collect();
+
+    if let Some(first_error) = errors.into_iter().next() {
+        return Err(first_error);
+    }
+    let cache_counters = cache_counters_mutex.into_inner().unwrap();
+
+    let packs = built_in_packs();
+    let all_file_paths: Vec<PathBuf> =
+        extracted_files.iter().map(|f| f.file.path.clone()).collect();
     let mut entrypoint_seeds = detect_all_entrypoints(
         &discovery,
         &config.entrypoints,
@@ -255,22 +270,13 @@ pub fn build_graph_with_options(
         &all_file_paths,
     );
     // --- Phase 1: Inject config-derived entrypoints ---
-    inject_config_entrypoints(
-        &mut entrypoint_seeds,
-        &config_inputs,
-        &discovery,
-        &all_file_paths,
-    );
+    inject_config_entrypoints(&mut entrypoint_seeds, &config_inputs, &discovery, &all_file_paths);
 
     // --- Phase 4: Seed from wildcard exports in manifests ---
-    let wildcard_file_inventory: Vec<PathBuf> = extracted_files
-        .iter()
-        .map(|f| f.file.relative_path.clone())
-        .collect();
-    let mut seen_seed_paths: FxHashSet<PathBuf> = entrypoint_seeds
-        .iter()
-        .map(|s| s.path.clone())
-        .collect();
+    let wildcard_file_inventory: Vec<PathBuf> =
+        extracted_files.iter().map(|f| f.file.relative_path.clone()).collect();
+    let mut seen_seed_paths: FxHashSet<PathBuf> =
+        entrypoint_seeds.iter().map(|s| s.path.clone()).collect();
     for workspace in discovery.workspaces.values() {
         let expanded = workspace.manifest.expand_wildcard_exports(&wildcard_file_inventory);
         for path in expanded {
@@ -480,7 +486,9 @@ pub fn build_graph_with_options(
     let glob_expanded_targets: FxHashSet<PathBuf> = extracted_files
         .iter()
         .flat_map(|f| f.resolved_imports.iter())
-        .filter(|edge| matches!(edge.kind, ResolvedEdgeKind::ImportMetaGlob | ResolvedEdgeKind::RequireContext))
+        .filter(|edge| {
+            matches!(edge.kind, ResolvedEdgeKind::ImportMetaGlob | ResolvedEdgeKind::RequireContext)
+        })
         .filter_map(|edge| edge.to_file.clone())
         .collect();
 
@@ -503,7 +511,7 @@ fn populate_extracted_file(
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
     cache: Option<&AnalysisCache>,
-    cache_counters: &mut CacheCounters,
+    cache_counters: &Mutex<CacheCounters>,
     hashes: CacheHashes,
 ) -> Result<()> {
     if !is_tracked_source(&extracted_file.file.path) {
@@ -520,11 +528,11 @@ fn populate_extracted_file(
 
     let source = String::from_utf8(source_bytes).into_diagnostic()?;
     match extract_file_facts(&extracted_file.file.path, &source) {
-        Ok(AdapterOutput { facts, synthetic_imports, synthetic_reexports, diagnostics, .. }) => {
+        Ok(AdapterOutput {
+            facts, synthetic_imports, synthetic_reexports, diagnostics, ..
+        }) => {
             extracted_file.external_dependencies.clear();
-            extracted_file.parse_diagnostics.extend(
-                diagnostics.iter().map(|d| d.message.clone()),
-            );
+            extracted_file.parse_diagnostics.extend(diagnostics.iter().map(|d| d.message.clone()));
 
             for import in &facts.imports {
                 let edge_kind = if import.is_side_effect {
@@ -599,7 +607,10 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::ImportMetaGlob { pattern: glob_pattern, line } => {
+                    pruneguard_extract::DependencyPattern::ImportMetaGlob {
+                        pattern: glob_pattern,
+                        line,
+                    } => {
                         if glob_pattern.contains('*') || glob_pattern.contains('?') {
                             // Expand wildcard glob against tracked source inventory.
                             expand_glob_into_edges(
@@ -621,7 +632,11 @@ fn populate_extracted_file(
                             ));
                         }
                     }
-                    pruneguard_extract::DependencyPattern::TripleSlashReference { path: ref_path, is_types, line } => {
+                    pruneguard_extract::DependencyPattern::TripleSlashReference {
+                        path: ref_path,
+                        is_types,
+                        line,
+                    } => {
                         let edge_kind = if *is_types {
                             ResolvedEdgeKind::TripleSlashTypes
                         } else {
@@ -646,7 +661,10 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::ImportMetaResolve { specifier, line } => {
+                    pruneguard_extract::DependencyPattern::ImportMetaResolve {
+                        specifier,
+                        line,
+                    } => {
                         extracted_file.resolved_imports.push(resolve_edge(
                             resolver,
                             &extracted_file.file.path,
@@ -656,7 +674,12 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::RequireContext { directory, recursive, regex_filter, line } => {
+                    pruneguard_extract::DependencyPattern::RequireContext {
+                        directory,
+                        recursive,
+                        regex_filter,
+                        line,
+                    } => {
                         // Expand require.context directory against tracked source inventory.
                         expand_require_context_into_edges(
                             extracted_file,
@@ -688,9 +711,13 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::ImportMetaGlobArray { patterns, line } => {
+                    pruneguard_extract::DependencyPattern::ImportMetaGlobArray {
+                        patterns,
+                        line,
+                    } => {
                         // Separate positive patterns from negation patterns (prefixed with `!`).
-                        let negations: Vec<&str> = patterns.iter()
+                        let negations: Vec<&str> = patterns
+                            .iter()
                             .filter(|p| p.starts_with('!'))
                             .map(|p| p.as_str())
                             .collect();
@@ -834,22 +861,22 @@ fn resolve_edge(
 fn hydrate_from_cache(
     extracted_file: &mut ExtractedFile,
     cache: &AnalysisCache,
-    counters: &mut CacheCounters,
+    counters: &Mutex<CacheCounters>,
     file_hash: u64,
     hashes: CacheHashes,
 ) -> Result<bool> {
-    counters.entries_read += 1;
+    counters.lock().unwrap().entries_read += 1;
     let Some(cached_file) =
         cache.get_file_facts(&extracted_file.file.path).map_err(|err| miette::miette!("{err}"))?
     else {
-        counters.misses += 1;
+        counters.lock().unwrap().misses += 1;
         return Ok(false);
     };
-    counters.entries_read += 1;
+    counters.lock().unwrap().entries_read += 1;
     let Some(cached_resolutions) =
         cache.get_resolutions(&extracted_file.file.path).map_err(|err| miette::miette!("{err}"))?
     else {
-        counters.misses += 1;
+        counters.lock().unwrap().misses += 1;
         return Ok(false);
     };
 
@@ -859,7 +886,7 @@ fn hydrate_from_cache(
         || cached_file.manifest_hash != hashes.manifest
         || cached_file.tsconfig_hash != hashes.tsconfig
     {
-        counters.misses += 1;
+        counters.lock().unwrap().misses += 1;
         return Ok(false);
     }
 
@@ -873,14 +900,14 @@ fn hydrate_from_cache(
     extracted_file.resolved_reexports =
         serde_json::from_slice(&cached_resolutions.resolved_reexports_json)
             .map_err(|err| miette::miette!("{err}"))?;
-    counters.hits += 1;
+    counters.lock().unwrap().hits += 1;
     Ok(true)
 }
 
 fn persist_to_cache(
     extracted_file: &ExtractedFile,
     cache: &AnalysisCache,
-    counters: &mut CacheCounters,
+    counters: &Mutex<CacheCounters>,
     file_hash: u64,
     hashes: CacheHashes,
 ) -> Result<()> {
@@ -899,7 +926,7 @@ fn persist_to_cache(
             external_dependencies: extracted_file.external_dependencies.clone(),
         })
         .map_err(|err| miette::miette!("{err}"))?;
-    counters.entries_written += 1;
+    counters.lock().unwrap().entries_written += 1;
     cache
         .put_resolutions(&CachedResolutions {
             path: extracted_file.file.path.to_string_lossy().to_string(),
@@ -909,8 +936,11 @@ fn persist_to_cache(
                 .map_err(|err| miette::miette!("{err}"))?,
         })
         .map_err(|err| miette::miette!("{err}"))?;
-    counters.entries_written += 1;
-    counters.misses += 1;
+    {
+        let mut c = counters.lock().unwrap();
+        c.entries_written += 1;
+        c.misses += 1;
+    }
     Ok(())
 }
 
@@ -933,11 +963,7 @@ fn detect_all_entrypoints(
         // entrypoints.  This avoids repeated full-tree filesystem traversals
         // from `pack.entrypoints()` on the monorepo root.
         let effective_packs: &[Box<dyn pruneguard_frameworks::FrameworkPack>] =
-            if is_monorepo && workspace.root == discovery.project_root {
-                &[]
-            } else {
-                packs
-            };
+            if is_monorepo && workspace.root == discovery.project_root { &[] } else { packs };
         let mut workspace_entrypoints = detect_entrypoints(
             Some(workspace.name.as_str()),
             &workspace.root,
@@ -1468,13 +1494,10 @@ fn expand_require_context_into_edges(
     };
 
     // Pre-compile the regex filter if one was provided.
-    let compiled_regex = regex_filter.and_then(|pat| {
-        globset::Glob::new(&format!("*{pat}*")).ok().map(|g| g.compile_matcher())
-    });
+    let compiled_regex = regex_filter
+        .and_then(|pat| globset::Glob::new(&format!("*{pat}*")).ok().map(|g| g.compile_matcher()));
     // Also attempt a true regex compilation for precise JS-regex semantics.
-    let true_regex = regex_filter.and_then(|pat| {
-        regex_lite::Regex::new(pat).ok()
-    });
+    let true_regex = regex_filter.and_then(|pat| regex_lite::Regex::new(pat).ok());
 
     let mut count = 0;
     let mut truncated = false;
@@ -1554,11 +1577,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::Runtime,
                 profile: EntrypointProfile::Both,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }
@@ -1577,11 +1596,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::Runtime,
                 profile: EntrypointProfile::Production,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }
@@ -1600,11 +1615,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::FrameworkConvention,
                 profile: EntrypointProfile::Production,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }
@@ -1623,11 +1634,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::Tooling,
                 profile: EntrypointProfile::Development,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }
@@ -1646,11 +1653,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::Tooling,
                 profile: EntrypointProfile::Development,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }
@@ -1669,11 +1672,7 @@ fn inject_config_entrypoints(
                 surface_kind: EntrypointSurfaceKind::Story,
                 profile: EntrypointProfile::Development,
                 workspace: None,
-                source: config_inputs
-                    .framework
-                    .as_deref()
-                    .unwrap_or("config-adapter")
-                    .to_string(),
+                source: config_inputs.framework.as_deref().unwrap_or("config-adapter").to_string(),
             });
         }
     }

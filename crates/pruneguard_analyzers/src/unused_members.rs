@@ -15,10 +15,7 @@ use crate::{make_finding, severity};
 /// Completely dead exports (those with no imports at all) are already reported
 /// by the `unused_exports` analyzer; this analyzer only flags *partially* used
 /// exports where some members are live and others are not.
-pub fn analyze(
-    build: &GraphBuildResult,
-    config: &AnalysisConfig,
-) -> Vec<Finding> {
+pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding> {
     let Some(finding_severity) = severity(config.unused_members) else {
         return Vec::new();
     };
@@ -46,12 +43,8 @@ pub fn analyze(
         .collect();
 
     // Build a set of live exports (exports that have at least one import).
-    let imported_exports: FxHashSet<(FileId, CompactString)> = build
-        .symbol_graph
-        .import_edges
-        .iter()
-        .map(|e| (e.source, e.export_name.clone()))
-        .collect();
+    let imported_exports: FxHashSet<(FileId, CompactString)> =
+        build.symbol_graph.import_edges.iter().map(|e| (e.source, e.export_name.clone())).collect();
 
     // Also count which member refs exist per parent to identify partially-used exports.
     let members_per_export: FxHashMap<(FileId, CompactString), Vec<&CompactString>> = {
@@ -70,13 +63,17 @@ pub fn analyze(
             continue;
         };
 
-        let Some(file_id) = build.module_graph.file_id(&extracted_file.file.path.to_string_lossy()) else {
+        let Some(file_id) = build.module_graph.file_id(&extracted_file.file.path.to_string_lossy())
+        else {
             continue;
         };
 
         for export in &facts.exports {
             // Only analyze class/enum/namespace exports that have tracked members.
-            if !matches!(export.export_kind, ExportKind::Class | ExportKind::Enum | ExportKind::Namespace) {
+            if !matches!(
+                export.export_kind,
+                ExportKind::Class | ExportKind::Enum | ExportKind::Namespace
+            ) {
                 continue;
             }
 
@@ -107,16 +104,12 @@ pub fn analyze(
                     live_count += 1;
                 } else {
                     // Also check if the member is marked live in the symbol graph.
-                    let is_member_live = build
-                        .symbol_graph
-                        .member_exports
-                        .iter()
-                        .any(|m| {
-                            m.file == file_id
-                                && m.parent_export == export.name
-                                && m.member_name == **member_name
-                                && m.is_live
-                        });
+                    let is_member_live = build.symbol_graph.member_exports.iter().any(|m| {
+                        m.file == file_id
+                            && m.parent_export == export.name
+                            && m.member_name == **member_name
+                            && m.is_live
+                    });
                     if is_member_live {
                         live_count += 1;
                     } else {
@@ -139,14 +132,9 @@ pub fn analyze(
             };
 
             // Demote confidence for files that are glob/context expansion targets.
-            let is_glob_target = build
-                .glob_expanded_targets
-                .contains(&extracted_file.file.path);
-            let confidence = if is_glob_target {
-                FindingConfidence::Low
-            } else {
-                FindingConfidence::Medium
-            };
+            let is_glob_target = build.glob_expanded_targets.contains(&extracted_file.file.path);
+            let confidence =
+                if is_glob_target { FindingConfidence::Low } else { FindingConfidence::Medium };
 
             for dead_member in &dead_members {
                 // --- Suppression checks ---
@@ -218,15 +206,9 @@ fn should_suppress_member(
     ignore_members_matcher: &Option<GlobSet>,
 ) -> bool {
     // Look up the member node to check kind and public tag.
-    let member_node = build
-        .symbol_graph
-        .member_exports
-        .iter()
-        .find(|m| {
-            m.file == file_id
-                && m.parent_export == *parent_export
-                && m.member_name == *member_name
-        });
+    let member_node = build.symbol_graph.member_exports.iter().find(|m| {
+        m.file == file_id && m.parent_export == *parent_export && m.member_name == *member_name
+    });
 
     if let Some(node) = member_node {
         // 1. Setter suppression: setters are typically paired with getters

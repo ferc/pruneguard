@@ -195,7 +195,13 @@ pub enum DependencyPattern {
     /// `import.meta.resolve('specifier')` — resolves a URL without importing.
     ImportMetaResolve { specifier: String, line: u32 },
     /// `require.context('./dir', true, /\.ts$/)` — webpack dynamic context.
-    RequireContext { directory: String, recursive: bool, #[serde(default)] regex_filter: Option<String>, line: u32 },
+    RequireContext {
+        directory: String,
+        recursive: bool,
+        #[serde(default)]
+        regex_filter: Option<String>,
+        line: u32,
+    },
     /// `new URL('./worker.js', import.meta.url)` — worker/asset URL pattern.
     UrlConstructor { specifier: String, line: u32 },
     /// `import foo = require('bar')` — TypeScript import-equals.
@@ -410,9 +416,7 @@ impl SourceAdapter for SvelteAdapter {
         // Avoid double-counting: remove module blocks from instance blocks.
         let instance_only: Vec<_> = instance_blocks
             .into_iter()
-            .filter(|b| {
-                !module_blocks.iter().any(|m| m.content == b.content)
-            })
+            .filter(|b| !module_blocks.iter().any(|m| m.content == b.content))
             .collect();
 
         let mut facts = extract_from_script_blocks(path, &instance_only);
@@ -425,10 +429,7 @@ impl SourceAdapter for SvelteAdapter {
                 specifier: path.display().to_string(),
                 names: vec![export.name.clone()],
                 line: export.line,
-                reason: format!(
-                    "svelte module context export '{}'",
-                    export.name
-                ),
+                reason: format!("svelte module context export '{}'", export.name),
             });
         }
 
@@ -635,10 +636,7 @@ fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractEr
 ///
 /// For each exported name, find the corresponding binding in the root scope
 /// and collect all non-declaration references to it.
-fn detect_same_file_refs(
-    program: &oxc_ast::ast::Program<'_>,
-    facts: &mut FileFacts,
-) {
+fn detect_same_file_refs(program: &oxc_ast::ast::Program<'_>, facts: &mut FileFacts) {
     let semantic_ret = oxc_semantic::SemanticBuilder::new().build(program);
     let semantic = &semantic_ret.semantic;
     let scoping = semantic.scoping();
@@ -656,11 +654,8 @@ fn detect_same_file_refs(
     }
 
     // Collect imported names so we can exclude them — they are not same-file symbols.
-    let imported_locals: FxHashSet<&str> = facts
-        .imports
-        .iter()
-        .flat_map(|imp| imp.names.iter().map(|n| n.local.as_str()))
-        .collect();
+    let imported_locals: FxHashSet<&str> =
+        facts.imports.iter().flat_map(|imp| imp.names.iter().map(|n| n.local.as_str())).collect();
 
     let root_scope_id = scoping.root_scope_id();
 
@@ -688,10 +683,9 @@ fn detect_same_file_refs(
                 continue;
             }
 
-            facts.same_file_refs.push(SameFileRefInfo {
-                export_name: export_name.clone(),
-                line: ref_span.start,
-            });
+            facts
+                .same_file_refs
+                .push(SameFileRefInfo { export_name: export_name.clone(), line: ref_span.start });
         }
     }
 }
@@ -1240,11 +1234,8 @@ fn extract_class_members(
                 let Some(name) = prop.key.static_name() else {
                     continue;
                 };
-                let member_kind = if prop.r#static {
-                    MemberKind::StaticProperty
-                } else {
-                    MemberKind::Property
-                };
+                let member_kind =
+                    if prop.r#static { MemberKind::StaticProperty } else { MemberKind::Property };
                 facts.member_exports.push(MemberExportInfo {
                     parent_name: class_name.clone(),
                     member_name: CompactString::new(&*name),
@@ -1688,27 +1679,147 @@ fn find_byte(haystack: &[u8], start: usize, byte: u8) -> Option<usize> {
 
 /// Standard HTML elements to ignore when scanning for component references.
 const HTML_ELEMENTS: &[&str] = &[
-    "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base",
-    "bdi", "bdo", "blockquote", "body", "br", "button", "canvas", "caption",
-    "cite", "code", "col", "colgroup", "data", "datalist", "dd", "del",
-    "details", "dfn", "dialog", "div", "dl", "dt", "em", "embed", "fieldset",
-    "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
-    "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe", "img",
-    "input", "ins", "kbd", "label", "legend", "li", "link", "main", "map",
-    "mark", "menu", "meta", "meter", "nav", "noscript", "object", "ol",
-    "optgroup", "option", "output", "p", "picture", "pre", "progress", "q",
-    "rp", "rt", "ruby", "s", "samp", "script", "search", "section", "select",
-    "slot", "small", "source", "span", "strong", "style", "sub", "summary",
-    "sup", "table", "tbody", "td", "template", "textarea", "tfoot", "th",
-    "thead", "time", "title", "tr", "track", "u", "ul", "var", "video", "wbr",
+    "a",
+    "abbr",
+    "address",
+    "area",
+    "article",
+    "aside",
+    "audio",
+    "b",
+    "base",
+    "bdi",
+    "bdo",
+    "blockquote",
+    "body",
+    "br",
+    "button",
+    "canvas",
+    "caption",
+    "cite",
+    "code",
+    "col",
+    "colgroup",
+    "data",
+    "datalist",
+    "dd",
+    "del",
+    "details",
+    "dfn",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "embed",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "hr",
+    "html",
+    "i",
+    "iframe",
+    "img",
+    "input",
+    "ins",
+    "kbd",
+    "label",
+    "legend",
+    "li",
+    "link",
+    "main",
+    "map",
+    "mark",
+    "menu",
+    "meta",
+    "meter",
+    "nav",
+    "noscript",
+    "object",
+    "ol",
+    "optgroup",
+    "option",
+    "output",
+    "p",
+    "picture",
+    "pre",
+    "progress",
+    "q",
+    "rp",
+    "rt",
+    "ruby",
+    "s",
+    "samp",
+    "script",
+    "search",
+    "section",
+    "select",
+    "slot",
+    "small",
+    "source",
+    "span",
+    "strong",
+    "style",
+    "sub",
+    "summary",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "time",
+    "title",
+    "tr",
+    "track",
+    "u",
+    "ul",
+    "var",
+    "video",
+    "wbr",
 ];
 
 /// SVG elements to ignore.
 const SVG_ELEMENTS: &[&str] = &[
-    "svg", "path", "circle", "rect", "line", "polyline", "polygon", "ellipse",
-    "g", "defs", "use", "text", "tspan", "image", "clippath", "mask",
-    "filter", "lineargradient", "radialgradient", "stop", "pattern",
-    "foreignobject", "animate", "animatetransform", "set",
+    "svg",
+    "path",
+    "circle",
+    "rect",
+    "line",
+    "polyline",
+    "polygon",
+    "ellipse",
+    "g",
+    "defs",
+    "use",
+    "text",
+    "tspan",
+    "image",
+    "clippath",
+    "mask",
+    "filter",
+    "lineargradient",
+    "radialgradient",
+    "stop",
+    "pattern",
+    "foreignobject",
+    "animate",
+    "animatetransform",
+    "set",
 ];
 
 /// Detect component references in the template portion of an SFC.
@@ -1733,11 +1844,8 @@ fn detect_template_component_refs(
     };
 
     // Collect names already imported in the script section.
-    let imported_names: FxHashSet<&str> = facts
-        .imports
-        .iter()
-        .flat_map(|i| i.names.iter().map(|n| n.local.as_str()))
-        .collect();
+    let imported_names: FxHashSet<&str> =
+        facts.imports.iter().flat_map(|i| i.names.iter().map(|n| n.local.as_str())).collect();
 
     let component_tags = scan_component_tags(&template);
     let mut synthetic = Vec::new();
@@ -1768,11 +1876,8 @@ fn detect_template_component_refs(
 ///
 /// Skips fenced code blocks (` ``` `) and inline code (`` ` ``).
 fn detect_mdx_component_refs(source: &str, facts: &FileFacts) -> Vec<SyntheticImport> {
-    let imported_names: FxHashSet<&str> = facts
-        .imports
-        .iter()
-        .flat_map(|i| i.names.iter().map(|n| n.local.as_str()))
-        .collect();
+    let imported_names: FxHashSet<&str> =
+        facts.imports.iter().flat_map(|i| i.names.iter().map(|n| n.local.as_str())).collect();
 
     // First, strip out fenced code blocks and inline code to avoid false positives.
     let cleaned = strip_mdx_code_regions(source);
@@ -1911,8 +2016,8 @@ fn scan_component_tags(template: &str) -> Vec<(String, u32)> {
             }
             if end > start {
                 let tag_name = &template[start..end];
-                let is_component = tag_name.as_bytes()[0].is_ascii_uppercase()
-                    || tag_name.contains('-');
+                let is_component =
+                    tag_name.as_bytes()[0].is_ascii_uppercase() || tag_name.contains('-');
                 if is_component && !is_html_element(tag_name) && !seen.contains(tag_name) {
                     let line = 1 + count_newlines(&bytes[..i]);
                     tags.push((tag_name.to_string(), u32::try_from(line).unwrap_or(u32::MAX)));
@@ -1965,11 +2070,8 @@ fn detect_member_accesses(
     accesses: &mut Vec<MemberAccessInfo>,
 ) {
     // Collect all named import bindings.
-    let imported_names: Vec<&str> = imports
-        .iter()
-        .flat_map(|imp| imp.names.iter())
-        .map(|name| name.local.as_str())
-        .collect();
+    let imported_names: Vec<&str> =
+        imports.iter().flat_map(|imp| imp.names.iter()).map(|name| name.local.as_str()).collect();
 
     if imported_names.is_empty() {
         return;
@@ -1988,19 +2090,15 @@ fn detect_member_accesses(
                 let abs_pos = pos + found;
 
                 // Check that the name is not part of a larger identifier.
-                let before_ok = abs_pos == 0
-                    || !is_ident_char(line_bytes[abs_pos - 1]);
+                let before_ok = abs_pos == 0 || !is_ident_char(line_bytes[abs_pos - 1]);
                 let after_pos = abs_pos + name_bytes.len();
-                let dot_follows = after_pos < line_bytes.len()
-                    && line_bytes[after_pos] == b'.';
+                let dot_follows = after_pos < line_bytes.len() && line_bytes[after_pos] == b'.';
 
                 if before_ok && dot_follows {
                     // Extract the member name after the dot.
                     let member_start = after_pos + 1;
                     let mut member_end = member_start;
-                    while member_end < line_bytes.len()
-                        && is_ident_char(line_bytes[member_end])
-                    {
+                    while member_end < line_bytes.len() && is_ident_char(line_bytes[member_end]) {
                         member_end += 1;
                     }
                     if member_end > member_start {
@@ -2028,11 +2126,8 @@ fn detect_instance_member_accesses(
     imports: &[ImportInfo],
     accesses: &mut Vec<MemberAccessInfo>,
 ) {
-    let imported_names: Vec<&str> = imports
-        .iter()
-        .flat_map(|imp| imp.names.iter())
-        .map(|name| name.local.as_str())
-        .collect();
+    let imported_names: Vec<&str> =
+        imports.iter().flat_map(|imp| imp.names.iter()).map(|name| name.local.as_str()).collect();
 
     if imported_names.is_empty() {
         return;
@@ -2050,12 +2145,11 @@ fn detect_instance_member_accesses(
                     let var_part = before[..eq_pos].trim();
                     // Extract the last word (variable name) from patterns like
                     // `const x`, `let x`, `var x`, or just `x`.
-                    let var_name = var_part.rsplit_once(char::is_whitespace)
+                    let var_name = var_part
+                        .rsplit_once(char::is_whitespace)
                         .map_or(var_part, |(_, name)| name)
                         .trim();
-                    if !var_name.is_empty()
-                        && var_name.bytes().all(|b| is_ident_char(b))
-                    {
+                    if !var_name.is_empty() && var_name.bytes().all(|b| is_ident_char(b)) {
                         var_to_class.push((var_name, class_name));
                     }
                 }
@@ -2075,18 +2169,14 @@ fn detect_instance_member_accesses(
                     break;
                 };
                 let abs_pos = pos + found;
-                let before_ok = abs_pos == 0
-                    || !is_ident_char(line_bytes[abs_pos - 1]);
+                let before_ok = abs_pos == 0 || !is_ident_char(line_bytes[abs_pos - 1]);
                 let after_pos = abs_pos + var_bytes.len();
-                let dot_follows = after_pos < line_bytes.len()
-                    && line_bytes[after_pos] == b'.';
+                let dot_follows = after_pos < line_bytes.len() && line_bytes[after_pos] == b'.';
 
                 if before_ok && dot_follows {
                     let member_start = after_pos + 1;
                     let mut member_end = member_start;
-                    while member_end < line_bytes.len()
-                        && is_ident_char(line_bytes[member_end])
-                    {
+                    while member_end < line_bytes.len() && is_ident_char(line_bytes[member_end]) {
                         member_end += 1;
                     }
                     if member_end > member_start {
@@ -2193,10 +2283,8 @@ fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
             // Array form: import.meta.glob(['./a/*.ts', './b/*.ts'])
             if let Some(patterns) = extract_string_array(&source[after_paren..]) {
                 if !patterns.is_empty() {
-                    results.push(DependencyPattern::ImportMetaGlobArray {
-                        patterns,
-                        line: line_u32,
-                    });
+                    results
+                        .push(DependencyPattern::ImportMetaGlobArray { patterns, line: line_u32 });
                 }
             }
             // Skip past the closing bracket.
@@ -2219,10 +2307,7 @@ fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
             }
 
             let pattern = source[literal_start..literal_end].to_string();
-            results.push(DependencyPattern::ImportMetaGlob {
-                pattern,
-                line: line_u32,
-            });
+            results.push(DependencyPattern::ImportMetaGlob { pattern, line: line_u32 });
             index = literal_end + 1;
         } else {
             index += 1;
@@ -2612,10 +2697,7 @@ fn detect_import_equals(program: &oxc_ast::ast::Program<'_>) -> Vec<DependencyPa
             {
                 let specifier = ext.expression.value.to_string();
                 let line = decl.span.start;
-                results.push(DependencyPattern::ImportEquals {
-                    specifier,
-                    line,
-                });
+                results.push(DependencyPattern::ImportEquals { specifier, line });
             }
         }
     }

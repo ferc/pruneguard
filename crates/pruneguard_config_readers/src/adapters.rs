@@ -118,7 +118,6 @@ impl AliasEntry {
     fn new(pattern: String, target: String, origin: AliasOrigin) -> Self {
         Self { pattern, target, origin }
     }
-
 }
 
 impl ConfigInputs {
@@ -202,9 +201,7 @@ fn strings_from_array(kind: &ConfigValueKind) -> Vec<String> {
 
 /// Returns `true` if the file-name component of `path` starts with `stem`.
 fn filename_starts_with(path: &std::path::Path, stem: &str) -> bool {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with(stem))
+    path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with(stem))
 }
 
 /// Returns `true` if *any* ancestor directory of `path` is named `dir`.
@@ -403,9 +400,7 @@ fn ingest_nuxt_generated_files(workspace_root: &Path) -> ConfigInputs {
                                 kind: "nitro-types".to_string(),
                                 reason: format!(
                                     "Nitro generated {}",
-                                    path.file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or("unknown")
+                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
                                 ),
                             });
                         }
@@ -473,11 +468,7 @@ fn parse_tanstack_route_tree(workspace_root: &Path, content: &str) -> Vec<RouteE
 fn detect_tanstack_router_routes(workspace_root: &Path) -> ConfigInputs {
     let mut inputs = ConfigInputs::default();
 
-    let candidates = [
-        "routeTree.gen.ts",
-        "src/routeTree.gen.ts",
-        "app/routeTree.gen.ts",
-    ];
+    let candidates = ["routeTree.gen.ts", "src/routeTree.gen.ts", "app/routeTree.gen.ts"];
 
     for candidate in &candidates {
         let path = workspace_root.join(candidate);
@@ -631,17 +622,12 @@ impl ConfigAdapter for ViteAdapter {
         if let Some(ConfigValueKind::Array(items)) = find_value(values, "resolve.alias") {
             for item in items {
                 if let ConfigValueKind::Object(pairs) = item {
-                    let find = pairs
-                        .iter()
-                        .find(|(k, _)| k == "find")
-                        .and_then(|(_, v)| match v {
-                            ConfigValueKind::String(s) => Some(s.clone()),
-                            _ => None,
-                        });
-                    let replacement = pairs
-                        .iter()
-                        .find(|(k, _)| k == "replacement")
-                        .and_then(|(_, v)| match v {
+                    let find = pairs.iter().find(|(k, _)| k == "find").and_then(|(_, v)| match v {
+                        ConfigValueKind::String(s) => Some(s.clone()),
+                        _ => None,
+                    });
+                    let replacement =
+                        pairs.iter().find(|(k, _)| k == "replacement").and_then(|(_, v)| match v {
                             ConfigValueKind::String(s) => Some(s.clone()),
                             _ => None,
                         });
@@ -746,10 +732,7 @@ impl ConfigAdapter for NextAdapter {
         // any statically-extracted alias-like sub-keys anyway.
         let webpack_alias_entries = find_values_with_prefix(values, "webpack.resolve.alias.");
         for entry in webpack_alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("webpack.resolve.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("webpack.resolve.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry::new(
                     alias_key.to_string(),
@@ -801,10 +784,7 @@ impl ConfigAdapter for JestAdapter {
         // Also try flat-key style
         let mapper_entries = find_values_with_prefix(values, "moduleNameMapper.");
         for entry in mapper_entries {
-            let pattern = entry
-                .key
-                .strip_prefix("moduleNameMapper.")
-                .unwrap_or(&entry.key);
+            let pattern = entry.key.strip_prefix("moduleNameMapper.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: pattern.to_string(),
@@ -981,10 +961,7 @@ impl ConfigAdapter for WebpackAdapter {
         // Also try flat-key style (resolve.alias.@components, etc.)
         let alias_entries = find_values_with_prefix(values, "resolve.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("resolve.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("resolve.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -1122,17 +1099,12 @@ impl ConfigAdapter for VitestAdapter {
         if let Some(ConfigValueKind::Array(items)) = find_value(values, "resolve.alias") {
             for item in items {
                 if let ConfigValueKind::Object(pairs) = item {
-                    let find = pairs
-                        .iter()
-                        .find(|(k, _)| k == "find")
-                        .and_then(|(_, v)| match v {
-                            ConfigValueKind::String(s) => Some(s.clone()),
-                            _ => None,
-                        });
-                    let replacement = pairs
-                        .iter()
-                        .find(|(k, _)| k == "replacement")
-                        .and_then(|(_, v)| match v {
+                    let find = pairs.iter().find(|(k, _)| k == "find").and_then(|(_, v)| match v {
+                        ConfigValueKind::String(s) => Some(s.clone()),
+                        _ => None,
+                    });
+                    let replacement =
+                        pairs.iter().find(|(k, _)| k == "replacement").and_then(|(_, v)| match v {
                             ConfigValueKind::String(s) => Some(s.clone()),
                             _ => None,
                         });
@@ -1294,10 +1266,7 @@ impl ConfigAdapter for AstroAdapter {
         // vite.resolve.alias → aliases
         let alias_entries = find_values_with_prefix(values, "vite.resolve.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("vite.resolve.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("vite.resolve.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -1320,10 +1289,7 @@ impl ConfigAdapter for AstroAdapter {
         }
 
         // Astro virtual modules.
-        inputs.ignore_unresolved.extend([
-            "astro:".to_string(),
-            "virtual:".to_string(),
-        ]);
+        inputs.ignore_unresolved.extend(["astro:".to_string(), "virtual:".to_string()]);
 
         inputs
     }
@@ -1471,8 +1437,7 @@ impl ConfigAdapter for AngularAdapter {
         };
 
         // projects.*.architect.build.options.main → entrypoints
-        let build_main_entries =
-            find_values_with_prefix(values, "projects.");
+        let build_main_entries = find_values_with_prefix(values, "projects.");
         for entry in &build_main_entries {
             if entry.key.contains(".architect.build.options.main") {
                 if let ConfigValueKind::String(s) = &entry.value {
@@ -1838,10 +1803,7 @@ impl ConfigAdapter for RspackAdapter {
         }
         let alias_entries = find_values_with_prefix(values, "resolve.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("resolve.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("resolve.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -1932,10 +1894,7 @@ impl ConfigAdapter for RsbuildAdapter {
         }
         let alias_entries = find_values_with_prefix(values, "source.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("source.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("source.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -2251,12 +2210,13 @@ impl ConfigAdapter for QwikAdapter {
         }
 
         // routesDir → source_roots (Qwik City route directory)
-        let has_routes_dir = if let Some(ConfigValueKind::String(s)) = find_value(values, "routesDir") {
-            inputs.source_roots.push(PathBuf::from(s));
-            true
-        } else {
-            false
-        };
+        let has_routes_dir =
+            if let Some(ConfigValueKind::String(s)) = find_value(values, "routesDir") {
+                inputs.source_roots.push(PathBuf::from(s));
+                true
+            } else {
+                false
+            };
 
         // Qwik route directory conventions (only if routesDir not explicitly set)
         if !has_routes_dir && inputs.source_roots.is_empty() {
@@ -2314,10 +2274,8 @@ impl ConfigAdapter for BabelAdapter {
         // as nested objects under plugins entries.
         let alias_entries = find_values_with_prefix(values, "plugins.module-resolver.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("plugins.module-resolver.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key =
+                entry.key.strip_prefix("plugins.module-resolver.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -2380,13 +2338,10 @@ impl ConfigAdapter for VueAdapter {
                 }
             }
         }
-        let alias_entries =
-            find_values_with_prefix(values, "configureWebpack.resolve.alias.");
+        let alias_entries = find_values_with_prefix(values, "configureWebpack.resolve.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("configureWebpack.resolve.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key =
+                entry.key.strip_prefix("configureWebpack.resolve.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -2650,10 +2605,7 @@ impl ConfigAdapter for RslibAdapter {
         }
         let alias_entries = find_values_with_prefix(values, "source.alias.");
         for entry in alias_entries {
-            let alias_key = entry
-                .key
-                .strip_prefix("source.alias.")
-                .unwrap_or(&entry.key);
+            let alias_key = entry.key.strip_prefix("source.alias.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
@@ -2874,7 +2826,9 @@ mod tests {
                 ),
                 cv(
                     "roots",
-                    ConfigValueKind::Array(vec![ConfigValueKind::String("<rootDir>/src".to_string())]),
+                    ConfigValueKind::Array(vec![ConfigValueKind::String(
+                        "<rootDir>/src".to_string(),
+                    )]),
                 ),
             ],
         );
@@ -2915,9 +2869,9 @@ mod tests {
             vec![
                 cv(
                     "stories",
-                    ConfigValueKind::Array(vec![
-                        ConfigValueKind::String("../src/**/*.stories.@(js|jsx|ts|tsx)".to_string()),
-                    ]),
+                    ConfigValueKind::Array(vec![ConfigValueKind::String(
+                        "../src/**/*.stories.@(js|jsx|ts|tsx)".to_string(),
+                    )]),
                 ),
                 cv(
                     "addons",
@@ -2944,7 +2898,10 @@ mod tests {
             "webpack.config.js",
             vec![
                 cv("entry", ConfigValueKind::String("./src/index.js".to_string())),
-                cv("resolve.alias.@components", ConfigValueKind::String("./src/components".to_string())),
+                cv(
+                    "resolve.alias.@components",
+                    ConfigValueKind::String("./src/components".to_string()),
+                ),
                 cv(
                     "externals",
                     ConfigValueKind::Array(vec![ConfigValueKind::String("jquery".to_string())]),
@@ -2997,10 +2954,7 @@ mod tests {
 
     #[test]
     fn merge_preserves_first_framework() {
-        let mut a = ConfigInputs {
-            framework: Some("vite".to_string()),
-            ..Default::default()
-        };
+        let mut a = ConfigInputs { framework: Some("vite".to_string()), ..Default::default() };
         let b = ConfigInputs {
             framework: Some("jest".to_string()),
             externals: vec!["foo".to_string()],
@@ -3014,10 +2968,7 @@ mod tests {
     #[test]
     fn merge_takes_framework_when_self_is_none() {
         let mut a = ConfigInputs::default();
-        let b = ConfigInputs {
-            framework: Some("next".to_string()),
-            ..Default::default()
-        };
+        let b = ConfigInputs { framework: Some("next".to_string()), ..Default::default() };
         a.merge(b);
         assert_eq!(a.framework, Some("next".to_string()));
     }
@@ -3054,10 +3005,7 @@ mod tests {
         let inputs = adapter.extract(&config);
         assert_eq!(inputs.test_patterns, vec!["**/*.{test,spec}.ts"]);
         assert_eq!(inputs.setup_files, vec![PathBuf::from("./test/setup.ts")]);
-        assert_eq!(
-            inputs.global_setup_files,
-            vec![PathBuf::from("./test/global-setup.ts")]
-        );
+        assert_eq!(inputs.global_setup_files, vec![PathBuf::from("./test/global-setup.ts")]);
         assert_eq!(inputs.framework, Some("vitest".to_string()));
     }
 
@@ -3071,10 +3019,7 @@ mod tests {
     fn vitest_adapter_extracts_aliases() {
         let config = make_config(
             "vitest.config.ts",
-            vec![cv(
-                "resolve.alias.@",
-                ConfigValueKind::String("./src".to_string()),
-            )],
+            vec![cv("resolve.alias.@", ConfigValueKind::String("./src".to_string()))],
         );
         let inputs = VitestAdapter.extract(&config);
         assert_eq!(inputs.aliases.len(), 1);
@@ -3087,10 +3032,7 @@ mod tests {
         let config = make_config(
             "nuxt.config.ts",
             vec![
-                cv(
-                    "alias.@",
-                    ConfigValueKind::String("./src".to_string()),
-                ),
+                cv("alias.@", ConfigValueKind::String("./src".to_string())),
                 cv(
                     "imports.dirs",
                     ConfigValueKind::Array(vec![ConfigValueKind::String(
@@ -3099,14 +3041,9 @@ mod tests {
                 ),
                 cv(
                     "components.dirs",
-                    ConfigValueKind::Array(vec![ConfigValueKind::String(
-                        "components".to_string(),
-                    )]),
+                    ConfigValueKind::Array(vec![ConfigValueKind::String("components".to_string())]),
                 ),
-                cv(
-                    "dir.pages",
-                    ConfigValueKind::String("pages".to_string()),
-                ),
+                cv("dir.pages", ConfigValueKind::String("pages".to_string())),
                 cv(
                     "modules",
                     ConfigValueKind::Array(vec![ConfigValueKind::String(
@@ -3124,10 +3061,7 @@ mod tests {
             inputs.auto_import_roots,
             vec![PathBuf::from("composables"), PathBuf::from("components")]
         );
-        assert_eq!(
-            inputs.production_entrypoints,
-            vec![PathBuf::from("pages")]
-        );
+        assert_eq!(inputs.production_entrypoints, vec![PathBuf::from("pages")]);
         assert_eq!(inputs.externals, vec!["@nuxtjs/tailwindcss"]);
     }
 
@@ -3165,18 +3099,9 @@ mod tests {
         let config = make_config(
             "svelte.config.js",
             vec![
-                cv(
-                    "kit.files.routes",
-                    ConfigValueKind::String("src/routes".to_string()),
-                ),
-                cv(
-                    "kit.files.lib",
-                    ConfigValueKind::String("src/lib".to_string()),
-                ),
-                cv(
-                    "kit.alias.$lib",
-                    ConfigValueKind::String("./src/lib".to_string()),
-                ),
+                cv("kit.files.routes", ConfigValueKind::String("src/routes".to_string())),
+                cv("kit.files.lib", ConfigValueKind::String("src/lib".to_string())),
+                cv("kit.alias.$lib", ConfigValueKind::String("./src/lib".to_string())),
             ],
         );
         let adapter = SvelteKitAdapter;
@@ -3197,14 +3122,8 @@ mod tests {
         let config = make_config(
             "remix.config.js",
             vec![
-                cv(
-                    "appDirectory",
-                    ConfigValueKind::String("app".to_string()),
-                ),
-                cv(
-                    "serverBuildPath",
-                    ConfigValueKind::String("build/index.js".to_string()),
-                ),
+                cv("appDirectory", ConfigValueKind::String("app".to_string())),
+                cv("serverBuildPath", ConfigValueKind::String("build/index.js".to_string())),
             ],
         );
         let adapter = RemixAdapter;
@@ -3333,10 +3252,7 @@ mod tests {
         let inputs = adapter.extract(&config);
         assert_eq!(
             inputs.externals,
-            vec![
-                "@docusaurus/preset-classic",
-                "@docusaurus/plugin-content-blog"
-            ]
+            vec!["@docusaurus/preset-classic", "@docusaurus/plugin-content-blog"]
         );
     }
 
@@ -3345,10 +3261,7 @@ mod tests {
         let config = make_config(
             "rollup.config.js",
             vec![
-                cv(
-                    "input",
-                    ConfigValueKind::String("src/index.js".to_string()),
-                ),
+                cv("input", ConfigValueKind::String("src/index.js".to_string())),
                 cv(
                     "external",
                     ConfigValueKind::Array(vec![
@@ -3372,14 +3285,8 @@ mod tests {
             vec![cv(
                 "input",
                 ConfigValueKind::Object(vec![
-                    (
-                        "main".to_string(),
-                        ConfigValueKind::String("src/main.js".to_string()),
-                    ),
-                    (
-                        "utils".to_string(),
-                        ConfigValueKind::String("src/utils.js".to_string()),
-                    ),
+                    ("main".to_string(), ConfigValueKind::String("src/main.js".to_string())),
+                    ("utils".to_string(), ConfigValueKind::String("src/utils.js".to_string())),
                 ]),
             )],
         );
@@ -3392,14 +3299,8 @@ mod tests {
         let config = make_config(
             "rspack.config.js",
             vec![
-                cv(
-                    "entry",
-                    ConfigValueKind::String("./src/index.js".to_string()),
-                ),
-                cv(
-                    "resolve.alias.@",
-                    ConfigValueKind::String("./src".to_string()),
-                ),
+                cv("entry", ConfigValueKind::String("./src/index.js".to_string())),
+                cv("resolve.alias.@", ConfigValueKind::String("./src".to_string())),
                 cv(
                     "externals",
                     ConfigValueKind::Array(vec![ConfigValueKind::String("jquery".to_string())]),
@@ -3420,14 +3321,8 @@ mod tests {
         let config = make_config(
             "rsbuild.config.ts",
             vec![
-                cv(
-                    "source.entry.main",
-                    ConfigValueKind::String("./src/index.tsx".to_string()),
-                ),
-                cv(
-                    "source.alias.@",
-                    ConfigValueKind::String("./src".to_string()),
-                ),
+                cv("source.entry.main", ConfigValueKind::String("./src/index.tsx".to_string())),
+                cv("source.alias.@", ConfigValueKind::String("./src".to_string())),
             ],
         );
         let adapter = RsbuildAdapter;
@@ -3463,10 +3358,7 @@ mod tests {
         let adapter = GatsbyAdapter;
         assert!(adapter.matches(&config));
         let inputs = adapter.extract(&config);
-        assert_eq!(
-            inputs.externals,
-            vec!["gatsby-plugin-react-helmet", "gatsby-plugin-mdx"]
-        );
+        assert_eq!(inputs.externals, vec!["gatsby-plugin-react-helmet", "gatsby-plugin-mdx"]);
     }
 
     #[test]
@@ -3480,10 +3372,7 @@ mod tests {
         let config = make_config(
             "nitro.config.ts",
             vec![
-                cv(
-                    "alias.#internal",
-                    ConfigValueKind::String("./server/internal".to_string()),
-                ),
+                cv("alias.#internal", ConfigValueKind::String("./server/internal".to_string())),
                 cv(
                     "imports.dirs",
                     ConfigValueKind::Array(vec![ConfigValueKind::String(
@@ -3503,10 +3392,7 @@ mod tests {
         let inputs = adapter.extract(&config);
         assert_eq!(inputs.aliases.len(), 1);
         assert_eq!(inputs.aliases[0].pattern, "#internal");
-        assert_eq!(
-            inputs.auto_import_roots,
-            vec![PathBuf::from("server/utils")]
-        );
+        assert_eq!(inputs.auto_import_roots, vec![PathBuf::from("server/utils")]);
         assert_eq!(inputs.externals, vec!["better-sqlite3"]);
     }
 
@@ -3515,14 +3401,8 @@ mod tests {
         let config = make_config(
             "react-router.config.ts",
             vec![
-                cv(
-                    "appDirectory",
-                    ConfigValueKind::String("app".to_string()),
-                ),
-                cv(
-                    "serverBuildPath",
-                    ConfigValueKind::String("build/server.js".to_string()),
-                ),
+                cv("appDirectory", ConfigValueKind::String("app".to_string())),
+                cv("serverBuildPath", ConfigValueKind::String("build/server.js".to_string())),
             ],
         );
         let adapter = ReactRouterAdapter;
@@ -3537,10 +3417,7 @@ mod tests {
     fn qwik_adapter_extracts_srcdir_with_medium_confidence() {
         let config = make_config(
             "qwik.config.ts",
-            vec![cv(
-                "srcDir",
-                ConfigValueKind::String("./src".to_string()),
-            )],
+            vec![cv("srcDir", ConfigValueKind::String("./src".to_string()))],
         );
         let adapter = QwikAdapter;
         assert!(adapter.matches(&config));
@@ -3591,17 +3468,11 @@ mod tests {
             ..Default::default()
         };
         a.merge(b);
-        assert_eq!(
-            a.runtime_entrypoints,
-            vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")]
-        );
+        assert_eq!(a.runtime_entrypoints, vec![PathBuf::from("a.ts"), PathBuf::from("b.ts")]);
         assert_eq!(a.production_entrypoints, vec![PathBuf::from("prod.ts")]);
         assert_eq!(a.development_entrypoints, vec![PathBuf::from("dev.ts")]);
         assert_eq!(a.story_entrypoints, vec![PathBuf::from("story.ts")]);
-        assert_eq!(
-            a.setup_files,
-            vec![PathBuf::from("setup-a.ts"), PathBuf::from("setup-b.ts")]
-        );
+        assert_eq!(a.setup_files, vec![PathBuf::from("setup-a.ts"), PathBuf::from("setup-b.ts")]);
         assert_eq!(a.global_setup_files, vec![PathBuf::from("global.ts")]);
         assert_eq!(a.auto_import_roots, vec![PathBuf::from("composables")]);
         // First non-default confidence is kept
@@ -3610,14 +3481,8 @@ mod tests {
 
     #[test]
     fn merge_keeps_first_non_default_confidence() {
-        let mut a = ConfigInputs {
-            confidence: AdapterConfidence::Medium,
-            ..Default::default()
-        };
-        let b = ConfigInputs {
-            confidence: AdapterConfidence::Low,
-            ..Default::default()
-        };
+        let mut a = ConfigInputs { confidence: AdapterConfidence::Medium, ..Default::default() };
+        let b = ConfigInputs { confidence: AdapterConfidence::Low, ..Default::default() };
         a.merge(b);
         // Already non-default, so it stays Medium.
         assert_eq!(a.confidence, AdapterConfidence::Medium);
@@ -3659,10 +3524,7 @@ mod tests {
                 "resolve.alias",
                 ConfigValueKind::Array(vec![ConfigValueKind::Object(vec![
                     ("find".to_string(), ConfigValueKind::String("@".to_string())),
-                    (
-                        "replacement".to_string(),
-                        ConfigValueKind::String("./src".to_string()),
-                    ),
+                    ("replacement".to_string(), ConfigValueKind::String("./src".to_string())),
                 ])]),
             )],
         );

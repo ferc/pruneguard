@@ -1565,14 +1565,10 @@ fn run_bench(cmd: cli::BenchCommand, format: cli::OutputFormat) -> miette::Resul
 
             eprintln!("Evaluating parity corpus at {}...", corpus_root.display());
             let result = pruneguard::evaluate_parity_corpus(&corpus_root)?;
-            let report =
-                pruneguard::parity_score_to_report(&result.score, &result.stale_deltas);
+            let report = pruneguard::parity_score_to_report(&result.score, &result.stale_deltas);
 
             if matches!(format, cli::OutputFormat::Json) {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).expect("serialize report")
-                );
+                println!("{}", serde_json::to_string_pretty(&report).expect("serialize report"));
             } else {
                 let text = pruneguard_analyzers::external_parity::format_external_parity_report(
                     &result.score,
@@ -1580,14 +1576,12 @@ fn run_bench(cmd: cli::BenchCommand, format: cli::OutputFormat) -> miette::Resul
                 print!("{text}");
 
                 // Print stale deltas.
-                let stale: Vec<_> =
-                    result.stale_deltas.iter().filter(|d| d.is_stale).collect();
+                let stale: Vec<_> = result.stale_deltas.iter().filter(|d| d.is_stale).collect();
                 if !stale.is_empty() {
                     println!();
                     println!("Stale matrix entries:");
                     for delta in &stale {
-                        let actual =
-                            if delta.corpus_passed { "passing" } else { "failing" };
+                        let actual = if delta.corpus_passed { "passing" } else { "failing" };
                         println!(
                             "  {}/{}: matrix says {:?}, corpus says {}",
                             delta.family, delta.name, delta.matrix_level, actual
@@ -1597,10 +1591,7 @@ fn run_bench(cmd: cli::BenchCommand, format: cli::OutputFormat) -> miette::Resul
 
                 // Print the canonical replacement score.
                 println!();
-                println!(
-                    "Replacement Score: {:.1}%",
-                    result.score.overall_pct
-                );
+                println!("Replacement Score: {:.1}%", result.score.overall_pct);
             }
             Ok(ExitCode::SUCCESS)
         }

@@ -326,9 +326,8 @@ fn migrate_command() -> impl Parser<Command> {
 }
 
 fn bench_replacement_subcommand() -> impl Parser<BenchCommand> {
-    let corpus = positional::<PathBuf>("CORPUS")
-        .help("Path to parity fixture corpus directory")
-        .optional();
+    let corpus =
+        positional::<PathBuf>("CORPUS").help("Path to parity fixture corpus directory").optional();
     construct!(BenchCommand::Replacement { corpus })
 }
 

@@ -195,14 +195,13 @@ pub fn scan_with_options(
                 let parity_report =
                     parity_score_to_report(&parity_result.score, &parity_result.stale_deltas);
                 report.stats.external_parity_pct = Some(parity_result.score.overall_pct);
-                report.stats.external_parity =
-                    Some(pruneguard_report::ExternalParitySummary {
-                        overall_pct: parity_result.score.overall_pct,
-                        total_cases: parity_result.score.total_cases,
-                        passed_cases: parity_result.score.passed_cases,
-                        total_checks: parity_result.score.total_checks,
-                        passed_checks: parity_result.score.passed_checks,
-                    });
+                report.stats.external_parity = Some(pruneguard_report::ExternalParitySummary {
+                    overall_pct: parity_result.score.overall_pct,
+                    total_cases: parity_result.score.total_cases,
+                    passed_cases: parity_result.score.passed_cases,
+                    total_checks: parity_result.score.total_checks,
+                    passed_checks: parity_result.score.passed_checks,
+                });
                 report.parity_score = Some(parity_report);
             }
         }
@@ -2564,23 +2563,15 @@ fn evaluate_parity_case(
 
     // Build entrypoint list: source files NOT listed in reachable_files or
     // unreachable_files are assumed to be entry/consumer files.
-    let reachable_set: BTreeSet<String> = expected
-        .reachable_files
-        .iter()
-        .map(|p| normalize_fixture_path(p))
-        .collect();
-    let unreachable_set: BTreeSet<String> = expected
-        .unreachable_files
-        .iter()
-        .map(|p| normalize_fixture_path(p))
-        .collect();
+    let reachable_set: BTreeSet<String> =
+        expected.reachable_files.iter().map(|p| normalize_fixture_path(p)).collect();
+    let unreachable_set: BTreeSet<String> =
+        expected.unreachable_files.iter().map(|p| normalize_fixture_path(p)).collect();
     let mut extra_entrypoints = Vec::new();
     if let Ok(mut source_files) = collect_source_files(&scan_dir, &scan_dir) {
         source_files.sort();
         for rel in &source_files {
-            if !reachable_set.contains(rel.as_str())
-                && !unreachable_set.contains(rel.as_str())
-            {
+            if !reachable_set.contains(rel.as_str()) && !unreachable_set.contains(rel.as_str()) {
                 extra_entrypoints.push(rel.clone());
             }
         }
@@ -2590,16 +2581,10 @@ fn evaluate_parity_case(
     // doesn't already have one.
     let config_path = scan_dir.join("pruneguard.json");
     if !extra_entrypoints.is_empty() && !config_path.exists() {
-        let entries: Vec<String> = extra_entrypoints
-            .iter()
-            .map(|p| format!("\"./{p}\""))
-            .collect();
+        let entries: Vec<String> = extra_entrypoints.iter().map(|p| format!("\"./{p}\"")).collect();
         let _ = std::fs::write(
             &config_path,
-            format!(
-                r#"{{"entrypoints":{{"include":[{}]}}}}"#,
-                entries.join(",")
-            ),
+            format!(r#"{{"entrypoints":{{"include":[{}]}}}}"#, entries.join(",")),
         );
     }
 
@@ -2608,10 +2593,7 @@ fn evaluate_parity_case(
     // Enable member analysis for member-semantics cases.
     config.analysis.unused_members = pruneguard_config::AnalysisSeverity::Warn;
     // Add the extra entrypoints directly via the include list.
-    config.entrypoints.include = extra_entrypoints
-        .iter()
-        .map(|p| format!("./{p}"))
-        .collect();
+    config.entrypoints.include = extra_entrypoints.iter().map(|p| format!("./{p}")).collect();
     let profile = EntrypointProfile::Both;
     let report = match scan(&scan_dir, &config, &[], profile) {
         Ok(report) => report,
@@ -2629,11 +2611,8 @@ fn evaluate_parity_case(
     };
 
     // Build a set of finding keys as `code:normalized_reference` for matching.
-    let finding_keys: BTreeSet<String> = report
-        .findings
-        .iter()
-        .flat_map(|f| finding_match_keys(f))
-        .collect();
+    let finding_keys: BTreeSet<String> =
+        report.findings.iter().flat_map(|f| finding_match_keys(f)).collect();
 
     // Check reachable files: should NOT appear as unused-file findings.
     for reachable in &expected.reachable_files {
