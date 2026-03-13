@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use compact_str::CompactString;
-use pruneguard_fs::FileRecord;
+use pruneguard_fs::{FileRecord, SourceKind};
 use pruneguard_resolver::ResolvedEdge;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -125,8 +125,24 @@ impl ExtractedFile {
     }
 }
 
-/// Extract all import/export facts from a single JS/TS file.
+/// Extract all import/export facts from a tracked source file.
+///
+/// For JS/TS files this parses the full file. For framework SFCs (`.vue`,
+/// `.svelte`, `.astro`, `.mdx`) this first extracts the embedded script
+/// blocks and then feeds them through the JS/TS extractor.
 pub fn extract_file_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+    let source_kind = SourceKind::from_path(path);
+    match source_kind {
+        Some(SourceKind::Vue) => Ok(extract_vue_facts(path, source)),
+        Some(SourceKind::Svelte) => Ok(extract_svelte_facts(path, source)),
+        Some(SourceKind::Astro) => extract_astro_facts(path, source),
+        Some(SourceKind::Mdx) => extract_mdx_facts(path, source),
+        _ => extract_js_ts_facts(path, source),
+    }
+}
+
+/// Core JS/TS extraction — parse the full source and walk the AST.
+fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
     let allocator = oxc_allocator::Allocator::default();
     let source_type = determine_source_type(path);
     let parser_ret = oxc_parser::Parser::new(&allocator, source, source_type).parse();
@@ -634,6 +650,185 @@ pub fn collect_specifiers(facts: &FileFacts) -> FxHashSet<CompactString> {
         }
     }
     specifiers
+}
+
+// ---------------------------------------------------------------------------
+// Framework SFC extractors
+// ---------------------------------------------------------------------------
+
+/// Extract facts from a Vue single-file component.
+///
+/// Parses `<script>` and `<script setup>` blocks and feeds their content
+/// through the JS/TS extractor. The file itself remains the node of record.
+fn extract_vue_facts(path: &Path, source: &str) -> FileFacts {
+    let blocks = extract_vue_script_blocks(source);
+    extract_from_script_blocks(path, &blocks)
+}
+
+/// Extract facts from a Svelte component.
+///
+/// Parses `<script>` and `<script context="module">` blocks.
+fn extract_svelte_facts(path: &Path, source: &str) -> FileFacts {
+    let blocks = extract_svelte_script_blocks(source);
+    extract_from_script_blocks(path, &blocks)
+}
+
+/// Shared helper: extract facts from a list of script blocks.
+fn extract_from_script_blocks(path: &Path, blocks: &[ScriptBlock]) -> FileFacts {
+    let mut combined = FileFacts::default();
+    for block in blocks {
+        let lang = block.lang.unwrap_or("js");
+        let virtual_path = make_virtual_path(path, lang);
+        if let Ok(facts) = extract_js_ts_facts(&virtual_path, &block.content) {
+            merge_facts(&mut combined, facts);
+        }
+    }
+    combined
+}
+
+/// Extract facts from an Astro component's frontmatter (`--- ... ---`).
+fn extract_astro_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+    let Some(frontmatter) = extract_astro_frontmatter(source) else {
+        return Ok(FileFacts::default());
+    };
+
+    let virtual_path = make_virtual_path(path, "ts");
+    extract_js_ts_facts(&virtual_path, &frontmatter)
+}
+
+/// Extract facts from an MDX file's top-level ESM imports/exports.
+fn extract_mdx_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+    let esm_block = extract_mdx_esm_lines(source);
+    if esm_block.is_empty() {
+        return Ok(FileFacts::default());
+    }
+
+    let virtual_path = make_virtual_path(path, "tsx");
+    extract_js_ts_facts(&virtual_path, &esm_block)
+}
+
+// ---------------------------------------------------------------------------
+// Script-block parsing helpers
+// ---------------------------------------------------------------------------
+
+struct ScriptBlock {
+    content: String,
+    lang: Option<&'static str>,
+}
+
+/// Extract `<script>` and `<script setup>` blocks from a Vue SFC.
+fn extract_vue_script_blocks(source: &str) -> Vec<ScriptBlock> {
+    extract_html_script_blocks(source, &["<script", "<script setup"])
+}
+
+/// Extract `<script>` and `<script context="module">` blocks from Svelte.
+fn extract_svelte_script_blocks(source: &str) -> Vec<ScriptBlock> {
+    extract_html_script_blocks(source, &["<script", "<script context=\"module\""])
+}
+
+/// Generic HTML-like `<script ...>...</script>` block extractor.
+///
+/// Handles `lang="ts"` / `lang="tsx"` attributes.
+fn extract_html_script_blocks(source: &str, open_tags: &[&str]) -> Vec<ScriptBlock> {
+    let mut blocks = Vec::new();
+    let lower = source.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+
+    for &tag_prefix in open_tags {
+        let mut search_start = 0;
+        while let Some(tag_start) = find_substr(bytes, search_start, tag_prefix.as_bytes()) {
+            // Find the closing `>` of the opening tag.
+            let Some(open_end) = find_byte(bytes, tag_start + tag_prefix.len(), b'>') else {
+                break;
+            };
+            let tag_attrs = &source[tag_start..=open_end];
+            let lang = detect_lang_attr(tag_attrs);
+            let content_start = open_end + 1;
+
+            // Find the matching `</script>`.
+            let Some(close_start) = find_substr(bytes, content_start, b"</script>") else {
+                break;
+            };
+
+            blocks.push(ScriptBlock {
+                content: source[content_start..close_start].to_string(),
+                lang,
+            });
+
+            search_start = close_start + b"</script>".len();
+        }
+    }
+
+    blocks
+}
+
+/// Extract Astro frontmatter delimited by `---`.
+fn extract_astro_frontmatter(source: &str) -> Option<String> {
+    let trimmed = source.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+    let after_first = &trimmed[3..];
+    let close = after_first.find("---")?;
+    Some(after_first[..close].to_string())
+}
+
+/// Extract top-level ESM `import` and `export` lines from an MDX file.
+///
+/// MDX allows standard ESM imports/exports at the top level, before any
+/// markdown or JSX content. We collect contiguous import/export blocks.
+fn extract_mdx_esm_lines(source: &str) -> String {
+    let mut esm_lines = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("import ")
+            || trimmed.starts_with("import{")
+            || trimmed.starts_with("export ")
+            || trimmed.starts_with("export{")
+            || trimmed.starts_with("export default ")
+        {
+            esm_lines.push(line);
+        }
+    }
+    esm_lines.join("\n")
+}
+
+fn detect_lang_attr(tag: &str) -> Option<&'static str> {
+    let lower = tag.to_ascii_lowercase();
+    if lower.contains("lang=\"ts\"") || lower.contains("lang='ts'") {
+        Some("ts")
+    } else if lower.contains("lang=\"tsx\"") || lower.contains("lang='tsx'") {
+        Some("tsx")
+    } else {
+        None
+    }
+}
+
+fn make_virtual_path(original: &Path, lang: &str) -> PathBuf {
+    original.with_extension(lang)
+}
+
+fn find_substr(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || start + needle.len() > haystack.len() {
+        return None;
+    }
+    haystack[start..]
+        .windows(needle.len())
+        .position(|w| w.iter().zip(needle).all(|(a, b)| a.eq_ignore_ascii_case(b)))
+        .map(|pos| pos + start)
+}
+
+fn find_byte(haystack: &[u8], start: usize, byte: u8) -> Option<usize> {
+    haystack[start..].iter().position(|&b| b == byte).map(|pos| pos + start)
+}
+
+fn merge_facts(target: &mut FileFacts, source: FileFacts) {
+    target.exports.extend(source.exports);
+    target.imports.extend(source.imports);
+    target.reexports.extend(source.reexports);
+    target.has_side_effects = target.has_side_effects || source.has_side_effects;
+    target.dynamic_imports.extend(source.dynamic_imports);
+    target.requires.extend(source.requires);
 }
 
 /// Errors from extraction.

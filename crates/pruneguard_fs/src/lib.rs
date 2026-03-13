@@ -4,6 +4,82 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
+/// The language/format of a tracked source file.
+///
+/// Used to route extraction and determine how to parse a file's content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    Js,
+    Jsx,
+    Ts,
+    Tsx,
+    Mts,
+    Cts,
+    Dts,
+    Vue,
+    Svelte,
+    Astro,
+    Mdx,
+}
+
+impl SourceKind {
+    /// Determine the source kind from a file path extension.
+    pub fn from_path(path: &Path) -> Option<Self> {
+        let ext = path.extension().and_then(|e| e.to_str())?;
+        // Handle `.d.ts` / `.d.mts` / `.d.cts` first.
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if Path::new(stem).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("d")) {
+            match ext {
+                "ts" | "mts" | "cts" => return Some(Self::Dts),
+                _ => {}
+            }
+        }
+        match ext {
+            "js" | "mjs" | "cjs" => Some(Self::Js),
+            "jsx" => Some(Self::Jsx),
+            "ts" => Some(Self::Ts),
+            "tsx" => Some(Self::Tsx),
+            "mts" => Some(Self::Mts),
+            "cts" => Some(Self::Cts),
+            "vue" => Some(Self::Vue),
+            "svelte" => Some(Self::Svelte),
+            "astro" => Some(Self::Astro),
+            "mdx" => Some(Self::Mdx),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind is a plain JS/TS variant (not a framework SFC).
+    pub const fn is_js_ts(self) -> bool {
+        matches!(
+            self,
+            Self::Js | Self::Jsx | Self::Ts | Self::Tsx | Self::Mts | Self::Cts | Self::Dts
+        )
+    }
+
+    /// Whether this kind is a framework single-file component.
+    pub const fn is_framework_sfc(self) -> bool {
+        matches!(self, Self::Vue | Self::Svelte | Self::Astro | Self::Mdx)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Js => "js",
+            Self::Jsx => "jsx",
+            Self::Ts => "ts",
+            Self::Tsx => "tsx",
+            Self::Mts => "mts",
+            Self::Cts => "cts",
+            Self::Dts => "dts",
+            Self::Vue => "vue",
+            Self::Svelte => "svelte",
+            Self::Astro => "astro",
+            Self::Mdx => "mdx",
+        }
+    }
+}
+
 /// Classification for a tracked repository file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileKind {
@@ -90,6 +166,7 @@ pub struct FileRecord {
     pub package: Option<String>,
     pub kind: FileKind,
     pub role: FileRole,
+    pub source_kind: Option<SourceKind>,
     pub ignored_reason: Option<String>,
 }
 
@@ -137,7 +214,12 @@ pub fn has_js_ts_extension(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| EXTENSIONS.contains(&ext))
 }
 
-/// Collect all JS/TS files under a directory.
+/// Check if a path is a tracked source file (JS/TS or framework SFC).
+pub fn is_tracked_source(path: &Path) -> bool {
+    SourceKind::from_path(path).is_some()
+}
+
+/// Collect all tracked source files under a directory.
 pub fn collect_source_files(
     root: &Path,
     ignore_patterns: &[String],
@@ -148,7 +230,7 @@ pub fn collect_source_files(
         .filter(|path| {
             path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
                 if extensions.is_empty() {
-                    has_js_ts_extension(path)
+                    is_tracked_source(path)
                 } else {
                     extensions.iter().any(|e| e == ext || e == &format!(".{ext}"))
                 }
@@ -173,6 +255,7 @@ pub fn collect_file_records(root: &Path, options: &FileCollectionOptions) -> Vec
                 workspace.as_ref().and_then(|name| options.package_names.get(name)).cloned();
             let role = classify_file(&relative, &classification_patterns);
             let kind = role.kind();
+            let source_kind = SourceKind::from_path(&relative);
 
             Some(FileRecord {
                 path,
@@ -181,6 +264,7 @@ pub fn collect_file_records(root: &Path, options: &FileCollectionOptions) -> Vec
                 package,
                 kind,
                 role,
+                source_kind,
                 ignored_reason: None,
             })
         })
@@ -229,7 +313,7 @@ fn should_track_file(relative_path: &Path) -> bool {
     let file_name = relative_path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
     let extension = relative_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
 
-    has_js_ts_extension(relative_path)
+    is_tracked_source(relative_path)
         || matches!(file_name, "package.json" | "tsconfig.json" | "tsconfig.base.json")
         || matches!(extension, "json")
             && (file_name.contains("config") || file_name.contains("schema"))

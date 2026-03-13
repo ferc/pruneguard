@@ -215,7 +215,7 @@ fn collect_files_recursive(dir: &Path, entries: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_files_recursive(&path, entries);
-        } else if pruneguard_fs::has_js_ts_extension(&path) {
+        } else if pruneguard_fs::is_tracked_source(&path) {
             entries.push(path);
         }
     }
@@ -251,7 +251,7 @@ fn collect_entrypoint_seeds_recursive(
                 reason_prefix,
                 heuristic,
             );
-        } else if pruneguard_fs::has_js_ts_extension(&path) {
+        } else if pruneguard_fs::is_tracked_source(&path) {
             seeds.push(FrameworkEntrypointSeed {
                 path,
                 profile: Some(profile),
@@ -282,7 +282,7 @@ fn collect_story_files(dir: &Path, entries: &mut Vec<PathBuf>) {
             collect_story_files(&path, entries);
         } else if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
             (name.contains(".stories.") || name.contains(".story."))
-                && pruneguard_fs::has_js_ts_extension(&path)
+                && pruneguard_fs::is_tracked_source(&path)
         }) {
             entries.push(path);
         }
@@ -403,7 +403,7 @@ fn collect_story_seeds(dir: &Path, seeds: &mut Vec<FrameworkEntrypointSeed>) {
             collect_story_seeds(&path, seeds);
         } else if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
             (name.contains(".stories.") || name.contains(".story."))
-                && pruneguard_fs::has_js_ts_extension(&path)
+                && pruneguard_fs::is_tracked_source(&path)
         }) {
             seeds.push(FrameworkEntrypointSeed {
                 path,
@@ -2521,7 +2521,7 @@ impl FrameworkPack for CypressPack {
         {
             for entry in read_dir.flatten() {
                 let path = entry.path();
-                if path.is_file() && pruneguard_fs::has_js_ts_extension(&path) {
+                if path.is_file() && pruneguard_fs::is_tracked_source(&path) {
                     entries.push(path);
                 }
             }
@@ -2584,7 +2584,7 @@ impl FrameworkPack for CypressPack {
         {
             for entry in read_dir.flatten() {
                 let path = entry.path();
-                if path.is_file() && pruneguard_fs::has_js_ts_extension(&path) {
+                if path.is_file() && pruneguard_fs::is_tracked_source(&path) {
                     seeds.push(FrameworkEntrypointSeed {
                         path,
                         profile: Some("development"),

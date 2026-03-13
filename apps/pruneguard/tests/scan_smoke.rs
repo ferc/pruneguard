@@ -1765,3 +1765,33 @@ fn turborepo_task_roots_are_entrypoints() {
         "src/unused.ts should be flagged as unused"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Framework SFC extraction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn framework_sfc_files_are_tracked_and_extracted() {
+    let root = fixture_root("framework-sfc-extraction");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let files = report["inventories"]["files"].as_array().expect("files array");
+
+    // Vue, Svelte, Astro, MDX files must be in the inventory.
+    let file_paths: Vec<&str> = files.iter().filter_map(|f| f["path"].as_str()).collect();
+    assert!(file_paths.iter().any(|p| p.ends_with(".vue")), "Vue files should be in inventory");
+    assert!(
+        file_paths.iter().any(|p| p.ends_with(".svelte")),
+        "Svelte files should be in inventory"
+    );
+    assert!(file_paths.iter().any(|p| p.ends_with(".astro")), "Astro files should be in inventory");
+    assert!(file_paths.iter().any(|p| p.ends_with(".mdx")), "MDX files should be in inventory");
+
+    // Dead Vue component SHOULD be flagged as unused.
+    assert!(
+        findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/dead-component.vue"),
+        "src/dead-component.vue should be flagged as unused"
+    );
+}

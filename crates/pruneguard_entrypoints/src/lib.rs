@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use pruneguard_config::{EntrypointsConfig, FrameworkToggle, FrameworksConfig};
 use pruneguard_frameworks::FrameworkPack;
-use pruneguard_fs::has_js_ts_extension;
+use pruneguard_fs::{has_js_ts_extension, is_tracked_source};
 use pruneguard_manifest::PackageManifest;
 use rustc_hash::FxHashSet;
 
@@ -142,7 +142,7 @@ pub fn detect_entrypoints(
             let profile = script_profile(script_name);
             for candidate in extract_script_entrypoint_candidates(command) {
                 let path = workspace_root.join(&candidate);
-                if !path.exists() || !has_js_ts_extension(&path) {
+                if !path.exists() || !is_tracked_source(&path) {
                     continue;
                 }
 
@@ -220,9 +220,7 @@ pub fn detect_entrypoints(
             let glob_pattern = workspace_root.join(&adjusted).display().to_string();
             if let Ok(paths) = glob::glob(&glob_pattern) {
                 for path in paths.flatten() {
-                    if has_js_ts_extension(&path)
-                        || path.extension().is_some_and(|e| e == "vue" || e == "svelte")
-                    {
+                    if is_tracked_source(&path) {
                         push_entrypoint(
                             &mut entrypoints,
                             &mut seen,
@@ -275,6 +273,17 @@ fn framework_enabled(
         "vitest" => frameworks.vitest,
         "jest" => frameworks.jest,
         "storybook" => frameworks.storybook,
+        "nuxt" => frameworks.nuxt,
+        "astro" => frameworks.astro,
+        "sveltekit" => frameworks.sveltekit,
+        "remix" => frameworks.remix,
+        "angular" => frameworks.angular,
+        "nx" => frameworks.nx,
+        "turborepo" => frameworks.turborepo,
+        "playwright" => frameworks.playwright,
+        "cypress" => frameworks.cypress,
+        "vitepress" => frameworks.vitepress,
+        "docusaurus" => frameworks.docusaurus,
         _ => None, // generic packs (file-routing, root-config) are auto-detect only
     });
 

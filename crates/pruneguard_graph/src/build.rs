@@ -16,7 +16,7 @@ use pruneguard_entrypoints::{
 };
 use pruneguard_extract::{ExtractedFile, extract_file_facts};
 use pruneguard_frameworks::built_in_packs;
-use pruneguard_fs::{FileKind, FileRole, has_js_ts_extension};
+use pruneguard_fs::{FileKind, FileRole, is_tracked_source};
 use pruneguard_report::{
     EntrypointInfo, FileInfo, FileRole as ReportFileRole, Inventories, PackageInfo, Stats,
     UnresolvedByReasonStats, WorkspaceInfo,
@@ -390,7 +390,7 @@ fn populate_extracted_file(
     cache_counters: &mut CacheCounters,
     hashes: CacheHashes,
 ) -> Result<()> {
-    if !has_js_ts_extension(&extracted_file.file.path) {
+    if !is_tracked_source(&extracted_file.file.path) {
         return Ok(());
     }
 
