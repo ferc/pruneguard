@@ -1346,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bpaf",
  "globset",
@@ -1382,7 +1382,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_analyzers"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "compact_str 0.8.1",
  "globset",
@@ -1407,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_cache"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "redb",
  "serde",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_compat"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "pruneguard_frameworks",
  "pruneguard_manifest",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_config"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "globset",
  "insta",
@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_config_readers"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_daemon"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "miette",
  "notify",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_discovery"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "glob",
  "globset",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_entrypoints"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "glob",
  "globset",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_extract"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "compact_str 0.8.1",
  "oxc_allocator",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_frameworks"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "globset",
  "pruneguard_config",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_fs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "globset",
  "ignore",
@@ -1559,7 +1559,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_git"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "miette",
  "serde",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_graph"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "compact_str 0.8.1",
  "globset",
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_manifest"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "compact_str 0.8.1",
  "rustc-hash",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_report"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "compact_str 0.8.1",
  "insta",
@@ -1617,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_resolver"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "miette",
  "oxc_resolver",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_rules"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "globset",
  "miette",
