@@ -30,6 +30,22 @@ pub struct FileFacts {
     /// References to exported symbols from within the same file.
     #[serde(default)]
     pub same_file_refs: Vec<SameFileRefInfo>,
+    /// Member access patterns detected in the file (e.g., `Color.Red`).
+    /// Used for tracking which enum/class/namespace members are referenced.
+    #[serde(default)]
+    pub member_accesses: Vec<MemberAccessInfo>,
+}
+
+/// A detected member access pattern (e.g., `Color.Red`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberAccessInfo {
+    /// The object name (e.g., `Color`).
+    pub object_name: String,
+    /// The member name (e.g., `Red`).
+    pub member_name: String,
+    /// Source line number.
+    pub line: u32,
 }
 
 /// The kind of an exported declaration.
@@ -606,6 +622,11 @@ fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractEr
     if !facts.exports.is_empty() {
         detect_same_file_refs(program, &mut facts);
     }
+
+    // Detect member access patterns (e.g., Color.Red) for imported names.
+    detect_member_accesses(source, &facts.imports, &mut facts.member_accesses);
+    // Detect instance member accesses (e.g., const svc = new Service(); svc.method()).
+    detect_instance_member_accesses(source, &facts.imports, &mut facts.member_accesses);
 
     Ok(facts)
 }
@@ -1930,6 +1951,168 @@ fn kebab_to_pascal(kebab: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Member access detection
+// ---------------------------------------------------------------------------
+
+/// Detect `ImportedName.Member` patterns in source code.
+///
+/// For each named import, scans the source for `Name.identifier` patterns
+/// and records them as member accesses. This is a lightweight heuristic
+/// that covers the common case of enum/namespace member access.
+fn detect_member_accesses(
+    source: &str,
+    imports: &[ImportInfo],
+    accesses: &mut Vec<MemberAccessInfo>,
+) {
+    // Collect all named import bindings.
+    let imported_names: Vec<&str> = imports
+        .iter()
+        .flat_map(|imp| imp.names.iter())
+        .map(|name| name.local.as_str())
+        .collect();
+
+    if imported_names.is_empty() {
+        return;
+    }
+
+    for (line_number, line) in source.lines().enumerate() {
+        for &name in &imported_names {
+            let name_bytes = name.as_bytes();
+            let line_bytes = line.as_bytes();
+            let mut pos = 0;
+            while pos + name_bytes.len() + 1 < line_bytes.len() {
+                let remaining = &line_bytes[pos..];
+                let Some(found) = find_bytes(remaining, name_bytes) else {
+                    break;
+                };
+                let abs_pos = pos + found;
+
+                // Check that the name is not part of a larger identifier.
+                let before_ok = abs_pos == 0
+                    || !is_ident_char(line_bytes[abs_pos - 1]);
+                let after_pos = abs_pos + name_bytes.len();
+                let dot_follows = after_pos < line_bytes.len()
+                    && line_bytes[after_pos] == b'.';
+
+                if before_ok && dot_follows {
+                    // Extract the member name after the dot.
+                    let member_start = after_pos + 1;
+                    let mut member_end = member_start;
+                    while member_end < line_bytes.len()
+                        && is_ident_char(line_bytes[member_end])
+                    {
+                        member_end += 1;
+                    }
+                    if member_end > member_start {
+                        let member_name = &line[member_start..member_end];
+                        accesses.push(MemberAccessInfo {
+                            object_name: name.to_string(),
+                            member_name: member_name.to_string(),
+                            line: (line_number + 1) as u32,
+                        });
+                    }
+                }
+
+                pos = abs_pos + name_bytes.len();
+            }
+        }
+    }
+}
+
+/// Detect instance member accesses: `const x = new Foo(); x.method()`.
+///
+/// Finds `new ImportedName(` assignments and tracks the variable, then
+/// detects `variable.member` patterns.
+fn detect_instance_member_accesses(
+    source: &str,
+    imports: &[ImportInfo],
+    accesses: &mut Vec<MemberAccessInfo>,
+) {
+    let imported_names: Vec<&str> = imports
+        .iter()
+        .flat_map(|imp| imp.names.iter())
+        .map(|name| name.local.as_str())
+        .collect();
+
+    if imported_names.is_empty() {
+        return;
+    }
+
+    // Phase 1: Find `= new ClassName(` patterns and map variable → class name.
+    let mut var_to_class: Vec<(&str, &str)> = Vec::new();
+    for line in source.lines() {
+        for &class_name in &imported_names {
+            let new_pattern = format!("new {class_name}(");
+            if let Some(new_pos) = line.find(&new_pattern) {
+                // Look backwards from `new_pos` to find `= ` and then the variable name.
+                let before = line[..new_pos].trim_end();
+                if let Some(eq_pos) = before.rfind('=') {
+                    let var_part = before[..eq_pos].trim();
+                    // Extract the last word (variable name) from patterns like
+                    // `const x`, `let x`, `var x`, or just `x`.
+                    let var_name = var_part.rsplit_once(char::is_whitespace)
+                        .map_or(var_part, |(_, name)| name)
+                        .trim();
+                    if !var_name.is_empty()
+                        && var_name.bytes().all(|b| is_ident_char(b))
+                    {
+                        var_to_class.push((var_name, class_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: Find `variable.member` patterns.
+    for (line_number, line) in source.lines().enumerate() {
+        for &(var_name, class_name) in &var_to_class {
+            let var_bytes = var_name.as_bytes();
+            let line_bytes = line.as_bytes();
+            let mut pos = 0;
+            while pos + var_bytes.len() + 1 < line_bytes.len() {
+                let remaining = &line_bytes[pos..];
+                let Some(found) = find_bytes(remaining, var_bytes) else {
+                    break;
+                };
+                let abs_pos = pos + found;
+                let before_ok = abs_pos == 0
+                    || !is_ident_char(line_bytes[abs_pos - 1]);
+                let after_pos = abs_pos + var_bytes.len();
+                let dot_follows = after_pos < line_bytes.len()
+                    && line_bytes[after_pos] == b'.';
+
+                if before_ok && dot_follows {
+                    let member_start = after_pos + 1;
+                    let mut member_end = member_start;
+                    while member_end < line_bytes.len()
+                        && is_ident_char(line_bytes[member_end])
+                    {
+                        member_end += 1;
+                    }
+                    if member_end > member_start {
+                        let member_name = &line[member_start..member_end];
+                        accesses.push(MemberAccessInfo {
+                            object_name: class_name.to_string(),
+                            member_name: member_name.to_string(),
+                            line: (line_number + 1) as u32,
+                        });
+                    }
+                }
+                pos = abs_pos + var_bytes.len();
+            }
+        }
+    }
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+const fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+// ---------------------------------------------------------------------------
 // Dynamic dependency pattern detectors
 // ---------------------------------------------------------------------------
 
@@ -1984,7 +2167,8 @@ fn detect_require_resolve(source: &str) -> Vec<DependencyPattern> {
     results
 }
 
-/// Detect `import.meta.glob('pattern')` calls via simple text scanning.
+/// Detect `import.meta.glob('pattern')` and `import.meta.glob(['pat1', 'pat2'])` calls
+/// via simple text scanning.
 fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
     let bytes = source.as_bytes();
     let needle = b"import.meta.glob(";
@@ -1997,35 +2181,101 @@ fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
             continue;
         }
 
-        let quote_pos = index + needle.len();
-        let Some(quote) = bytes.get(quote_pos).copied() else {
+        let after_paren = index + needle.len();
+        let Some(&first_char) = bytes.get(after_paren) else {
             break;
         };
-        if !matches!(quote, b'"' | b'\'') {
-            index += 1;
-            continue;
-        }
 
-        let literal_start = quote_pos + 1;
-        let mut literal_end = literal_start;
-        while literal_end < bytes.len() && bytes[literal_end] != quote {
-            literal_end += 1;
-        }
-        if literal_end >= bytes.len() {
-            index += 1;
-            continue;
-        }
-
-        let pattern = source[literal_start..literal_end].to_string();
         let line = 1 + count_newlines(&bytes[..index]);
-        results.push(DependencyPattern::ImportMetaGlob {
-            pattern,
-            line: u32::try_from(line).unwrap_or(u32::MAX),
-        });
-        index = literal_end + 1;
+        let line_u32 = u32::try_from(line).unwrap_or(u32::MAX);
+
+        if first_char == b'[' {
+            // Array form: import.meta.glob(['./a/*.ts', './b/*.ts'])
+            if let Some(patterns) = extract_string_array(&source[after_paren..]) {
+                if !patterns.is_empty() {
+                    results.push(DependencyPattern::ImportMetaGlobArray {
+                        patterns,
+                        line: line_u32,
+                    });
+                }
+            }
+            // Skip past the closing bracket.
+            let mut skip = after_paren + 1;
+            while skip < bytes.len() && bytes[skip] != b']' {
+                skip += 1;
+            }
+            index = skip + 1;
+        } else if matches!(first_char, b'"' | b'\'') {
+            // Single string form: import.meta.glob('./modules/*.ts')
+            let quote = first_char;
+            let literal_start = after_paren + 1;
+            let mut literal_end = literal_start;
+            while literal_end < bytes.len() && bytes[literal_end] != quote {
+                literal_end += 1;
+            }
+            if literal_end >= bytes.len() {
+                index += 1;
+                continue;
+            }
+
+            let pattern = source[literal_start..literal_end].to_string();
+            results.push(DependencyPattern::ImportMetaGlob {
+                pattern,
+                line: line_u32,
+            });
+            index = literal_end + 1;
+        } else {
+            index += 1;
+        }
     }
 
     results
+}
+
+/// Extract an array of string literals from a source fragment starting with `[`.
+/// Returns `None` if the array can't be parsed.
+fn extract_string_array(source: &str) -> Option<Vec<String>> {
+    let bytes = source.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return None;
+    }
+
+    let mut strings = Vec::new();
+    let mut i = 1; // Skip the opening `[`.
+
+    loop {
+        // Skip whitespace and commas.
+        while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b',') {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        if bytes[i] == b']' {
+            break;
+        }
+
+        // Expect a quoted string.
+        let quote = bytes[i];
+        if !matches!(quote, b'"' | b'\'') {
+            return None; // Non-string element, bail.
+        }
+        i += 1;
+        let start = i;
+        while i < bytes.len() && bytes[i] != quote {
+            if bytes[i] == b'\\' {
+                i += 1; // Skip escaped char.
+            }
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        strings.push(source[start..i].to_string());
+        i += 1; // Skip closing quote.
+    }
+
+    Some(strings)
 }
 
 /// Detect `/// <reference path="..." />` and `/// <reference types="..." />`

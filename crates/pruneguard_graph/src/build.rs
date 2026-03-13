@@ -29,7 +29,7 @@ use pruneguard_resolver::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{MemberNodeKind, ModuleEdge, ModuleGraph, SymbolGraph};
+use crate::{MemberAccessKind, MemberNodeKind, ModuleEdge, ModuleGraph, SymbolGraph};
 
 /// Fully built repository graph and its supporting inventories.
 #[derive(Debug)]
@@ -46,6 +46,8 @@ pub struct GraphBuildResult {
     /// Findings for exports in these files should use demoted confidence
     /// since their liveness depends on heuristic pattern matching.
     pub glob_expanded_targets: FxHashSet<PathBuf>,
+    /// Fast path-to-file-index lookup for `find_file`.
+    file_path_index: FxHashMap<String, usize>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -65,12 +67,13 @@ struct CacheHashes {
 impl GraphBuildResult {
     /// Find a tracked file by absolute path, relative path, or suffix.
     pub fn find_file(&self, query: &str) -> Option<&ExtractedFile> {
+        // Fast path: direct lookup by absolute or relative path.
+        if let Some(&idx) = self.file_path_index.get(query) {
+            return self.files.get(idx);
+        }
+        // Slow fallback for suffix matches (rare).
         self.files.iter().find(|file| {
-            file.file.path == Path::new(query)
-                || file.file.relative_path == Path::new(query)
-                || file.file.relative_path.to_string_lossy() == query
-                || file.file.path.to_string_lossy() == query
-                || file.file.relative_path.to_string_lossy().ends_with(query)
+            file.file.relative_path.to_string_lossy().ends_with(query)
         })
     }
 }
@@ -98,6 +101,7 @@ pub fn build_graph_with_options(
     let discovery_cwd = scan_roots.first().map_or_else(|| cwd.to_path_buf(), Clone::clone);
     let discovery = discover(&discovery_cwd, config)?;
     let exclude_matcher = compile_globset(&config.entrypoints.exclude);
+
 
     let mut files = discovery.collect_files(config);
     let total_discovered_files = files.len();
@@ -237,6 +241,10 @@ pub fn build_graph_with_options(
     }
 
     let packs = built_in_packs();
+    let all_file_paths: Vec<PathBuf> = extracted_files
+        .iter()
+        .map(|f| f.file.path.clone())
+        .collect();
     let mut entrypoint_seeds = detect_all_entrypoints(
         &discovery,
         &config.entrypoints,
@@ -244,24 +252,30 @@ pub fn build_graph_with_options(
         &packs,
         exclude_matcher.as_ref(),
         &scan_roots,
+        &all_file_paths,
     );
     // --- Phase 1: Inject config-derived entrypoints ---
     inject_config_entrypoints(
         &mut entrypoint_seeds,
         &config_inputs,
         &discovery,
+        &all_file_paths,
     );
 
     // --- Phase 4: Seed from wildcard exports in manifests ---
-    let file_inventory: Vec<PathBuf> = extracted_files
+    let wildcard_file_inventory: Vec<PathBuf> = extracted_files
         .iter()
         .map(|f| f.file.relative_path.clone())
         .collect();
+    let mut seen_seed_paths: FxHashSet<PathBuf> = entrypoint_seeds
+        .iter()
+        .map(|s| s.path.clone())
+        .collect();
     for workspace in discovery.workspaces.values() {
-        let expanded = workspace.manifest.expand_wildcard_exports(&file_inventory);
+        let expanded = workspace.manifest.expand_wildcard_exports(&wildcard_file_inventory);
         for path in expanded {
             let abs = discovery.project_root.join(&path);
-            if !entrypoint_seeds.iter().any(|s| s.path == abs) {
+            if seen_seed_paths.insert(abs.clone()) {
                 entrypoint_seeds.push(EntrypointSeed {
                     path: abs,
                     kind: SeedKind::PackageExports,
@@ -455,6 +469,13 @@ pub fn build_graph_with_options(
         external_parity: None,
     };
 
+    // Build fast path-to-file index for O(1) lookups.
+    let mut file_path_index = FxHashMap::default();
+    for (i, f) in extracted_files.iter().enumerate() {
+        file_path_index.insert(f.file.path.to_string_lossy().to_string(), i);
+        file_path_index.insert(f.file.relative_path.to_string_lossy().to_string(), i);
+    }
+
     // Collect files that were pulled in via glob/context expansion for confidence demotion.
     let glob_expanded_targets: FxHashSet<PathBuf> = extracted_files
         .iter()
@@ -473,6 +494,7 @@ pub fn build_graph_with_options(
         files: extracted_files,
         stats,
         glob_expanded_targets,
+        file_path_index,
     })
 }
 
@@ -899,17 +921,31 @@ fn detect_all_entrypoints(
     packs: &[Box<dyn pruneguard_frameworks::FrameworkPack>],
     exclude_matcher: Option<&GlobSet>,
     scan_roots: &[PathBuf],
+    file_inventory: &[PathBuf],
 ) -> Vec<EntrypointSeed> {
     let mut entrypoints = Vec::new();
+    let ws_count = discovery.workspaces.len();
+    let is_monorepo = ws_count > 1;
 
     for workspace in discovery.workspaces.values() {
+        // In a monorepo, skip expensive framework pack detection for the root
+        // workspace since child workspaces handle their own framework
+        // entrypoints.  This avoids repeated full-tree filesystem traversals
+        // from `pack.entrypoints()` on the monorepo root.
+        let effective_packs: &[Box<dyn pruneguard_frameworks::FrameworkPack>] =
+            if is_monorepo && workspace.root == discovery.project_root {
+                &[]
+            } else {
+                packs
+            };
         let mut workspace_entrypoints = detect_entrypoints(
             Some(workspace.name.as_str()),
             &workspace.root,
             &workspace.manifest,
             config,
             frameworks_config,
-            packs,
+            effective_packs,
+            Some(file_inventory),
         );
 
         workspace_entrypoints.retain(|entrypoint| {
@@ -1249,6 +1285,51 @@ fn add_symbol_edges(
     for same_ref in &facts.same_file_refs {
         symbol_graph.add_same_file_ref(importer_id, same_ref.export_name.clone(), same_ref.line);
     }
+
+    // Register member access patterns (e.g., Color.Red → member ref on Color's Red member).
+    // Build a map from local import name → (source_id, imported_name) for lookup.
+    let import_map: FxHashMap<&str, (crate::FileId, &str)> = facts
+        .imports
+        .iter()
+        .zip(resolved_imports.iter())
+        .filter_map(|(import, edge)| {
+            let source_path = edge.to_file.as_ref()?;
+            let (source_id, _) = file_nodes.get(source_path)?;
+            Some(
+                import
+                    .names
+                    .iter()
+                    .map(move |name| (name.local.as_str(), (*source_id, name.imported.as_str()))),
+            )
+        })
+        .flatten()
+        .collect();
+
+    for access in &facts.member_accesses {
+        if let Some(&(source_id, export_name)) = import_map.get(access.object_name.as_str()) {
+            if export_name == "*" {
+                // Namespace import: `import * as NS from './mod'` + `NS.member`.
+                // Create a direct import edge for the specific member so the
+                // unused_exports analyzer knows the export is consumed.
+                symbol_graph.add_import(
+                    importer_id,
+                    source_id,
+                    CompactString::new(&access.member_name),
+                    false,
+                );
+            } else {
+                // Named import: `import { Color } from './color'` + `Color.Red`.
+                symbol_graph.add_member_ref(
+                    importer_id,
+                    source_id,
+                    CompactString::new(export_name),
+                    CompactString::new(&access.member_name),
+                    false,
+                    MemberAccessKind::Read,
+                );
+            }
+        }
+    }
 }
 
 const fn to_module_edge(kind: ResolvedEdgeKind) -> ModuleEdge {
@@ -1295,7 +1376,10 @@ fn expand_glob_into_edges(
     }
 
     let source_dir = extracted_file.file.path.parent().unwrap_or(&extracted_file.file.path);
-    let glob = match Glob::new(pattern) {
+    // Normalize `./` prefix: globset treats `./foo` literally, but import.meta.glob
+    // uses `./` to mean "relative to current file's directory".
+    let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+    let glob = match Glob::new(normalized_pattern) {
         Ok(g) => g,
         Err(_) => return,
     };
@@ -1307,8 +1391,9 @@ fn expand_glob_into_edges(
     } else {
         let mut builder = GlobSetBuilder::new();
         for neg in negations {
-            // Strip the leading `!` to get the raw glob pattern.
+            // Strip the leading `!` and `./` to get the raw glob pattern.
             let raw = neg.strip_prefix('!').unwrap_or(neg);
+            let raw = raw.strip_prefix("./").unwrap_or(raw);
             if let Ok(g) = Glob::new(raw) {
                 builder.add(g);
             }
@@ -1450,6 +1535,7 @@ fn inject_config_entrypoints(
     entrypoint_seeds: &mut Vec<EntrypointSeed>,
     config_inputs: &pruneguard_config_readers::ConfigInputs,
     discovery: &DiscoveryResult,
+    file_inventory: &[PathBuf],
 ) {
     let project_root = &discovery.project_root;
     let existing: FxHashSet<PathBuf> = entrypoint_seeds.iter().map(|s| s.path.clone()).collect();
@@ -1612,31 +1698,44 @@ fn inject_config_entrypoints(
     }
 
     // Route entry globs (e.g. TanStack Router, React Router, Vike, Qwik City).
-    for glob_entry in &config_inputs.route_entry_globs {
-        if let Ok(glob) = Glob::new(&glob_entry.pattern) {
-            let matcher = glob.compile_matcher();
-            // Walk the project looking for matching files.
+    // Use the pre-discovered file inventory instead of filesystem traversal.
+    if !config_inputs.route_entry_globs.is_empty() {
+        // Pre-group files by workspace for efficient lookup.
+        let mut files_by_workspace: FxHashMap<&Path, Vec<(&Path, &PathBuf)>> = FxHashMap::default();
+        for workspace in discovery.workspaces.values() {
+            files_by_workspace.insert(&workspace.root, Vec::new());
+        }
+        for file_path in file_inventory {
             for workspace in discovery.workspaces.values() {
-                let walk_root = &workspace.root;
-                if let Ok(read_dir) = std::fs::read_dir(walk_root) {
-                    let mut files_to_check: Vec<PathBuf> = Vec::new();
-                    collect_files_recursive(walk_root, &mut files_to_check, 5);
-                    for file_path in files_to_check {
-                        let relative = file_path
-                            .strip_prefix(walk_root)
-                            .unwrap_or(&file_path);
-                        if matcher.is_match(relative) && !existing.contains(&file_path) {
-                            entrypoint_seeds.push(EntrypointSeed {
-                                path: file_path,
-                                kind: SeedKind::FrameworkPack,
-                                surface_kind: EntrypointSurfaceKind::FrameworkConvention,
-                                profile: EntrypointProfile::Production,
-                                workspace: Some(workspace.name.clone()),
-                                source: format!("route-glob:{}", glob_entry.framework),
-                            });
+                if file_path.starts_with(&workspace.root) {
+                    let relative = file_path.strip_prefix(&workspace.root).unwrap_or(file_path);
+                    files_by_workspace
+                        .entry(&workspace.root)
+                        .or_default()
+                        .push((relative, file_path));
+                    break; // Each file belongs to at most one workspace (most specific).
+                }
+            }
+        }
+
+        for glob_entry in &config_inputs.route_entry_globs {
+            if let Ok(glob) = Glob::new(&glob_entry.pattern) {
+                let matcher = glob.compile_matcher();
+                for workspace in discovery.workspaces.values() {
+                    if let Some(ws_files) = files_by_workspace.get(workspace.root.as_path()) {
+                        for (relative, file_path) in ws_files {
+                            if matcher.is_match(relative) && !existing.contains(*file_path) {
+                                entrypoint_seeds.push(EntrypointSeed {
+                                    path: (*file_path).clone(),
+                                    kind: SeedKind::FrameworkPack,
+                                    surface_kind: EntrypointSurfaceKind::FrameworkConvention,
+                                    profile: EntrypointProfile::Production,
+                                    workspace: Some(workspace.name.clone()),
+                                    source: format!("route-glob:{}", glob_entry.framework),
+                                });
+                            }
                         }
                     }
-                    let _ = read_dir; // Silence unused binding.
                 }
             }
         }

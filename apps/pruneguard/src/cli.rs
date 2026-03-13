@@ -85,10 +85,16 @@ pub enum Command {
     Debug(DebugCommand),
     Migrate(MigrateCommand),
     Daemon(DaemonCommand),
+    Bench(BenchCommand),
     /// Bare positional paths without explicit subcommand — rejected with guidance.
     BarePathsError {
         paths: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum BenchCommand {
+    Replacement { corpus: Option<PathBuf> },
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +325,22 @@ fn migrate_command() -> impl Parser<Command> {
     construct!([knip, depcruise]).map(Command::Migrate)
 }
 
+fn bench_replacement_subcommand() -> impl Parser<BenchCommand> {
+    let corpus = positional::<PathBuf>("CORPUS")
+        .help("Path to parity fixture corpus directory")
+        .optional();
+    construct!(BenchCommand::Replacement { corpus })
+}
+
+fn bench_command() -> impl Parser<Command> {
+    let replacement = bench_replacement_subcommand()
+        .to_options()
+        .descr("Compute weighted replacement score against parity corpus")
+        .command("replacement");
+
+    construct!([replacement]).map(Command::Bench)
+}
+
 fn daemon_start_subcommand() -> impl Parser<DaemonCommand> {
     pure(DaemonCommand::Start)
 }
@@ -410,6 +432,10 @@ fn command_parser() -> impl Parser<Command> {
         .command("migrate");
     let daemon =
         daemon_command().to_options().descr("Manage the background daemon").command("daemon");
+    let bench = bench_command()
+        .to_options()
+        .descr("Run replacement benchmarks against parity corpus")
+        .command("bench");
 
     // Catch bare positional paths and give a helpful error message.
     let bare_paths = bare_paths_catcher();
@@ -431,6 +457,7 @@ fn command_parser() -> impl Parser<Command> {
         debug,
         migrate,
         daemon,
+        bench,
         bare_paths,
         default_review
     ])

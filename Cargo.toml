@@ -112,6 +112,9 @@ napi = { version = "2", default-features = false, features = ["napi9"] }
 napi-derive = "2"
 napi-build = "2"
 
+# Temp files
+tempfile = "3"
+
 # Async / daemon
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "signal", "fs", "macros"] }
 notify = { version = "8", default-features = false, features = ["macos_kqueue"] }

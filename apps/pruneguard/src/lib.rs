@@ -32,6 +32,9 @@ pub struct ScanOptions {
     pub no_cache: bool,
     pub no_baseline: bool,
     pub require_full_scope: bool,
+    /// When set, evaluate the parity corpus at this path and include the score
+    /// in the scan report's `parity_score` and `stats.external_parity*` fields.
+    pub parity_corpus: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -183,6 +186,26 @@ pub fn scan_with_options(
 
     if let Some(focus) = compile_focus_filter(options.focus.as_deref())? {
         apply_focus_to_scan_report(&mut report, &build, &focus);
+    }
+
+    // Optionally compute external parity score and attach to the report.
+    if let Some(corpus_path) = &options.parity_corpus {
+        if corpus_path.exists() {
+            if let Ok(parity_result) = evaluate_parity_corpus(corpus_path) {
+                let parity_report =
+                    parity_score_to_report(&parity_result.score, &parity_result.stale_deltas);
+                report.stats.external_parity_pct = Some(parity_result.score.overall_pct);
+                report.stats.external_parity =
+                    Some(pruneguard_report::ExternalParitySummary {
+                        overall_pct: parity_result.score.overall_pct,
+                        total_cases: parity_result.score.total_cases,
+                        passed_cases: parity_result.score.passed_cases,
+                        total_checks: parity_result.score.total_checks,
+                        passed_checks: parity_result.score.passed_checks,
+                    });
+                report.parity_score = Some(parity_report);
+            }
+        }
     }
 
     refresh_summary(&mut report);
@@ -2429,6 +2452,423 @@ const fn edge_label(edge: ModuleEdge) -> &'static str {
     }
 }
 
+// ── Parity corpus evaluation ───────────────────────────────────────────
+
+/// Result of evaluating the full parity corpus.
+pub struct ParityCorpusResult {
+    pub score: pruneguard_analyzers::external_parity::ExternalParityScore,
+    pub stale_deltas: Vec<pruneguard_analyzers::parity::StaleDelta>,
+}
+
+/// Evaluate the external parity corpus against real scans and return the
+/// aggregate replacement score plus stale-delta information.
+pub fn evaluate_parity_corpus(corpus_root: &Path) -> miette::Result<ParityCorpusResult> {
+    use pruneguard_analyzers::external_parity::{
+        compute_external_parity_score, discover_parity_cases,
+    };
+
+    let cases = discover_parity_cases(corpus_root);
+    let mut results = Vec::with_capacity(cases.len());
+
+    for (meta, expected, case_dir) in &cases {
+        results.push(evaluate_parity_case(case_dir, meta, expected));
+    }
+
+    let score = compute_external_parity_score(&results);
+    let stale_deltas = pruneguard_analyzers::parity::stale_delta(&results);
+
+    Ok(ParityCorpusResult { score, stale_deltas })
+}
+
+/// Copy a directory tree recursively.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Evaluate a single parity case by running a real scan and comparing
+/// the findings against the expected outcomes.
+///
+/// Each case is run in a temporary directory with a minimal package.json
+/// to isolate it from the pruneguard workspace.
+fn evaluate_parity_case(
+    case_dir: &Path,
+    meta: &pruneguard_analyzers::external_parity::ParityCaseMeta,
+    expected: &pruneguard_analyzers::external_parity::ParityCaseExpected,
+) -> pruneguard_analyzers::external_parity::ParityCaseResult {
+    let mut failures = Vec::new();
+    let mut total_checks: usize = 0;
+    let mut passed_checks: usize = 0;
+
+    // Create isolated temp directory with the fixture contents.
+    let temp_dir = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(err) => {
+            return pruneguard_analyzers::external_parity::ParityCaseResult {
+                family: meta.family.clone(),
+                name: meta.name.clone(),
+                reference_tool: meta.reference_tool.clone(),
+                passed: false,
+                total_checks: 1,
+                passed_checks: 0,
+                failures: vec![format!("failed to create temp dir: {err}")],
+            };
+        }
+    };
+    // Canonicalize the temp dir path to avoid macOS /var vs /private/var issues.
+    let scan_dir = match temp_dir.path().canonicalize() {
+        Ok(p) => p,
+        Err(_) => temp_dir.path().to_path_buf(),
+    };
+
+    // Copy the case source files to the temp dir.
+    if let Err(err) = copy_dir_recursive(case_dir, &scan_dir) {
+        return pruneguard_analyzers::external_parity::ParityCaseResult {
+            family: meta.family.clone(),
+            name: meta.name.clone(),
+            reference_tool: meta.reference_tool.clone(),
+            passed: false,
+            total_checks: 1,
+            passed_checks: 0,
+            failures: vec![format!("failed to copy fixture: {err}")],
+        };
+    }
+
+    // Ensure a minimal package.json exists so discovery treats this as a project root.
+    // Detect the entry point from the fixture structure.
+    let pkg_json = scan_dir.join("package.json");
+    if !pkg_json.exists() {
+        let main_field = if scan_dir.join("src/index.ts").exists() {
+            r#","main":"./src/index.ts""#
+        } else if scan_dir.join("src/main.ts").exists() {
+            r#","main":"./src/main.ts""#
+        } else {
+            ""
+        };
+        let _ = std::fs::write(
+            &pkg_json,
+            format!(r#"{{"name":"parity-case","private":true{main_field}}}"#),
+        );
+    }
+
+    // Build entrypoint list: source files NOT listed in reachable_files or
+    // unreachable_files are assumed to be entry/consumer files.
+    let reachable_set: BTreeSet<String> = expected
+        .reachable_files
+        .iter()
+        .map(|p| normalize_fixture_path(p))
+        .collect();
+    let unreachable_set: BTreeSet<String> = expected
+        .unreachable_files
+        .iter()
+        .map(|p| normalize_fixture_path(p))
+        .collect();
+    let mut extra_entrypoints = Vec::new();
+    if let Ok(mut source_files) = collect_source_files(&scan_dir, &scan_dir) {
+        source_files.sort();
+        for rel in &source_files {
+            if !reachable_set.contains(rel.as_str())
+                && !unreachable_set.contains(rel.as_str())
+            {
+                extra_entrypoints.push(rel.clone());
+            }
+        }
+    }
+
+    // Write a pruneguard.json config with extra entrypoints if the case
+    // doesn't already have one.
+    let config_path = scan_dir.join("pruneguard.json");
+    if !extra_entrypoints.is_empty() && !config_path.exists() {
+        let entries: Vec<String> = extra_entrypoints
+            .iter()
+            .map(|p| format!("\"./{p}\""))
+            .collect();
+        let _ = std::fs::write(
+            &config_path,
+            format!(
+                r#"{{"entrypoints":{{"include":[{}]}}}}"#,
+                entries.join(",")
+            ),
+        );
+    }
+
+    // Run a scan on the isolated case directory.
+    let mut config = PruneguardConfig::default();
+    // Enable member analysis for member-semantics cases.
+    config.analysis.unused_members = pruneguard_config::AnalysisSeverity::Warn;
+    // Add the extra entrypoints directly via the include list.
+    config.entrypoints.include = extra_entrypoints
+        .iter()
+        .map(|p| format!("./{p}"))
+        .collect();
+    let profile = EntrypointProfile::Both;
+    let report = match scan(&scan_dir, &config, &[], profile) {
+        Ok(report) => report,
+        Err(err) => {
+            return pruneguard_analyzers::external_parity::ParityCaseResult {
+                family: meta.family.clone(),
+                name: meta.name.clone(),
+                reference_tool: meta.reference_tool.clone(),
+                passed: false,
+                total_checks: 1,
+                passed_checks: 0,
+                failures: vec![format!("scan failed: {err}")],
+            };
+        }
+    };
+
+    // Build a set of finding keys as `code:normalized_reference` for matching.
+    let finding_keys: BTreeSet<String> = report
+        .findings
+        .iter()
+        .flat_map(|f| finding_match_keys(f))
+        .collect();
+
+    // Check reachable files: should NOT appear as unused-file findings.
+    for reachable in &expected.reachable_files {
+        total_checks += 1;
+        let normalized = normalize_fixture_path(reachable);
+        let key = format!("unused-file:{normalized}");
+        if finding_keys.contains(&key) {
+            failures.push(format!("reachable {reachable} was reported as unused-file"));
+        } else {
+            passed_checks += 1;
+        }
+    }
+
+    // Check unreachable files: should appear as unused-file findings.
+    for unreachable in &expected.unreachable_files {
+        total_checks += 1;
+        let normalized = normalize_fixture_path(unreachable);
+        let key = format!("unused-file:{normalized}");
+        if finding_keys.contains(&key) {
+            passed_checks += 1;
+        } else {
+            failures.push(format!("unreachable {unreachable} was not reported as unused-file"));
+        }
+    }
+
+    // Check expected findings: should be present.
+    for expected_finding in &expected.expected_findings {
+        total_checks += 1;
+        if finding_matches_expected(&finding_keys, &report.findings, expected_finding) {
+            passed_checks += 1;
+        } else {
+            failures.push(format!("expected finding `{expected_finding}` not found"));
+        }
+    }
+
+    // Check expected no-findings: should be absent.
+    for expected_no in &expected.expected_no_findings {
+        total_checks += 1;
+        if finding_matches_expected(&finding_keys, &report.findings, expected_no) {
+            failures.push(format!("unexpected finding `{expected_no}` was reported"));
+        } else {
+            passed_checks += 1;
+        }
+    }
+
+    pruneguard_analyzers::external_parity::ParityCaseResult {
+        family: meta.family.clone(),
+        name: meta.name.clone(),
+        reference_tool: meta.reference_tool.clone(),
+        passed: failures.is_empty(),
+        total_checks,
+        passed_checks,
+        failures,
+    }
+}
+
+/// Recursively collect .ts/.tsx/.js/.jsx/.vue/.svelte/.astro/.mdx files,
+/// returning paths relative to `root`.
+fn collect_source_files(dir: &Path, root: &Path) -> std::io::Result<Vec<String>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip meta.json / expected.json directories and node_modules.
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "node_modules" || name == ".git" {
+                continue;
+            }
+            files.extend(collect_source_files(&path, root)?);
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            match ext {
+                "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte" | "astro" | "mdx" => {
+                    // Skip config files — they shouldn't be entrypoints.
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if name.contains(".config.") || name == "package.json" {
+                        continue;
+                    }
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        files.push(rel.to_string_lossy().to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(files)
+}
+
+/// Normalize a fixture path like `./src/lib.ts` to `src/lib.ts`.
+fn normalize_fixture_path(path: &str) -> String {
+    path.trim_start_matches("./").to_string()
+}
+
+/// Generate all match keys for a finding so we can compare against expected outcomes.
+///
+/// Returns keys like:
+/// - `unused-file:src/lib.ts` for unused-file findings
+/// - `unused-export:unusedHelper` for unused-export findings (by export name)
+/// - `unused-member:Color.Yellow` for unused-member findings (by member name)
+fn finding_match_keys(finding: &Finding) -> Vec<String> {
+    let mut keys = Vec::new();
+
+    // Full key: code:subject (normalized)
+    let subject_normalized = normalize_fixture_path(&finding.subject);
+    keys.push(format!("{}:{}", finding.code, subject_normalized));
+
+    // For export findings, subject is `path#ExportName`.
+    if let Some(hash_pos) = finding.subject.find('#') {
+        let name_part = &finding.subject[hash_pos + 1..];
+        keys.push(format!("{}:{}", finding.code, name_part));
+    }
+
+    // For unused-member findings, the subject is `path.TypeName` but the
+    // specific dead member is in the evidence description as `TypeName.Member`.
+    // Extract it so we can match `unused-member:Color.Yellow`.
+    if finding.code == "unused-member" {
+        for ev in &finding.evidence {
+            // Evidence description: "`Color.Yellow` is never referenced..."
+            if let Some(start) = ev.description.find('`') {
+                if let Some(end) = ev.description[start + 1..].find('`') {
+                    let member_ref = &ev.description[start + 1..start + 1 + end];
+                    keys.push(format!("unused-member:{member_ref}"));
+                }
+            }
+        }
+    }
+
+    keys
+}
+
+/// Check whether an expected finding spec matches any actual finding.
+///
+/// Expected format: `code:reference` where reference can be:
+/// - A file path for unused-file: `./src/lib.ts`
+/// - An export name for unused-export: `unusedHelper`
+/// - A member name for unused-member: `Color.Yellow`
+fn finding_matches_expected(
+    finding_keys: &BTreeSet<String>,
+    findings: &[Finding],
+    expected: &str,
+) -> bool {
+    // Direct key match.
+    let normalized = if let Some((code, reference)) = expected.split_once(':') {
+        format!("{}:{}", code, normalize_fixture_path(reference))
+    } else {
+        expected.to_string()
+    };
+
+    if finding_keys.contains(&normalized) {
+        return true;
+    }
+
+    // Fallback: check if any finding with matching code has a subject containing
+    // the reference. This handles path variations.
+    if let Some((code, reference)) = expected.split_once(':') {
+        let ref_normalized = normalize_fixture_path(reference);
+        findings.iter().any(|f| {
+            f.code == code
+                && (normalize_fixture_path(&f.subject) == ref_normalized
+                    || f.subject.contains(&ref_normalized)
+                    || f.subject.ends_with(&format!("#{ref_normalized}")))
+        })
+    } else {
+        false
+    }
+}
+
+/// Convert an `ExternalParityScore` into the report types for JSON output.
+pub fn parity_score_to_report(
+    score: &pruneguard_analyzers::external_parity::ExternalParityScore,
+    stale_deltas: &[pruneguard_analyzers::parity::StaleDelta],
+) -> pruneguard_report::ExternalParityReport {
+    use pruneguard_report::{
+        ExternalParityCaseResult, ExternalParityFamilyScore, ExternalParityReport,
+        ExternalParityToolScore, ParityStaleDelta,
+    };
+
+    ExternalParityReport {
+        total_cases: score.total_cases,
+        passed_cases: score.passed_cases,
+        total_checks: score.total_checks,
+        passed_checks: score.passed_checks,
+        overall_pct: score.overall_pct,
+        by_family: score
+            .by_family
+            .iter()
+            .map(|f| ExternalParityFamilyScore {
+                family: f.family.clone(),
+                total_cases: f.total_cases,
+                passed_cases: f.passed_cases,
+                pct: f.pct,
+            })
+            .collect(),
+        by_reference_tool: score
+            .by_reference_tool
+            .iter()
+            .map(|t| ExternalParityToolScore {
+                tool: t.tool.clone(),
+                total_cases: t.total_cases,
+                passed_cases: t.passed_cases,
+                pct: t.pct,
+            })
+            .collect(),
+        case_results: score
+            .case_results
+            .iter()
+            .map(|c| ExternalParityCaseResult {
+                family: c.family.clone(),
+                name: c.name.clone(),
+                reference_tool: c.reference_tool.clone(),
+                passed: c.passed,
+                total_checks: c.total_checks,
+                passed_checks: c.passed_checks,
+                failures: c.failures.clone(),
+            })
+            .collect(),
+        stale_deltas: stale_deltas
+            .iter()
+            .filter(|d| d.is_stale)
+            .map(|d| ParityStaleDelta {
+                feature: format!("{}/{}", d.family, d.name),
+                matrix_level: format!("{:?}", d.matrix_level),
+                actual_level: if d.corpus_passed {
+                    "Passing".to_string()
+                } else {
+                    "Failing".to_string()
+                },
+            })
+            .collect(),
+    }
+}
+
 fn normalize_scan_roots(cwd: &Path, scan_paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut paths = scan_paths
         .iter()
@@ -2544,6 +2984,7 @@ pub fn scan_json(options: JsScanOptions) -> napi::Result<String> {
             no_cache: options.no_cache.unwrap_or(false),
             no_baseline: options.no_baseline.unwrap_or(false),
             require_full_scope: options.require_full_scope.unwrap_or(false),
+            ..Default::default()
         },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;
@@ -2571,6 +3012,7 @@ pub fn scan_dot_text(options: JsScanOptions) -> napi::Result<String> {
             no_cache: options.no_cache.unwrap_or(false),
             no_baseline: options.no_baseline.unwrap_or(false),
             require_full_scope: options.require_full_scope.unwrap_or(false),
+            ..Default::default()
         },
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;

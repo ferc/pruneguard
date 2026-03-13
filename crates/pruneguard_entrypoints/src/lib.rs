@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use pruneguard_config::{EntrypointsConfig, FrameworkToggle, FrameworksConfig};
 use pruneguard_frameworks::FrameworkPack;
 use pruneguard_fs::{has_js_ts_extension, is_tracked_source};
@@ -136,6 +137,11 @@ impl std::fmt::Display for EntrypointSeed {
 }
 
 /// Detect entrypoints for a workspace package.
+///
+/// When `file_inventory` is provided, auto-loaded framework patterns are
+/// matched against this in-memory list instead of performing filesystem glob
+/// traversals.  This avoids repeated `glob::glob()` walks across large
+/// monorepos.
 #[allow(clippy::too_many_lines)]
 pub fn detect_entrypoints(
     workspace_name: Option<&str>,
@@ -144,6 +150,7 @@ pub fn detect_entrypoints(
     config: &EntrypointsConfig,
     frameworks_config: Option<&FrameworksConfig>,
     framework_packs: &[Box<dyn FrameworkPack>],
+    file_inventory: Option<&[PathBuf]>,
 ) -> Vec<EntrypointSeed> {
     let mut entrypoints = Vec::new();
     let mut seen = FxHashSet::default();
@@ -272,26 +279,72 @@ pub fn detect_entrypoints(
 
         // Auto-loaded patterns: files the framework auto-imports at runtime
         // (e.g. Nuxt composables/, utils/, plugins/).
-        for pattern in pack.auto_loaded_patterns() {
-            // The Rust `glob` crate's `**` matches directory components but
-            // not leaf files.  Ensure patterns that end with `/**` also have a
-            // trailing wildcard to capture files (e.g. `composables/**` →
-            // `composables/**/*`).
-            let adjusted =
-                if pattern.ends_with("/**") { format!("{pattern}/*") } else { pattern.clone() };
-            let glob_pattern = workspace_root.join(&adjusted).display().to_string();
-            if let Ok(paths) = glob::glob(&glob_pattern) {
-                for path in paths.flatten() {
-                    if is_tracked_source(&path) {
-                        push_entrypoint(
-                            &mut entrypoints,
-                            &mut seen,
-                            path,
-                            EntrypointKind::FrameworkPack,
-                            profile,
-                            workspace_name,
-                            format!("framework-auto-load:{}:{pattern}", pack.name()),
-                        );
+        let auto_patterns = pack.auto_loaded_patterns();
+        if !auto_patterns.is_empty() {
+            if let Some(inventory) = file_inventory {
+                // Fast path: match patterns against the pre-discovered file list
+                // instead of performing filesystem glob traversals.
+                if let Some(matcher) = compile_auto_load_globset(&auto_patterns) {
+                    let pack_name = pack.name();
+                    // Pre-compile individual pattern matchers for labelling.
+                    let compiled_patterns: Vec<_> = auto_patterns
+                        .iter()
+                        .filter_map(|p| {
+                            let adj = if p.ends_with("/**") {
+                                format!("{p}/*")
+                            } else {
+                                p.clone()
+                            };
+                            Glob::new(&adj).ok().map(|g| (p.clone(), g.compile_matcher()))
+                        })
+                        .collect();
+
+                    for path in inventory {
+                        if !path.starts_with(workspace_root) {
+                            continue;
+                        }
+                        let relative = path.strip_prefix(workspace_root).unwrap_or(path);
+                        if matcher.is_match(relative) && is_tracked_source(path) {
+                            let pattern_label = compiled_patterns
+                                .iter()
+                                .find(|(_, m)| m.is_match(relative))
+                                .map(|(p, _)| p.as_str())
+                                .unwrap_or("auto-load");
+                            push_entrypoint(
+                                &mut entrypoints,
+                                &mut seen,
+                                path.clone(),
+                                EntrypointKind::FrameworkPack,
+                                profile,
+                                workspace_name,
+                                format!("framework-auto-load:{pack_name}:{pattern_label}"),
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Fallback: filesystem glob (used when no inventory is available).
+                for pattern in &auto_patterns {
+                    let adjusted = if pattern.ends_with("/**") {
+                        format!("{pattern}/*")
+                    } else {
+                        pattern.clone()
+                    };
+                    let glob_pattern = workspace_root.join(&adjusted).display().to_string();
+                    if let Ok(paths) = glob::glob(&glob_pattern) {
+                        for path in paths.flatten() {
+                            if is_tracked_source(&path) {
+                                push_entrypoint(
+                                    &mut entrypoints,
+                                    &mut seen,
+                                    path,
+                                    EntrypointKind::FrameworkPack,
+                                    profile,
+                                    workspace_name,
+                                    format!("framework-auto-load:{}:{pattern}", pack.name()),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -589,4 +642,20 @@ fn resolve_dist_to_source(workspace_root: &Path, file: &str) -> Option<PathBuf> 
     }
 
     None
+}
+
+/// Compile auto-loaded patterns into a single `GlobSet` for efficient matching.
+fn compile_auto_load_globset(patterns: &[String]) -> Option<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        let adjusted = if pattern.ends_with("/**") {
+            format!("{pattern}/*")
+        } else {
+            pattern.clone()
+        };
+        if let Ok(glob) = Glob::new(&adjusted) {
+            builder.add(glob);
+        }
+    }
+    builder.build().ok()
 }

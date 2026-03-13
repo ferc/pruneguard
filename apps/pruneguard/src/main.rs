@@ -64,6 +64,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                     no_cache: options.global.no_cache,
                     no_baseline: options.global.no_baseline,
                     require_full_scope: options.global.require_full_scope,
+                    ..Default::default()
                 },
             )?;
             handle_scan_report(scan, &options.global)
@@ -312,6 +313,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
         }
         cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd, options.global.format),
         cli::Command::Daemon(daemon_cmd) => run_daemon(&daemon_cmd),
+        cli::Command::Bench(bench_cmd) => run_bench(bench_cmd, options.global.format),
     }
 }
 
@@ -1540,6 +1542,66 @@ fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
             rt.block_on(async {
                 server.run().await.map_err(|err| miette::miette!("daemon error: {err}"))
             })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn run_bench(cmd: cli::BenchCommand, format: cli::OutputFormat) -> miette::Result<ExitCode> {
+    match cmd {
+        cli::BenchCommand::Replacement { corpus } => {
+            let corpus_root = corpus.unwrap_or_else(|| {
+                let manifest_dir = env!("CARGO_MANIFEST_DIR");
+                std::path::PathBuf::from(manifest_dir)
+                    .join("..")
+                    .join("..")
+                    .join("fixtures")
+                    .join("parity")
+            });
+
+            if !corpus_root.exists() {
+                miette::bail!("parity corpus not found at {}", corpus_root.display());
+            }
+
+            eprintln!("Evaluating parity corpus at {}...", corpus_root.display());
+            let result = pruneguard::evaluate_parity_corpus(&corpus_root)?;
+            let report =
+                pruneguard::parity_score_to_report(&result.score, &result.stale_deltas);
+
+            if matches!(format, cli::OutputFormat::Json) {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).expect("serialize report")
+                );
+            } else {
+                let text = pruneguard_analyzers::external_parity::format_external_parity_report(
+                    &result.score,
+                );
+                print!("{text}");
+
+                // Print stale deltas.
+                let stale: Vec<_> =
+                    result.stale_deltas.iter().filter(|d| d.is_stale).collect();
+                if !stale.is_empty() {
+                    println!();
+                    println!("Stale matrix entries:");
+                    for delta in &stale {
+                        let actual =
+                            if delta.corpus_passed { "passing" } else { "failing" };
+                        println!(
+                            "  {}/{}: matrix says {:?}, corpus says {}",
+                            delta.family, delta.name, delta.matrix_level, actual
+                        );
+                    }
+                }
+
+                // Print the canonical replacement score.
+                println!();
+                println!(
+                    "Replacement Score: {:.1}%",
+                    result.score.overall_pct
+                );
+            }
             Ok(ExitCode::SUCCESS)
         }
     }
