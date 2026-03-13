@@ -100,6 +100,9 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Regex (lightweight)
+regex-lite = "0.1"
+
 # Misc
 cow-utils = "0.1"
 compact_str = { version = "0.8", features = ["serde"] }

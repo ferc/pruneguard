@@ -1,0 +1,6 @@
+{
+  "family": "source-adapters",
+  "name": "vue-sfc-script",
+  "reference_tool": "dependency-cruiser",
+  "description": "Vue SFC script block imports are extracted and create graph edges"
+}

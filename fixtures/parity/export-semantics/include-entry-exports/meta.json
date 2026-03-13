@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "include-entry-exports",
+  "reference_tool": "knip",
+  "description": "includeEntryExports flag controls whether entrypoint exports are reported as unused"
+}

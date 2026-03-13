@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "jsdoc-import",
+  "reference_tool": "dependency-cruiser",
+  "description": "JSDoc @type {import('./types').Foo} creates a JsDocImport edge"
+}

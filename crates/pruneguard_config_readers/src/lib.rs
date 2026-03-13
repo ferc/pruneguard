@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-pub use adapters::{AdapterConfidence, AliasEntry, ConfigAdapter, ConfigInputs, extract_all_inputs};
+pub use adapters::{
+    AdapterConfidence, AliasEntry, ConfigAdapter, ConfigInputs, GeneratedEntrypoint,
+    LowConfidenceReason, RouteEntryGlob, SyntheticImportMap, SyntheticMapping,
+    detect_route_entrypoints, extract_all_inputs,
+};
 
 #[derive(Debug, Error)]
 pub enum ConfigReaderError {
@@ -629,6 +633,42 @@ pub fn read_workspace_configs(workspace_root: &Path) -> Vec<ConfigReadResult> {
         "webpack.config.ts",
         "webpack.config.cjs",
         "webpack.config.mjs",
+        // New adapters
+        "babel.config.js",
+        "babel.config.json",
+        ".babelrc",
+        ".babelrc.json",
+        "vue.config.js",
+        "vue.config.ts",
+        "tsr.config.json",
+        "vike.config.js",
+        "+config.ts",
+        "rslib.config.ts",
+        "rslib.config.js",
+        "playwright-ct.config.ts",
+        "playwright-ct.config.js",
+        "nitro.config.ts",
+        "nitro.config.js",
+        "react-router.config.ts",
+        "react-router.config.js",
+        "rsbuild.config.ts",
+        "rsbuild.config.js",
+        ".parcelrc",
+        "qwik.config.ts",
+        "qwik.config.js",
+        "rollup.config.js",
+        "rollup.config.mjs",
+        "rollup.config.ts",
+        "rspack.config.js",
+        "rspack.config.ts",
+        "gatsby-config.js",
+        "gatsby-config.ts",
+        "gatsby-node.js",
+        "gatsby-node.ts",
+        "gatsby-browser.js",
+        "gatsby-browser.ts",
+        "gatsby-ssr.js",
+        "gatsby-ssr.ts",
     ];
 
     let mut results = Vec::new();

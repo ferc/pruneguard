@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/service.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-member:Service.unusedMethod"],
+  "expected_no_findings": ["unused-member:Service.usedMethod"]
+}

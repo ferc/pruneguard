@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "webpack-config",
+  "reference_tool": "knip",
+  "description": "Webpack config aliases are resolved and create edges to aliased modules"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "enum-member-tracking",
+  "reference_tool": "knip",
+  "description": "Enum member usage is tracked and unused variants are reported"
+}

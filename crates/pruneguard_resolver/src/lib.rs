@@ -9,7 +9,22 @@ use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
 /// default extensions, condition names) so that the analysis cache is invalidated.
-pub const RESOLVER_LOGIC_VERSION: u32 = 5;
+pub const RESOLVER_LOGIC_VERSION: u32 = 6;
+
+/// Origin of a resolved alias, used for attribution in findings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AliasOrigin {
+    Manifest,
+    Tsconfig,
+    Webpack,
+    Babel,
+    Vite,
+    #[default]
+    FrameworkGenerated,
+    SubpathImports,
+    BrowserField,
+}
 
 /// Result of resolving a module specifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +38,8 @@ pub struct ResolvedModule {
     pub exports_subpath: Option<String>,
     /// Which condition branch was selected (e.g. "import", "require", "types", "default").
     pub exports_condition: Option<String>,
+    /// Origin of the alias that resolved this module, if any.
+    pub alias_origin: Option<AliasOrigin>,
 }
 
 /// Graph-facing kind of a resolved dependency edge.
@@ -72,6 +89,9 @@ pub struct ResolvedEdge {
     /// The condition branch that was selected (e.g. "import", "types", "default").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exports_condition: Option<String>,
+    /// Origin of the alias that resolved this edge, if applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias_origin: Option<AliasOrigin>,
     pub line: Option<u32>,
 }
 
@@ -140,8 +160,8 @@ pub struct ModuleResolver {
     /// Cached workspace package.json fallback main fields (`typings`, `types`, `module`).
     workspace_main_fields: FxHashMap<String, WorkspaceMainFields>,
     /// Aliases from framework config adapters (e.g. Vite resolve.alias, Webpack resolve.alias).
-    /// Each entry maps a prefix pattern to an absolute target directory.
-    config_aliases: Vec<(String, PathBuf)>,
+    /// Each entry maps a prefix pattern to an absolute target directory, along with its origin.
+    config_aliases: Vec<(String, PathBuf, AliasOrigin)>,
     /// External packages from framework config adapters.
     /// Specifiers matching these names are treated as external dependencies.
     config_externals: FxHashSet<String>,
@@ -237,19 +257,24 @@ impl ModuleResolver {
 
     /// Register aliases from framework config adapters (e.g. Vite resolve.alias).
     ///
-    /// Each alias maps a prefix (e.g. `@`) to a target directory (e.g. `./src`).
+    /// Each alias maps a prefix (e.g. `@`) to a target directory (e.g. `./src`),
+    /// along with an `AliasOrigin` indicating which config source it came from.
     /// Relative targets are resolved against `project_root`.
-    pub fn set_config_aliases(&mut self, aliases: Vec<(String, String)>, project_root: &Path) {
+    pub fn set_config_aliases(
+        &mut self,
+        aliases: Vec<(String, String, AliasOrigin)>,
+        project_root: &Path,
+    ) {
         self.config_aliases = aliases
             .into_iter()
-            .map(|(pattern, target)| {
+            .map(|(pattern, target, origin)| {
                 let abs = if Path::new(&target).is_absolute() {
                     PathBuf::from(&target)
                 } else {
                     let stripped = target.strip_prefix("./").unwrap_or(&target);
                     project_root.join(stripped)
                 };
-                (pattern, abs)
+                (pattern, abs, origin)
             })
             .collect();
     }
@@ -326,6 +351,7 @@ impl ModuleResolver {
                     via_exports,
                     exports_subpath,
                     exports_condition,
+                    alias_origin: None,
                 })
             }
             Err(err) => {
@@ -356,19 +382,25 @@ impl ModuleResolver {
 
     /// Try to resolve a specifier via config-derived aliases.
     ///
-    /// For each alias `(pattern, target_dir)`, if the specifier starts with
+    /// For each alias `(pattern, target_dir, origin)`, if the specifier starts with
     /// `pattern`, replace the prefix and resolve the remainder relative to the
-    /// target directory.
+    /// target directory.  The `AliasOrigin` is attached to the returned module.
     fn resolve_via_config_alias(&self, specifier: &str, _from: &Path) -> Option<ResolvedModule> {
-        for (pattern, target_dir) in &self.config_aliases {
+        for (pattern, target_dir, origin) in &self.config_aliases {
             // Exact match: `@` → `./src` means `@` resolves to `./src/index`
             if specifier == pattern {
-                return resolve_with_extensions(target_dir, "index");
+                return resolve_with_extensions(target_dir, "index").map(|mut m| {
+                    m.alias_origin = Some(*origin);
+                    m
+                });
             }
             // Prefix match: `@/utils` with alias `@` → `./src` means `./src/utils`
             let prefix_with_sep = format!("{pattern}/");
             if let Some(rest) = specifier.strip_prefix(&prefix_with_sep) {
-                return resolve_with_extensions(target_dir, rest);
+                return resolve_with_extensions(target_dir, rest).map(|mut m| {
+                    m.alias_origin = Some(*origin);
+                    m
+                });
             }
         }
         None
@@ -452,10 +484,14 @@ impl ModuleResolver {
                 via_exports: false,
                 exports_subpath: None,
                 exports_condition: None,
+                alias_origin: Some(AliasOrigin::SubpathImports),
             });
         }
 
-        resolve_with_extensions(workspace_root, relative)
+        resolve_with_extensions(workspace_root, relative).map(|mut m| {
+            m.alias_origin = Some(AliasOrigin::SubpathImports);
+            m
+        })
     }
 
     /// Try to resolve a specifier via a workspace package's `browser` field.
@@ -474,7 +510,10 @@ impl ModuleResolver {
         match browser {
             serde_json::Value::String(alt_main) if specifier == pkg_name.as_str() => {
                 let relative = alt_main.strip_prefix("./").unwrap_or(alt_main.as_str());
-                resolve_with_extensions(workspace_root, relative)
+                resolve_with_extensions(workspace_root, relative).map(|mut m| {
+                    m.alias_origin = Some(AliasOrigin::BrowserField);
+                    m
+                })
             }
             serde_json::Value::Object(map) => {
                 // Look for an exact match of the specifier in the browser map.
@@ -487,9 +526,13 @@ impl ModuleResolver {
                         via_exports: false,
                         exports_subpath: None,
                         exports_condition: None,
+                        alias_origin: Some(AliasOrigin::BrowserField),
                     })
                 } else {
-                    resolve_with_extensions(workspace_root, relative)
+                    resolve_with_extensions(workspace_root, relative).map(|mut m| {
+                        m.alias_origin = Some(AliasOrigin::BrowserField);
+                        m
+                    })
                 }
             }
             _ => None,
@@ -729,6 +772,7 @@ fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule>
             via_exports: false,
             exports_subpath: None,
             exports_condition: None,
+            alias_origin: None,
         });
     }
 
@@ -741,6 +785,7 @@ fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule>
                 via_exports: false,
                 exports_subpath: None,
                 exports_condition: None,
+                alias_origin: None,
             });
         }
     }
@@ -755,6 +800,7 @@ fn resolve_with_extensions(root: &Path, subpath: &str) -> Option<ResolvedModule>
                     via_exports: false,
                     exports_subpath: None,
                     exports_condition: None,
+                    alias_origin: None,
                 });
             }
         }
@@ -936,11 +982,13 @@ fn resolve_from_exports_value(
             via_exports: true,
             exports_subpath: Some(subpath.to_string()),
             exports_condition: None,
+            alias_origin: Some(AliasOrigin::Manifest),
         });
     }
     resolve_with_extensions(workspace_root, relative).map(|mut m| {
         m.via_exports = true;
         m.exports_subpath = Some(subpath.to_string());
+        m.alias_origin = Some(AliasOrigin::Manifest);
         m
     })
 }

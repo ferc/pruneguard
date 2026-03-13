@@ -1,0 +1,26 @@
+---
+title: Hello World
+layout: '../layouts/BlogLayout.astro'
+---
+
+import { greet } from '../utils';
+import CodeBlock from '../components/CodeBlock';
+
+export const metadata = { author: 'Test' };
+
+# Hello World
+
+The greeting is: {greet('MDX')}
+
+<CodeBlock language="js" />
+
+Here is an example of a component in a fenced code block (should be ignored):
+
+```jsx
+import Fake from './Fake';
+<FakeComponent />
+```
+
+And an inline code reference: `<InlineCodeComponent />` should also be ignored.
+
+<CallToAction variant="primary">Sign up now</CallToAction>

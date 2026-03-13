@@ -1,6 +1,7 @@
 pub mod boundaries;
 pub mod cycles;
 pub mod duplicate_exports;
+pub mod external_parity;
 pub mod impact;
 pub mod ownership;
 pub mod parity;
@@ -67,7 +68,7 @@ pub fn run_analyzers(
         config.analysis.ownership,
     ));
 
-    findings.extend(unused_members::analyze(build, config.analysis.unused_members));
+    findings.extend(unused_members::analyze(build, &config.analysis));
     findings.extend(duplicate_exports::analyze(build, config.analysis.duplicate_exports));
 
     // Apply ignore_issues rules to suppress matching findings.

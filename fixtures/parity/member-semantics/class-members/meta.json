@@ -1,0 +1,6 @@
+{
+  "family": "member-semantics",
+  "name": "class-members",
+  "reference_tool": "knip",
+  "description": "Class member usage is tracked and unused methods/properties are reported"
+}

@@ -1,9 +1,10 @@
 use compact_str::CompactString;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use pruneguard_config::AnalysisSeverity;
+use pruneguard_config::AnalysisConfig;
 use pruneguard_extract::ExportKind;
-use pruneguard_graph::{FileId, GraphBuildResult};
+use pruneguard_graph::{FileId, GraphBuildResult, MemberAccessKind, MemberNodeKind};
 use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
 use crate::{make_finding, severity};
@@ -16,19 +17,31 @@ use crate::{make_finding, severity};
 /// exports where some members are live and others are not.
 pub fn analyze(
     build: &GraphBuildResult,
-    level: AnalysisSeverity,
+    config: &AnalysisConfig,
 ) -> Vec<Finding> {
-    let Some(finding_severity) = severity(level) else {
+    let Some(finding_severity) = severity(config.unused_members) else {
         return Vec::new();
     };
 
     let mut findings = Vec::new();
 
+    // Compile ignore_members glob patterns.
+    let ignore_members_matcher = compile_member_globs(&config.ignore_members);
+
     // Build a set of member references keyed by (source_file, export_name, member_name).
+    // When member_write_only_is_unused is true, only count Read and ReadWrite accesses.
     let referenced_members: FxHashSet<(FileId, CompactString, CompactString)> = build
         .symbol_graph
         .member_refs
         .iter()
+        .filter(|r| {
+            if config.member_write_only_is_unused {
+                // Only count Read and ReadWrite accesses as "used".
+                matches!(r.access_kind, MemberAccessKind::Read | MemberAccessKind::ReadWrite)
+            } else {
+                true
+            }
+        })
         .map(|r| (r.source, r.export_name.clone(), r.member_name.clone()))
         .collect();
 
@@ -136,6 +149,21 @@ pub fn analyze(
             };
 
             for dead_member in &dead_members {
+                // --- Suppression checks ---
+
+                // 1. Setter suppression: setters are typically paired with getters
+                //    and don't need independent usage tracking.
+                if should_suppress_member(
+                    build,
+                    file_id,
+                    &export.name,
+                    dead_member,
+                    config,
+                    &ignore_members_matcher,
+                ) {
+                    continue;
+                }
+
                 let evidence = vec![Evidence {
                     kind: "unused-member".to_string(),
                     file: Some(relative_path.to_string_lossy().to_string()),
@@ -178,4 +206,82 @@ pub fn analyze(
     }
 
     findings
+}
+
+/// Check whether a dead member should be suppressed from reporting.
+fn should_suppress_member(
+    build: &GraphBuildResult,
+    file_id: FileId,
+    parent_export: &CompactString,
+    member_name: &CompactString,
+    config: &AnalysisConfig,
+    ignore_members_matcher: &Option<GlobSet>,
+) -> bool {
+    // Look up the member node to check kind and public tag.
+    let member_node = build
+        .symbol_graph
+        .member_exports
+        .iter()
+        .find(|m| {
+            m.file == file_id
+                && m.parent_export == *parent_export
+                && m.member_name == *member_name
+        });
+
+    if let Some(node) = member_node {
+        // 1. Setter suppression: setters are typically paired with getters
+        //    and don't need independent usage tracking.
+        if node.member_kind == MemberNodeKind::Setter {
+            return true;
+        }
+
+        // 2. @public tag suppression: members marked as public API should not
+        //    be reported as unused.
+        if node.is_public_tagged {
+            if config.public_tag_names.is_empty() {
+                // Default: any @public tag suppresses the finding.
+                return true;
+            }
+            // If specific tag names are configured, the extractor already
+            // checked against those tags, so is_public_tagged being true
+            // means it matched.
+            return true;
+        }
+    }
+
+    // 3. Ignore members matching glob patterns.
+    if let Some(matcher) = ignore_members_matcher {
+        if matcher.is_match(member_name.as_str()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Compile a list of glob patterns into a `GlobSet`, returning `None` if the
+/// list is empty or all patterns are invalid.
+fn compile_member_globs(patterns: &[String]) -> Option<GlobSet> {
+    if patterns.is_empty() {
+        return None;
+    }
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        match Glob::new(pattern) {
+            Ok(glob) => {
+                builder.add(glob);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    pattern,
+                    %err,
+                    "invalid glob in ignoreMembers config, skipping pattern"
+                );
+            }
+        }
+    }
+    match builder.build() {
+        Ok(set) if !set.is_empty() => Some(set),
+        _ => None,
+    }
 }

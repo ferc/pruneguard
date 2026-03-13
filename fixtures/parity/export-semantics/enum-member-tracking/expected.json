@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/status.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-member:Status.Archived"],
+  "expected_no_findings": ["unused-member:Status.Active", "unused-member:Status.Inactive"]
+}

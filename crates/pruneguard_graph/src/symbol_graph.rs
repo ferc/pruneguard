@@ -18,6 +18,8 @@ pub struct SymbolGraph {
     pub same_file_refs: Vec<SameFileRef>,
     /// Individual members of exported classes/enums/namespaces.
     pub member_exports: Vec<MemberExportNode>,
+    /// Namespace alias chains (destructured namespace members).
+    pub namespace_alias_chains: Vec<NamespaceAliasChain>,
     /// Next export ID counter.
     next_export_id: u32,
 }
@@ -77,6 +79,22 @@ pub struct MemberRef {
     pub member_name: CompactString,
     /// Whether this is a type-only access.
     pub is_type: bool,
+    /// Whether this is a read access, write access, or both.
+    pub access_kind: MemberAccessKind,
+}
+
+/// The kind of access to a member (read, write, or both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberAccessKind {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+impl Default for MemberAccessKind {
+    fn default() -> Self {
+        Self::Read
+    }
 }
 
 /// Tracks when an export is referenced within its own file (not via import).
@@ -101,6 +119,39 @@ pub struct MemberExportNode {
     pub file: FileId,
     /// Whether this member is live (reachable).
     pub is_live: bool,
+    /// The kind of member (method, property, getter, setter, enum variant, etc.).
+    pub member_kind: MemberNodeKind,
+    /// Whether this member has a @public JSDoc tag.
+    pub is_public_tagged: bool,
+}
+
+/// The kind of a member within an exported class, enum, or namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MemberNodeKind {
+    #[default]
+    Property,
+    Method,
+    Getter,
+    Setter,
+    EnumVariant,
+    StaticProperty,
+    StaticMethod,
+    NamespaceMember,
+}
+
+/// Tracks when a namespace import is destructured or aliased.
+#[derive(Debug, Clone)]
+pub struct NamespaceAliasChain {
+    /// File containing the destructuring/alias.
+    pub file: FileId,
+    /// Source file of the namespace import.
+    pub namespace_source: FileId,
+    /// The namespace export name (often the module's own name or `*`).
+    pub namespace_export: CompactString,
+    /// Local binding name after destructuring/alias.
+    pub local_name: CompactString,
+    /// Member name from the namespace.
+    pub member_name: CompactString,
 }
 
 impl SymbolGraph {
@@ -178,8 +229,16 @@ impl SymbolGraph {
         export_name: CompactString,
         member_name: CompactString,
         is_type: bool,
+        access_kind: MemberAccessKind,
     ) {
-        self.member_refs.push(MemberRef { accessor, source, export_name, member_name, is_type });
+        self.member_refs.push(MemberRef {
+            accessor,
+            source,
+            export_name,
+            member_name,
+            is_type,
+            access_kind,
+        });
     }
 
     /// Record a same-file reference to an export.
@@ -198,12 +257,34 @@ impl SymbolGraph {
         file: FileId,
         parent_export: CompactString,
         member_name: CompactString,
+        member_kind: MemberNodeKind,
+        is_public_tagged: bool,
     ) {
         self.member_exports.push(MemberExportNode {
             parent_export,
             member_name,
             file,
             is_live: false,
+            member_kind,
+            is_public_tagged,
+        });
+    }
+
+    /// Record a namespace alias chain (destructured namespace member).
+    pub fn add_namespace_alias_chain(
+        &mut self,
+        file: FileId,
+        namespace_source: FileId,
+        namespace_export: CompactString,
+        local_name: CompactString,
+        member_name: CompactString,
+    ) {
+        self.namespace_alias_chains.push(NamespaceAliasChain {
+            file,
+            namespace_source,
+            namespace_export,
+            local_name,
+            member_name,
         });
     }
 
@@ -261,6 +342,7 @@ impl SymbolGraph {
     ///    reexporter, mark the original in the source as live (follow chains).
     /// 3. For each member ref, mark the specific member as live.
     /// 4. For each same-file ref, mark the export as live.
+    /// 5. For each namespace alias chain, mark the corresponding member as live.
     pub fn propagate_liveness(&mut self) {
         // Step 1: import edges -> mark target exports live.
         let import_targets: Vec<(FileId, CompactString)> = self
@@ -344,6 +426,28 @@ impl SymbolGraph {
             .collect();
         for (file, name) in same_file_targets {
             if let Some(node) = self.exports.get_mut(&(file, name)) {
+                node.is_live = true;
+            }
+        }
+
+        // Step 5: namespace alias chains -> mark corresponding members live.
+        // When `const { foo } = utils` where `utils` is a namespace import,
+        // mark `foo` as a live member of the namespace source.
+        let alias_targets: Vec<(FileId, CompactString, CompactString)> = self
+            .namespace_alias_chains
+            .iter()
+            .map(|a| (a.namespace_source, a.namespace_export.clone(), a.member_name.clone()))
+            .collect();
+        for (source_file, parent, member) in alias_targets {
+            // Mark the member export as live.
+            for m in &mut self.member_exports {
+                if m.file == source_file && m.parent_export == parent && m.member_name == member {
+                    m.is_live = true;
+                }
+            }
+            // Also mark the corresponding source export as live (the member
+            // itself may be a top-level export in the source file).
+            if let Some(node) = self.exports.get_mut(&(source_file, member.clone())) {
                 node.is_live = true;
             }
         }

@@ -23,6 +23,9 @@ pub struct AnalysisReport {
     pub entrypoints: Vec<EntrypointInfo>,
     /// Performance statistics.
     pub stats: Stats,
+    /// External parity corpus score, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parity_score: Option<ExternalParityReport>,
 }
 
 /// Summary counts for a report.
@@ -494,6 +497,15 @@ pub struct Stats {
     /// Framework confidence breakdown.
     #[serde(default)]
     pub framework_confidence_counts: FrameworkConfidenceCounts,
+    /// Names of unsupported frameworks detected in the workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsupported_frameworks: Vec<String>,
+    /// External parity score percentage (0-100), if computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_parity_pct: Option<f64>,
+    /// External parity score summary, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_parity: Option<ExternalParitySummary>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -885,6 +897,96 @@ impl SuggestRulesReport {
     pub fn json_schema() -> schemars::schema::RootSchema {
         schemars::schema_for!(Self)
     }
+}
+
+/// External parity report from the fixture-derived corpus.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalParityReport {
+    /// Total number of parity test cases.
+    pub total_cases: usize,
+    /// Number of fully passing cases.
+    pub passed_cases: usize,
+    /// Total number of individual checks across all cases.
+    pub total_checks: usize,
+    /// Number of individual checks that passed.
+    pub passed_checks: usize,
+    /// Overall parity percentage (0-100).
+    pub overall_pct: f64,
+    /// Per-family parity breakdown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_family: Vec<ExternalParityFamilyScore>,
+    /// Per-reference-tool parity breakdown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_reference_tool: Vec<ExternalParityToolScore>,
+    /// Individual case results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub case_results: Vec<ExternalParityCaseResult>,
+    /// Stale matrix deltas (features where the hand-authored tracker disagrees with reality).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_deltas: Vec<ParityStaleDelta>,
+}
+
+/// A stale delta where the hand-authored parity matrix disagrees with actual test results.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ParityStaleDelta {
+    /// Feature or test case name.
+    pub feature: String,
+    /// Level claimed in the parity matrix.
+    pub matrix_level: String,
+    /// Actual level observed from test results.
+    pub actual_level: String,
+}
+
+/// Per-family score in the external parity report.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalParityFamilyScore {
+    pub family: String,
+    pub total_cases: usize,
+    pub passed_cases: usize,
+    pub pct: f64,
+}
+
+/// Per-tool score in the external parity report.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalParityToolScore {
+    pub tool: String,
+    pub total_cases: usize,
+    pub passed_cases: usize,
+    pub pct: f64,
+}
+
+/// Result of a single parity case in the external report.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalParityCaseResult {
+    pub family: String,
+    pub name: String,
+    pub reference_tool: String,
+    pub passed: bool,
+    pub total_checks: usize,
+    pub passed_checks: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failures: Vec<String>,
+}
+
+/// Summary of external parity score for the stats section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalParitySummary {
+    /// Overall parity percentage (0-100).
+    pub overall_pct: f64,
+    /// Total cases evaluated.
+    pub total_cases: usize,
+    /// Cases that fully passed.
+    pub passed_cases: usize,
+    /// Total individual checks.
+    pub total_checks: usize,
+    /// Individual checks that passed.
+    pub passed_checks: usize,
 }
 
 /// Daemon status report for querying daemon health from JS or CLI.

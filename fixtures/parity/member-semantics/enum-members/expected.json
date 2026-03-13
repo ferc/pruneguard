@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/color.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-member:Color.Yellow"],
+  "expected_no_findings": ["unused-member:Color.Red", "unused-member:Color.Blue"]
+}

@@ -29,6 +29,7 @@ pruneguard_cache = { workspace = true }
 pruneguard_config_readers = { workspace = true }
 
 globset = { workspace = true }
+regex-lite = { workspace = true }
 miette = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }

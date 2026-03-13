@@ -242,7 +242,7 @@ pub enum AnalysisSeverity {
     Error,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisConfig {
     #[serde(default)]
@@ -274,6 +274,42 @@ pub struct AnalysisConfig {
     /// reported as unused.
     #[serde(default)]
     pub ignore_exports_used_in_file: bool,
+
+    /// Glob patterns for member names to ignore in unused-member analysis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_members: Vec<String>,
+
+    /// JSDoc tag names that mark a member as public/intentionally exported.
+    /// When empty, `@public` is used as the default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_tag_names: Vec<String>,
+
+    /// Whether write-only member references count as "used".
+    /// When true (default), a member that is only written to (e.g. `obj.field = x`)
+    /// but never read is reported as unused.
+    #[serde(default = "default_true")]
+    pub member_write_only_is_unused: bool,
+}
+
+impl Default for AnalysisConfig {
+    fn default() -> Self {
+        Self {
+            unused_exports: AnalysisSeverity::default(),
+            unused_files: AnalysisSeverity::default(),
+            unused_packages: AnalysisSeverity::default(),
+            unused_dependencies: AnalysisSeverity::default(),
+            cycles: AnalysisSeverity::default(),
+            boundaries: AnalysisSeverity::default(),
+            ownership: AnalysisSeverity::default(),
+            impact: AnalysisSeverity::default(),
+            unused_members: AnalysisSeverity::default(),
+            duplicate_exports: AnalysisSeverity::default(),
+            ignore_exports_used_in_file: false,
+            ignore_members: Vec::new(),
+            public_tag_names: Vec::new(),
+            member_write_only_is_unused: true,
+        }
+    }
 }
 
 /// Rule for suppressing specific finding kinds.
@@ -422,6 +458,34 @@ pub struct FrameworksConfig {
     pub vitepress: Option<FrameworkToggle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docusaurus: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vue: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub svelte: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub babel: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tanstack_router: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vike: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rslib: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playwright_ct: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playwright_test: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nitro: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub react_router: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rsbuild: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parcel: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qwik: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_dev: Option<FrameworkToggle>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

@@ -1,0 +1,26 @@
+---
+import { greet } from '../utils';
+import MyVue from '../components/MyVue.vue';
+
+const title = greet('Astro');
+const items = ['one', 'two', 'three'];
+---
+
+<html lang="en">
+<head>
+  <title>{title}</title>
+</head>
+<body>
+  <h1>{title}</h1>
+  <MyVue client:load />
+  <HeroSection />
+  <ul>
+    {items.map((item) => <li>{item}</li>)}
+  </ul>
+
+  <script>
+    import { greet } from '../utils';
+    console.log(greet('inline'));
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "import-meta-glob-array",
+  "reference_tool": "knip",
+  "description": "Array form import.meta.glob with multiple patterns creates edges to all matched files"
+}

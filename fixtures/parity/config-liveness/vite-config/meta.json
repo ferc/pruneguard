@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "vite-config",
+  "reference_tool": "knip",
+  "description": "Vite config aliases are resolved and create edges to aliased modules"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "triple-slash-file",
+  "reference_tool": "dependency-cruiser",
+  "description": "Triple-slash reference path directive creates a TripleSlashFile edge"
+}

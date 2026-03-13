@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "namespace-member-refs",
+  "reference_tool": "knip",
+  "description": "Namespace member references are tracked in the symbol graph"
+}

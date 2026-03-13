@@ -1,0 +1,6 @@
+{
+  "family": "source-adapters",
+  "name": "svelte-script",
+  "reference_tool": "dependency-cruiser",
+  "description": "Svelte component script block imports are extracted and create graph edges"
+}

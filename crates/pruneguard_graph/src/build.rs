@@ -10,13 +10,13 @@ use pruneguard_cache::{
     PathIndexEntry,
 };
 use pruneguard_config::{EntrypointsConfig, PruneguardConfig};
-use pruneguard_config_readers::{extract_all_inputs, read_workspace_configs};
+use pruneguard_config_readers::{detect_route_entrypoints, extract_all_inputs, read_workspace_configs};
 use pruneguard_discovery::{DiscoveryResult, discover};
 use pruneguard_entrypoints::{
     EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, EntrypointSurfaceKind,
     detect_entrypoints,
 };
-use pruneguard_extract::{AdapterOutput, ExtractedFile, extract_file_facts};
+use pruneguard_extract::{AdapterOutput, ExtractedFile, MemberKind, extract_file_facts};
 use pruneguard_frameworks::built_in_packs;
 use pruneguard_fs::{FileKind, FileRole, is_tracked_source};
 use pruneguard_report::{
@@ -29,7 +29,7 @@ use pruneguard_resolver::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{ModuleEdge, ModuleGraph, SymbolGraph};
+use crate::{MemberNodeKind, ModuleEdge, ModuleGraph, SymbolGraph};
 
 /// Fully built repository graph and its supporting inventories.
 #[derive(Debug)]
@@ -133,14 +133,20 @@ pub fn build_graph_with_options(
     for workspace in discovery.workspaces.values() {
         all_workspace_configs.extend(read_workspace_configs(&workspace.root));
     }
-    let config_inputs = extract_all_inputs(&all_workspace_configs);
+    let mut config_inputs = extract_all_inputs(&all_workspace_configs);
+
+    // --- Phase 1b: Detect route-generated entrypoints from package.json deps ---
+    for workspace in discovery.workspaces.values() {
+        let route_inputs = detect_route_entrypoints(&workspace.root);
+        config_inputs.merge(route_inputs);
+    }
 
     // Feed config-derived aliases to the resolver.
     if !config_inputs.aliases.is_empty() {
         let aliases = config_inputs
             .aliases
             .iter()
-            .map(|a| (a.pattern.clone(), a.target.clone()))
+            .map(|a| (a.pattern.clone(), a.target.clone(), a.origin))
             .collect();
         resolver.set_config_aliases(aliases, &discovery.project_root);
     }
@@ -151,8 +157,13 @@ pub fn build_graph_with_options(
     }
 
     // Feed config-derived ignore_unresolved patterns to the resolver.
-    if !config_inputs.ignore_unresolved.is_empty() {
-        resolver.set_ignore_unresolved(config_inputs.ignore_unresolved.clone());
+    // Also include virtual module prefixes.
+    let mut ignore_patterns = config_inputs.ignore_unresolved.clone();
+    ignore_patterns.extend(config_inputs.virtual_module_prefixes.clone());
+    ignore_patterns.sort();
+    ignore_patterns.dedup();
+    if !ignore_patterns.is_empty() {
+        resolver.set_ignore_unresolved(ignore_patterns);
     }
 
     let base_hashes = CacheHashes {
@@ -439,6 +450,9 @@ pub fn build_graph_with_options(
         compatibility_warnings: Vec::new(),
         strict_trust_applied: false,
         framework_confidence_counts: pruneguard_report::FrameworkConfidenceCounts::default(),
+        unsupported_frameworks: Vec::new(),
+        external_parity_pct: None,
+        external_parity: None,
     };
 
     // Collect files that were pulled in via glob/context expansion for confidence demotion.
@@ -484,9 +498,11 @@ fn populate_extracted_file(
 
     let source = String::from_utf8(source_bytes).into_diagnostic()?;
     match extract_file_facts(&extracted_file.file.path, &source) {
-        Ok(AdapterOutput { facts, synthetic_imports, synthetic_reexports, diagnostics }) => {
+        Ok(AdapterOutput { facts, synthetic_imports, synthetic_reexports, diagnostics, .. }) => {
             extracted_file.external_dependencies.clear();
-            extracted_file.parse_diagnostics.extend(diagnostics);
+            extracted_file.parse_diagnostics.extend(
+                diagnostics.iter().map(|d| d.message.clone()),
+            );
 
             for import in &facts.imports {
                 let edge_kind = if import.is_side_effect {
@@ -567,6 +583,7 @@ fn populate_extracted_file(
                             expand_glob_into_edges(
                                 extracted_file,
                                 glob_pattern,
+                                &[],
                                 *line,
                                 resolver,
                                 repo_files,
@@ -617,12 +634,13 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::RequireContext { directory, recursive, line } => {
+                    pruneguard_extract::DependencyPattern::RequireContext { directory, recursive, regex_filter, line } => {
                         // Expand require.context directory against tracked source inventory.
                         expand_require_context_into_edges(
                             extracted_file,
                             directory,
                             *recursive,
+                            regex_filter.as_deref(),
                             *line,
                             resolver,
                             repo_files,
@@ -649,11 +667,20 @@ fn populate_extracted_file(
                         ));
                     }
                     pruneguard_extract::DependencyPattern::ImportMetaGlobArray { patterns, line } => {
+                        // Separate positive patterns from negation patterns (prefixed with `!`).
+                        let negations: Vec<&str> = patterns.iter()
+                            .filter(|p| p.starts_with('!'))
+                            .map(|p| p.as_str())
+                            .collect();
                         for glob_pattern in patterns {
+                            if glob_pattern.starts_with('!') {
+                                continue; // Negations are applied as filters, not expanded.
+                            }
                             if glob_pattern.contains('*') || glob_pattern.contains('?') {
                                 expand_glob_into_edges(
                                     extracted_file,
                                     glob_pattern,
+                                    &negations,
                                     *line,
                                     resolver,
                                     repo_files,
@@ -743,6 +770,7 @@ fn resolve_edge(
             via_exports: module.via_exports,
             exports_subpath: module.exports_subpath,
             exports_condition: module.exports_condition,
+            alias_origin: module.alias_origin,
             line: Some(line),
         },
         Ok(module) => ResolvedEdge {
@@ -757,6 +785,7 @@ fn resolve_edge(
             via_exports: module.via_exports,
             exports_subpath: module.exports_subpath,
             exports_condition: module.exports_condition,
+            alias_origin: module.alias_origin,
             line: Some(line),
         },
         Err(err) => ResolvedEdge {
@@ -774,6 +803,7 @@ fn resolve_edge(
             via_exports: false,
             exports_subpath: None,
             exports_condition: None,
+            alias_origin: None,
             line: Some(line),
         },
     }
@@ -1196,10 +1226,22 @@ fn add_symbol_edges(
 
     // Register member exports (class methods, enum variants, namespace members).
     for member in &facts.member_exports {
+        let member_kind = match member.member_kind {
+            MemberKind::Method => MemberNodeKind::Method,
+            MemberKind::Property => MemberNodeKind::Property,
+            MemberKind::EnumVariant => MemberNodeKind::EnumVariant,
+            MemberKind::NamespaceMember => MemberNodeKind::NamespaceMember,
+            MemberKind::StaticMethod => MemberNodeKind::StaticMethod,
+            MemberKind::StaticProperty => MemberNodeKind::StaticProperty,
+            MemberKind::Getter => MemberNodeKind::Getter,
+            MemberKind::Setter => MemberNodeKind::Setter,
+        };
         symbol_graph.add_member_export(
             importer_id,
             member.parent_name.clone(),
             member.member_name.clone(),
+            member_kind,
+            member.is_public_tagged,
         );
     }
 
@@ -1236,10 +1278,13 @@ const MAX_EXPANDED_EDGES: usize = 500;
 /// Expand an `import.meta.glob` wildcard pattern against the tracked source inventory.
 ///
 /// For each file in `repo_files` that matches the glob, a `ResolvedEdgeKind::ImportMetaGlob`
-/// edge is added.  Negation patterns (starting with `!`) are skipped.
+/// edge is added. Negation patterns (starting with `!`) in `negations` are used to filter
+/// out matched files. When the result set is truncated at `MAX_EXPANDED_EDGES`, a diagnostic
+/// is emitted to note the truncation.
 fn expand_glob_into_edges(
     extracted_file: &mut ExtractedFile,
     pattern: &str,
+    negations: &[&str],
     line: u32,
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
@@ -1256,34 +1301,75 @@ fn expand_glob_into_edges(
     };
     let matcher = glob.compile_matcher();
 
+    // Build a GlobSet from negation patterns for efficient filtering.
+    let negation_set = if negations.is_empty() {
+        None
+    } else {
+        let mut builder = GlobSetBuilder::new();
+        for neg in negations {
+            // Strip the leading `!` to get the raw glob pattern.
+            let raw = neg.strip_prefix('!').unwrap_or(neg);
+            if let Ok(g) = Glob::new(raw) {
+                builder.add(g);
+            }
+        }
+        builder.build().ok()
+    };
+
     let mut count = 0;
+    let mut truncated = false;
     for file_path in repo_files {
         if count >= MAX_EXPANDED_EDGES {
+            truncated = true;
             break;
         }
         // Match against the relative path from the source file's directory.
         let Ok(relative) = file_path.strip_prefix(source_dir) else {
             continue;
         };
-        if matcher.is_match(relative) {
-            extracted_file.resolved_imports.push(resolve_edge(
-                resolver,
-                &extracted_file.file.path,
-                &file_path.to_string_lossy(),
-                ResolvedEdgeKind::ImportMetaGlob,
-                line,
-                repo_files,
-            ));
-            count += 1;
+        if !matcher.is_match(relative) {
+            continue;
         }
+        // Apply negation filter: if the file matches any negation glob, skip it.
+        if let Some(ref neg_set) = negation_set {
+            if neg_set.is_match(relative) {
+                continue;
+            }
+        }
+        extracted_file.resolved_imports.push(resolve_edge(
+            resolver,
+            &extracted_file.file.path,
+            &file_path.to_string_lossy(),
+            ResolvedEdgeKind::ImportMetaGlob,
+            line,
+            repo_files,
+        ));
+        count += 1;
+    }
+
+    if truncated {
+        tracing::warn!(
+            file = %extracted_file.file.path.display(),
+            pattern,
+            cap = MAX_EXPANDED_EDGES,
+            "import.meta.glob expansion truncated at {MAX_EXPANDED_EDGES} edges; \
+             some matching files may not be tracked as dependencies",
+        );
+        extracted_file.parse_diagnostics.push(format!(
+            "import.meta.glob pattern `{pattern}` expanded to >{MAX_EXPANDED_EDGES} files; \
+             results truncated (confidence lowered)",
+        ));
     }
 }
 
-/// Expand a `require.context(directory, recursive)` against the tracked source inventory.
+/// Expand a `require.context(directory, recursive, regex_filter)` against the tracked source
+/// inventory. When `regex_filter` is provided, only files whose path (relative to the context
+/// directory) matches the regex are included.
 fn expand_require_context_into_edges(
     extracted_file: &mut ExtractedFile,
     directory: &str,
     recursive: bool,
+    regex_filter: Option<&str>,
     line: u32,
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
@@ -1296,20 +1382,40 @@ fn expand_require_context_into_edges(
         source_dir.join(stripped)
     };
 
+    // Pre-compile the regex filter if one was provided.
+    let compiled_regex = regex_filter.and_then(|pat| {
+        globset::Glob::new(&format!("*{pat}*")).ok().map(|g| g.compile_matcher())
+    });
+    // Also attempt a true regex compilation for precise JS-regex semantics.
+    let true_regex = regex_filter.and_then(|pat| {
+        regex_lite::Regex::new(pat).ok()
+    });
+
     let mut count = 0;
+    let mut truncated = false;
     for file_path in repo_files {
         if count >= MAX_EXPANDED_EDGES {
+            truncated = true;
             break;
         }
         if !file_path.starts_with(&context_dir) {
             continue;
         }
+        let Ok(relative) = file_path.strip_prefix(&context_dir) else {
+            continue;
+        };
         // Non-recursive: only direct children.
-        if !recursive {
-            let Ok(relative) = file_path.strip_prefix(&context_dir) else {
+        if !recursive && relative.components().count() > 1 {
+            continue;
+        }
+        // Apply regex filter against the relative path.
+        if let Some(ref re) = true_regex {
+            let rel_str = relative.to_string_lossy();
+            if !re.is_match(&rel_str) {
                 continue;
-            };
-            if relative.components().count() > 1 {
+            }
+        } else if let Some(ref glob_matcher) = compiled_regex {
+            if !glob_matcher.is_match(relative) {
                 continue;
             }
         }
@@ -1322,6 +1428,20 @@ fn expand_require_context_into_edges(
             repo_files,
         ));
         count += 1;
+    }
+
+    if truncated {
+        tracing::warn!(
+            file = %extracted_file.file.path.display(),
+            directory,
+            cap = MAX_EXPANDED_EDGES,
+            "require.context expansion truncated at {MAX_EXPANDED_EDGES} edges; \
+             some matching files may not be tracked as dependencies",
+        );
+        extracted_file.parse_diagnostics.push(format!(
+            "require.context(`{directory}`) expanded to >{MAX_EXPANDED_EDGES} files; \
+             results truncated (confidence lowered)",
+        ));
     }
 }
 
@@ -1469,6 +1589,80 @@ fn inject_config_entrypoints(
                     .unwrap_or("config-adapter")
                     .to_string(),
             });
+        }
+    }
+
+    // Generated entrypoints (e.g. from Nuxt .d.ts files).
+    for generated in &config_inputs.generated_entrypoints {
+        let abs = if generated.path.is_absolute() {
+            generated.path.clone()
+        } else {
+            project_root.join(&generated.path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::FrameworkConvention,
+                profile: EntrypointProfile::Both,
+                workspace: None,
+                source: format!("generated:{}", generated.kind),
+            });
+        }
+    }
+
+    // Route entry globs (e.g. TanStack Router, React Router, Vike, Qwik City).
+    for glob_entry in &config_inputs.route_entry_globs {
+        if let Ok(glob) = Glob::new(&glob_entry.pattern) {
+            let matcher = glob.compile_matcher();
+            // Walk the project looking for matching files.
+            for workspace in discovery.workspaces.values() {
+                let walk_root = &workspace.root;
+                if let Ok(read_dir) = std::fs::read_dir(walk_root) {
+                    let mut files_to_check: Vec<PathBuf> = Vec::new();
+                    collect_files_recursive(walk_root, &mut files_to_check, 5);
+                    for file_path in files_to_check {
+                        let relative = file_path
+                            .strip_prefix(walk_root)
+                            .unwrap_or(&file_path);
+                        if matcher.is_match(relative) && !existing.contains(&file_path) {
+                            entrypoint_seeds.push(EntrypointSeed {
+                                path: file_path,
+                                kind: SeedKind::FrameworkPack,
+                                surface_kind: EntrypointSurfaceKind::FrameworkConvention,
+                                profile: EntrypointProfile::Production,
+                                workspace: Some(workspace.name.clone()),
+                                source: format!("route-glob:{}", glob_entry.framework),
+                            });
+                        }
+                    }
+                    let _ = read_dir; // Silence unused binding.
+                }
+            }
+        }
+    }
+}
+
+/// Recursively collect file paths under `dir`, up to `max_depth` levels deep.
+fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>, max_depth: u32) {
+    if max_depth == 0 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip hidden directories and node_modules
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with('.') || name == "node_modules" {
+                    continue;
+                }
+            }
+            collect_files_recursive(&path, out, max_depth - 1);
+        } else {
+            out.push(path);
         }
     }
 }

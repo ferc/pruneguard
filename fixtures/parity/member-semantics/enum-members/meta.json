@@ -1,0 +1,6 @@
+{
+  "family": "member-semantics",
+  "name": "enum-members",
+  "reference_tool": "knip",
+  "description": "Enum variant usage is tracked and unused variants are reported"
+}

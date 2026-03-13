@@ -1,1 +1,8 @@
-{ "name": "compat-test", "private": true, "dependencies": { "gatsby": "^5.0.0" } }
+{
+  "name": "compat-test",
+  "private": true,
+  "dependencies": {
+    "gatsby": "^5.0.0",
+    "@redwoodjs/core": "^5.0.0"
+  }
+}

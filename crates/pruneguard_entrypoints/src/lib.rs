@@ -114,7 +114,7 @@ fn derive_surface_kind(kind: EntrypointKind, source: &str) -> EntrypointSurfaceK
                 .and_then(|rest| rest.split(':').next())
                 .unwrap_or("");
             match fw_name {
-                "vitest" | "jest" | "playwright" | "cypress" => EntrypointSurfaceKind::Test,
+                "vitest" | "jest" | "playwright" | "playwright-ct" | "playwright-test" | "cypress" => EntrypointSurfaceKind::Test,
                 "storybook" => EntrypointSurfaceKind::Story,
                 _ => EntrypointSurfaceKind::FrameworkConvention,
             }
@@ -348,6 +348,20 @@ fn framework_enabled(
         "cypress" => frameworks.cypress,
         "vitepress" => frameworks.vitepress,
         "docusaurus" => frameworks.docusaurus,
+        "vue" => frameworks.vue,
+        "svelte" => frameworks.svelte,
+        "babel" => frameworks.babel,
+        "tanstack-router" => frameworks.tanstack_router,
+        "vike" => frameworks.vike,
+        "rslib" => frameworks.rslib,
+        "playwright-ct" => frameworks.playwright_ct,
+        "playwright-test" => frameworks.playwright_test,
+        "nitro" => frameworks.nitro,
+        "react-router" => frameworks.react_router,
+        "rsbuild" => frameworks.rsbuild,
+        "parcel" => frameworks.parcel,
+        "qwik" => frameworks.qwik,
+        "trigger-dev" => frameworks.trigger_dev,
         _ => None, // generic packs (file-routing, root-config) are auto-detect only
     });
 

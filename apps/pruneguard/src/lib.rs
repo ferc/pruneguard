@@ -130,14 +130,19 @@ pub fn scan_with_options(
         build.entrypoints.iter().filter(|ep| ep.heuristic.unwrap_or(false)).count();
     report.stats.compatibility_warnings =
         compat.warnings.iter().map(|w| w.message.clone()).collect();
+    report.stats.strict_trust_applied = compat.should_apply_strict_trust();
+    report.stats.unsupported_frameworks = compat.unsupported_framework_names();
+    report.stats.framework_confidence_counts.unsupported = compat.unsupported_signals.len();
 
-    // Annotate findings with trust notes and framework context.
+    // Apply trust downgrades: lower confidence and attach trust notes to
+    // findings affected by unsupported/heuristic frameworks.
+    compat.apply_trust_downgrades(&mut report.findings);
+
+    // Attach compat-level framework context (unsupported/heuristic signals).
+    compat.attach_framework_context(&mut report.findings);
+
+    // Also attach per-entrypoint framework context from the build.
     for finding in &mut report.findings {
-        let notes = compat.trust_notes_for_path(&finding.subject);
-        if !notes.is_empty() {
-            finding.trust_notes = Some(notes);
-        }
-
         let fw_context: Vec<String> =
             build
                 .entrypoints
@@ -157,7 +162,8 @@ pub fn scan_with_options(
                 .into_iter()
                 .collect();
         if !fw_context.is_empty() {
-            finding.framework_context = Some(fw_context);
+            let existing = finding.framework_context.get_or_insert_with(Vec::new);
+            existing.extend(fw_context);
         }
     }
 
@@ -652,7 +658,12 @@ fn compute_compat_report_from_build(
     all_detections.retain(|d| seen_names.insert(d.name));
 
     let manifest = root_manifest.cloned().unwrap_or_default();
-    pruneguard_compat::CompatibilityReport::compute(&all_detections, &all_trust_notes, &manifest)
+    pruneguard_compat::CompatibilityReport::compute(
+        &all_detections,
+        &all_trust_notes,
+        &manifest,
+        Some(&build.discovery.project_root),
+    )
 }
 
 /// Review a branch for CI/agent gating.
@@ -1914,6 +1925,7 @@ fn report_from_build(
         findings,
         entrypoints: build.entrypoints.clone(),
         stats: build.stats.clone(),
+        parity_score: None,
     }
 }
 

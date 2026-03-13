@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "import-equals",
+  "reference_tool": "dependency-cruiser",
+  "description": "import foo = require('bar') creates a resolved ImportEquals edge"
+}

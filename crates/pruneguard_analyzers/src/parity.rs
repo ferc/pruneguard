@@ -528,3 +528,69 @@ pub fn format_parity_table() -> String {
 
     out
 }
+
+/// Format the parity table with an optional external corpus score appended.
+pub fn format_parity_table_with_external(
+    external_score: Option<&crate::external_parity::ExternalParityScore>,
+) -> String {
+    let mut out = format_parity_table();
+
+    if let Some(score) = external_score {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "--- External Parity Corpus ---");
+        out.push_str(&crate::external_parity::format_external_parity_report(score));
+    }
+
+    out
+}
+
+/// A delta entry comparing the hand-authored matrix against external corpus results.
+#[derive(Debug)]
+pub struct StaleDelta {
+    pub family: String,
+    pub name: String,
+    pub matrix_level: SupportLevel,
+    pub corpus_passed: bool,
+    pub is_stale: bool,
+}
+
+/// Compare the hand-authored parity matrix against external corpus results.
+///
+/// Returns entries where the matrix claims `Supported` but the corpus case
+/// failed, or where the matrix claims `Unsupported`/`Partial` but the corpus
+/// case passed. These indicate potentially stale hand-authored entries.
+pub fn stale_delta(corpus_results: &[crate::external_parity::ParityCaseResult]) -> Vec<StaleDelta> {
+    let matrix = parity_matrix();
+    let mut deltas = Vec::new();
+
+    for result in corpus_results {
+        // Try to find a matching matrix entry by family+name (fuzzy match).
+        let matching = matrix.iter().find(|f| {
+            f.family == result.family
+                && (f.name == result.name
+                    || f.name.replace('.', "-").replace(' ', "-").to_lowercase()
+                        == result.name.replace('.', "-").replace(' ', "-").to_lowercase())
+        });
+
+        if let Some(feature) = matching {
+            let is_stale = match feature.level {
+                // Matrix says supported but corpus says it fails.
+                SupportLevel::Supported => !result.passed,
+                // Matrix says unsupported but corpus says it passes.
+                SupportLevel::Unsupported => result.passed,
+                // Matrix says partial -- stale if corpus fully passes.
+                SupportLevel::Partial => result.passed,
+            };
+
+            deltas.push(StaleDelta {
+                family: result.family.clone(),
+                name: result.name.clone(),
+                matrix_level: feature.level,
+                corpus_passed: result.passed,
+                is_stale,
+            });
+        }
+    }
+
+    deltas
+}

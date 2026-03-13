@@ -158,6 +158,8 @@ pub fn built_in_packs() -> Vec<Box<dyn FrameworkPack>> {
         Box::new(CypressPack),
         Box::new(VitePressPack),
         Box::new(DocusaurusPack),
+        // Tier 4 — Background / Task Runners
+        Box::new(TriggerDevPack),
     ]
 }
 
@@ -819,6 +821,14 @@ impl FrameworkPack for VitestPack {
             }
         }
         seeds
+    }
+
+    fn auto_loaded_patterns(&self) -> Vec<String> {
+        vec![
+            "**/*.test.*".to_string(),
+            "**/*.spec.*".to_string(),
+            "**/__tests__/**".to_string(),
+        ]
     }
 }
 
@@ -2826,6 +2836,124 @@ impl FrameworkPack for DocusaurusPack {
                 "production",
                 "theme",
                 "Docusaurus theme customization",
+                false,
+            );
+        }
+
+        seeds
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trigger.dev
+// ---------------------------------------------------------------------------
+
+struct TriggerDevPack;
+
+impl FrameworkPack for TriggerDevPack {
+    fn name(&self) -> &'static str {
+        "trigger-dev"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        manifest_has_any_dep(manifest, &["@trigger.dev/sdk"])
+            || find_config_file(workspace_root, "trigger.config").is_some()
+    }
+
+    fn detect_detailed(
+        &self,
+        workspace_root: &Path,
+        manifest: &PackageManifest,
+    ) -> Option<FrameworkDetection> {
+        let (has_dep, has_config, signals) = build_detection_signals(
+            workspace_root,
+            manifest,
+            &["@trigger.dev/sdk"],
+            &["trigger.config"],
+        );
+
+        if !has_dep && !has_config {
+            return None;
+        }
+
+        Some(FrameworkDetection {
+            name: "trigger-dev",
+            confidence: if has_dep && has_config {
+                DetectionConfidence::Exact
+            } else {
+                DetectionConfidence::Heuristic
+            },
+            signals,
+            reasons: vec!["Trigger.dev background task runner detected".into()],
+        })
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // trigger.config.ts is an entrypoint itself
+        for name in &[
+            "trigger.config.ts",
+            "trigger.config.js",
+            "trigger.config.mts",
+            "trigger.config.mjs",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        // All files under trigger/ dir are task entrypoints
+        // (Trigger.dev defaults to `dirs: ["./trigger"]` and auto-detects this dir)
+        let trigger_dir = workspace_root.join("trigger");
+        if trigger_dir.is_dir() {
+            collect_files_recursive(&trigger_dir, &mut entries);
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec![
+            // Trigger.dev build output
+            ".trigger/**".to_string(),
+        ]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        vec![]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        for name in &[
+            "trigger.config.ts",
+            "trigger.config.js",
+            "trigger.config.mts",
+            "trigger.config.mjs",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Trigger.dev configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        let trigger_dir = workspace_root.join("trigger");
+        if trigger_dir.is_dir() {
+            collect_entrypoint_seeds_recursive(
+                &trigger_dir,
+                &mut seeds,
+                "production",
+                "task",
+                "Trigger.dev task file",
                 false,
             );
         }

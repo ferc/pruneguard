@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "import-meta-glob-literal",
+  "reference_tool": "knip",
+  "description": "Literal import.meta.glob expansion creates edges to matched files"
+}

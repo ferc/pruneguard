@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use pruneguard_resolver::AliasOrigin;
 
 use crate::{ConfigReadResult, ConfigValue, ConfigValueKind};
 
@@ -13,6 +15,45 @@ pub enum AdapterConfidence {
     High,
     Medium,
     Low,
+}
+
+/// A generated entrypoint discovered from framework build artifacts.
+#[derive(Debug, Clone, Default)]
+pub struct GeneratedEntrypoint {
+    pub path: PathBuf,
+    pub kind: String,
+    pub reason: String,
+}
+
+/// A glob pattern for route-generated entrypoints.
+#[derive(Debug, Clone, Default)]
+pub struct RouteEntryGlob {
+    pub pattern: String,
+    pub framework: String,
+    pub reason: String,
+}
+
+/// A synthetic import map extracted from a generated `.d.ts` file.
+#[derive(Debug, Clone, Default)]
+pub struct SyntheticImportMap {
+    pub source_file: PathBuf,
+    pub mappings: Vec<SyntheticMapping>,
+    pub framework: String,
+}
+
+/// A single mapping from a synthetic import map.
+#[derive(Debug, Clone, Default)]
+pub struct SyntheticMapping {
+    pub import_name: String,
+    pub resolved_path: Option<String>,
+    pub is_type: bool,
+}
+
+/// A reason for low confidence in a specific area of extraction.
+#[derive(Debug, Clone)]
+pub struct LowConfidenceReason {
+    pub scope: String,
+    pub reason: String,
 }
 
 /// Structured inputs extracted from framework configuration files.
@@ -52,13 +93,32 @@ pub struct ConfigInputs {
     pub confidence: AdapterConfidence,
     /// Specifier patterns to treat as resolved (e.g. virtual modules, framework aliases).
     pub ignore_unresolved: Vec<String>,
+    /// Generated entrypoints from framework build artifacts (e.g. .nuxt/imports.d.ts).
+    pub generated_entrypoints: Vec<GeneratedEntrypoint>,
+    /// Route-generated entry globs for frameworks like TanStack Router, React Router.
+    pub route_entry_globs: Vec<RouteEntryGlob>,
+    /// Synthetic import maps from generated .d.ts files.
+    pub synthetic_import_maps: Vec<SyntheticImportMap>,
+    /// Virtual module prefixes that should not be treated as unresolved.
+    pub virtual_module_prefixes: Vec<String>,
+    /// Reasons for low confidence in specific areas.
+    pub low_confidence_reasons: Vec<LowConfidenceReason>,
 }
 
 /// A path alias mapping (e.g. `@/` -> `./src/`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AliasEntry {
     pub pattern: String,
     pub target: String,
+    /// Which config source this alias came from.
+    pub origin: AliasOrigin,
+}
+
+impl AliasEntry {
+    fn new(pattern: String, target: String, origin: AliasOrigin) -> Self {
+        Self { pattern, target, origin }
+    }
+
 }
 
 impl ConfigInputs {
@@ -82,6 +142,11 @@ impl ConfigInputs {
         self.global_setup_files.extend(other.global_setup_files);
         self.auto_import_roots.extend(other.auto_import_roots);
         self.ignore_unresolved.extend(other.ignore_unresolved);
+        self.generated_entrypoints.extend(other.generated_entrypoints);
+        self.route_entry_globs.extend(other.route_entry_globs);
+        self.synthetic_import_maps.extend(other.synthetic_import_maps);
+        self.virtual_module_prefixes.extend(other.virtual_module_prefixes);
+        self.low_confidence_reasons.extend(other.low_confidence_reasons);
         // Keep the first non-default confidence.
         if self.confidence == AdapterConfidence::High && other.confidence != AdapterConfidence::High
         {
@@ -148,6 +213,384 @@ fn path_contains_dir(path: &std::path::Path, dir: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Generated .d.ts parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a Nuxt/Nitro generated `.d.ts` file using simple string scanning.
+fn parse_dts_for_synthetic_mappings(content: &str) -> Vec<SyntheticMapping> {
+    let mut mappings = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Match: export { foo, bar } from './path'
+        if trimmed.starts_with("export") && trimmed.contains("from") {
+            if let Some(from_part) = extract_from_specifier(trimmed) {
+                let names = extract_export_names(trimmed);
+                for (name, is_type) in names {
+                    mappings.push(SyntheticMapping {
+                        import_name: name,
+                        resolved_path: Some(from_part.clone()),
+                        is_type,
+                    });
+                }
+            }
+        }
+
+        // Match: import { foo, bar } from './path'
+        if trimmed.starts_with("import") && trimmed.contains("from") {
+            let is_type_import = trimmed.starts_with("import type ");
+            if let Some(from_part) = extract_from_specifier(trimmed) {
+                let names = extract_import_names(trimmed);
+                for name in names {
+                    mappings.push(SyntheticMapping {
+                        import_name: name,
+                        resolved_path: Some(from_part.clone()),
+                        is_type: is_type_import,
+                    });
+                }
+            }
+        }
+
+        // Match: const foo: typeof import('./path')['default']
+        if trimmed.starts_with("const ") && trimmed.contains("typeof import(") {
+            if let Some(name) = trimmed.strip_prefix("const ").and_then(|s| s.split(':').next()) {
+                let name = name.trim().to_string();
+                let resolved = extract_typeof_import_path(trimmed);
+                mappings.push(SyntheticMapping {
+                    import_name: name,
+                    resolved_path: resolved,
+                    is_type: false,
+                });
+            }
+        }
+    }
+
+    mappings
+}
+
+fn extract_from_specifier(line: &str) -> Option<String> {
+    let from_idx = line.rfind(" from ")?;
+    let after_from = &line[from_idx + 6..];
+    let trimmed = after_from.trim().trim_end_matches(';').trim();
+    if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
+        Some(trimmed[1..trimmed.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn extract_export_names(line: &str) -> Vec<(String, bool)> {
+    let mut results = Vec::new();
+    if let Some(brace_start) = line.find('{') {
+        if let Some(brace_end) = line.find('}') {
+            let names_str = &line[brace_start + 1..brace_end];
+            for name in names_str.split(',') {
+                let name = name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                if let Some(stripped) = name.strip_prefix("type ") {
+                    let clean = stripped.trim().split(" as ").next().unwrap_or("").trim();
+                    if !clean.is_empty() {
+                        results.push((clean.to_string(), true));
+                    }
+                } else {
+                    let clean = name.split(" as ").next().unwrap_or("").trim();
+                    if !clean.is_empty() {
+                        results.push((clean.to_string(), false));
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+fn extract_import_names(line: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    if let Some(brace_start) = line.find('{') {
+        if let Some(brace_end) = line.find('}') {
+            let names_str = &line[brace_start + 1..brace_end];
+            for name in names_str.split(',') {
+                let name = name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let clean = name
+                    .strip_prefix("type ")
+                    .unwrap_or(name)
+                    .trim()
+                    .split(" as ")
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if !clean.is_empty() {
+                    results.push(clean.to_string());
+                }
+            }
+        }
+    }
+    results
+}
+
+fn extract_typeof_import_path(line: &str) -> Option<String> {
+    let import_idx = line.find("typeof import(")?;
+    let start = import_idx + "typeof import(".len();
+    let after = &line[start..];
+    let quote_char = after.chars().next()?;
+    if quote_char != '\'' && quote_char != '"' {
+        return None;
+    }
+    let inner = &after[1..];
+    let end = inner.find(quote_char)?;
+    Some(inner[..end].to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Nuxt/Nitro generated file ingestion
+// ---------------------------------------------------------------------------
+
+fn ingest_nuxt_generated_files(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    let dts_files: &[(&str, &str)] = &[
+        (".nuxt/imports.d.ts", "nuxt-auto-imports"),
+        (".nuxt/components.d.ts", "nuxt-auto-components"),
+        (".nuxt/types/nitro-routes.d.ts", "nitro-routes"),
+        (".nuxt/types/nitro-imports.d.ts", "nitro-auto-imports"),
+    ];
+
+    for (relative_path, kind) in dts_files {
+        let full_path = workspace_root.join(relative_path);
+        if let Ok(content) = std::fs::read_to_string(&full_path) {
+            let mappings = parse_dts_for_synthetic_mappings(&content);
+            if !mappings.is_empty() {
+                inputs.synthetic_import_maps.push(SyntheticImportMap {
+                    source_file: full_path.clone(),
+                    mappings,
+                    framework: "nuxt".to_string(),
+                });
+                inputs.generated_entrypoints.push(GeneratedEntrypoint {
+                    path: full_path,
+                    kind: kind.to_string(),
+                    reason: format!("Nuxt generated {relative_path}"),
+                });
+            }
+        }
+    }
+
+    let nitro_types_dir = workspace_root.join(".nitro/types");
+    if nitro_types_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&nitro_types_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("ts")
+                    && path.to_string_lossy().ends_with(".d.ts")
+                {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let mappings = parse_dts_for_synthetic_mappings(&content);
+                        if !mappings.is_empty() {
+                            inputs.synthetic_import_maps.push(SyntheticImportMap {
+                                source_file: path.clone(),
+                                mappings,
+                                framework: "nitro".to_string(),
+                            });
+                            inputs.generated_entrypoints.push(GeneratedEntrypoint {
+                                path: path.clone(),
+                                kind: "nitro-types".to_string(),
+                                reason: format!(
+                                    "Nitro generated {}",
+                                    path.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("unknown")
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    inputs
+}
+
+// ---------------------------------------------------------------------------
+// Route-generated entrypoint detection
+// ---------------------------------------------------------------------------
+
+fn parse_tanstack_route_tree(workspace_root: &Path, content: &str) -> Vec<RouteEntryGlob> {
+    let mut globs = Vec::new();
+    let mut route_files = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("import") && trimmed.contains("from") {
+            if let Some(specifier) = extract_from_specifier(trimmed) {
+                if specifier.starts_with("./routes/") || specifier.starts_with("../routes/") {
+                    route_files.push(specifier);
+                }
+            }
+        }
+
+        if trimmed.contains("createFileRoute") || trimmed.contains("createLazyFileRoute") {
+            if let Some(path_start) = trimmed.find("'./") {
+                let after = &trimmed[path_start + 1..];
+                if let Some(end) = after.find('\'') {
+                    route_files.push(after[..end].to_string());
+                }
+            }
+        }
+    }
+
+    if route_files.is_empty() {
+        let route_dirs = ["src/routes", "app/routes", "routes"];
+        for dir in &route_dirs {
+            if workspace_root.join(dir).is_dir() {
+                globs.push(RouteEntryGlob {
+                    pattern: format!("{dir}/**/*.{{ts,tsx}}"),
+                    framework: "tanstack-router".to_string(),
+                    reason: "TanStack Router route directory detected".to_string(),
+                });
+                break;
+            }
+        }
+    } else {
+        globs.push(RouteEntryGlob {
+            pattern: "src/routes/**/*.{ts,tsx}".to_string(),
+            framework: "tanstack-router".to_string(),
+            reason: "TanStack Router routeTree.gen.ts references route files".to_string(),
+        });
+    }
+
+    globs
+}
+
+fn detect_tanstack_router_routes(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    let candidates = [
+        "routeTree.gen.ts",
+        "src/routeTree.gen.ts",
+        "app/routeTree.gen.ts",
+    ];
+
+    for candidate in &candidates {
+        let path = workspace_root.join(candidate);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let route_globs = parse_tanstack_route_tree(workspace_root, &content);
+            inputs.route_entry_globs.extend(route_globs);
+            inputs.generated_entrypoints.push(GeneratedEntrypoint {
+                path,
+                kind: "tanstack-route-tree".to_string(),
+                reason: "TanStack Router generated route tree".to_string(),
+            });
+            break;
+        }
+    }
+
+    inputs
+}
+
+fn detect_react_router_routes(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    let route_dirs = ["app/routes", "src/routes"];
+    for dir in &route_dirs {
+        if workspace_root.join(dir).is_dir() {
+            inputs.route_entry_globs.push(RouteEntryGlob {
+                pattern: format!("{dir}/**/*.{{ts,tsx}}"),
+                framework: "react-router".to_string(),
+                reason: format!("React Router route convention in {dir}/"),
+            });
+            break;
+        }
+    }
+
+    inputs
+}
+
+fn detect_vike_routes(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    let page_dirs = ["pages", "src/pages"];
+    for dir in &page_dirs {
+        if workspace_root.join(dir).is_dir() {
+            inputs.route_entry_globs.push(RouteEntryGlob {
+                pattern: format!("{dir}/**/*.page.{{ts,tsx,js,jsx}}"),
+                framework: "vike".to_string(),
+                reason: format!("Vike page convention in {dir}/"),
+            });
+            break;
+        }
+    }
+
+    inputs
+}
+
+fn detect_qwik_city_routes(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    if workspace_root.join("src/routes").is_dir() {
+        inputs.route_entry_globs.push(RouteEntryGlob {
+            pattern: "src/routes/**/*.{ts,tsx}".to_string(),
+            framework: "qwik-city".to_string(),
+            reason: "Qwik City route convention in src/routes/".to_string(),
+        });
+    }
+
+    inputs
+}
+
+fn detect_framework_deps(workspace_root: &Path) -> Vec<String> {
+    let pkg_path = workspace_root.join("package.json");
+    let Ok(content) = std::fs::read_to_string(&pkg_path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+
+    let mut deps = Vec::new();
+    for section in &["dependencies", "devDependencies", "peerDependencies"] {
+        if let Some(serde_json::Value::Object(map)) = value.get(section) {
+            for key in map.keys() {
+                deps.push(key.clone());
+            }
+        }
+    }
+    deps
+}
+
+/// Run all route detection heuristics based on detected framework dependencies.
+pub fn detect_route_entrypoints(workspace_root: &Path) -> ConfigInputs {
+    let deps = detect_framework_deps(workspace_root);
+    let mut inputs = ConfigInputs::default();
+
+    if deps.iter().any(|d| d == "@tanstack/react-router" || d == "@tanstack/router") {
+        inputs.merge(detect_tanstack_router_routes(workspace_root));
+    }
+
+    if deps.iter().any(|d| d == "react-router" || d == "@remix-run/react") {
+        inputs.merge(detect_react_router_routes(workspace_root));
+    }
+
+    if deps.iter().any(|d| d == "vike") {
+        inputs.merge(detect_vike_routes(workspace_root));
+    }
+
+    if deps.iter().any(|d| d == "@builder.io/qwik-city") {
+        inputs.merge(detect_qwik_city_routes(workspace_root));
+    }
+
+    inputs
+}
+
+// ---------------------------------------------------------------------------
 // ViteAdapter
 // ---------------------------------------------------------------------------
 
@@ -179,6 +622,7 @@ impl ConfigAdapter for ViteAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    origin: AliasOrigin::Vite,
                 });
             }
         }
@@ -202,7 +646,11 @@ impl ConfigAdapter for ViteAdapter {
                             _ => None,
                         });
                     if let (Some(f), Some(r)) = (find, replacement) {
-                        inputs.aliases.push(AliasEntry { pattern: f, target: r });
+                        inputs.aliases.push(AliasEntry {
+                            pattern: f,
+                            target: r,
+                            origin: AliasOrigin::Vite,
+                        });
                     }
                 }
             }
@@ -303,10 +751,11 @@ impl ConfigAdapter for NextAdapter {
                 .strip_prefix("webpack.resolve.alias.")
                 .unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
-                inputs.aliases.push(AliasEntry {
-                    pattern: alias_key.to_string(),
-                    target: target.clone(),
-                });
+                inputs.aliases.push(AliasEntry::new(
+                    alias_key.to_string(),
+                    target.clone(),
+                    AliasOrigin::Webpack,
+                ));
             }
         }
 
@@ -344,6 +793,7 @@ impl ConfigAdapter for JestAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -359,6 +809,7 @@ impl ConfigAdapter for JestAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: pattern.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -522,6 +973,7 @@ impl ConfigAdapter for WebpackAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        origin: AliasOrigin::Webpack,
                     });
                 }
             }
@@ -537,6 +989,7 @@ impl ConfigAdapter for WebpackAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    origin: AliasOrigin::Webpack,
                 });
             }
         }
@@ -660,6 +1113,7 @@ impl ConfigAdapter for VitestAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    origin: AliasOrigin::Vite,
                 });
             }
         }
@@ -683,7 +1137,11 @@ impl ConfigAdapter for VitestAdapter {
                             _ => None,
                         });
                     if let (Some(f), Some(r)) = (find, replacement) {
-                        inputs.aliases.push(AliasEntry { pattern: f, target: r });
+                        inputs.aliases.push(AliasEntry {
+                            pattern: f,
+                            target: r,
+                            origin: AliasOrigin::Vite,
+                        });
                     }
                 }
             }
@@ -722,6 +1180,7 @@ impl ConfigAdapter for NuxtAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -733,6 +1192,7 @@ impl ConfigAdapter for NuxtAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -773,6 +1233,22 @@ impl ConfigAdapter for NuxtAdapter {
             "~~/".to_string(),
             "@@/".to_string(),
         ]);
+
+        // Also register these as virtual module prefixes for the graph builder.
+        inputs.virtual_module_prefixes.extend([
+            "#imports".to_string(),
+            "#components".to_string(),
+            "#app".to_string(),
+            "#build".to_string(),
+            "~~/".to_string(),
+            "@@/".to_string(),
+        ]);
+
+        // Ingest Nuxt/Nitro generated .d.ts files if present.
+        if let Some(workspace_root) = config.path.parent() {
+            let generated = ingest_nuxt_generated_files(workspace_root);
+            inputs.merge(generated);
+        }
 
         inputs
     }
@@ -826,6 +1302,7 @@ impl ConfigAdapter for AstroAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -836,6 +1313,7 @@ impl ConfigAdapter for AstroAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -890,6 +1368,7 @@ impl ConfigAdapter for SvelteKitAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -901,6 +1380,7 @@ impl ConfigAdapter for SvelteKitAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -1079,13 +1559,53 @@ impl ConfigAdapter for TurborepoAdapter {
         filename_starts_with(&config.path, "turbo.json")
     }
 
-    fn extract(&self, _config: &ConfigReadResult) -> ConfigInputs {
-        // Limited static extraction — pipeline keys are mostly metadata.
-        ConfigInputs {
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
             framework: Some(self.framework_name().to_string()),
             confidence: AdapterConfidence::Medium,
             ..Default::default()
+        };
+
+        // Parse task definitions to infer file roots and globs.
+        // Tasks are stored under "tasks.<name>" (turbo.json v2) or
+        // "pipeline.<name>" (turbo.json v1).
+        for prefix in &["tasks.", "pipeline."] {
+            let task_entries = find_values_with_prefix(values, prefix);
+            for entry in &task_entries {
+                // tasks.<name>.inputs → source file globs
+                if entry.key.ends_with(".inputs") {
+                    for s in strings_from_array(&entry.value) {
+                        inputs.source_roots.push(PathBuf::from(s));
+                    }
+                }
+                // tasks.<name>.outputs → ignore patterns (build output)
+                if entry.key.ends_with(".outputs") {
+                    for s in strings_from_array(&entry.value) {
+                        inputs.ignore_patterns.push(s);
+                    }
+                }
+                // tasks.<name>.dependsOn → workspace dependency names
+                if entry.key.ends_with(".dependsOn") {
+                    for s in strings_from_array(&entry.value) {
+                        // dependsOn entries like "^build" indicate upstream
+                        // workspace deps; plain names are task references.
+                        if !s.starts_with('^') && !s.starts_with('$') {
+                            inputs.externals.push(s);
+                        }
+                    }
+                }
+            }
         }
+
+        // globalDependencies → source roots
+        if let Some(kind) = find_value(values, "globalDependencies") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        inputs
     }
 }
 
@@ -1212,6 +1732,13 @@ impl ConfigAdapter for RollupAdapter {
                 _ => {}
             }
         }
+        // Flat-key input entries (input.main, input.vendor, etc.)
+        let input_entries = find_values_with_prefix(values, "input.");
+        for entry in input_entries {
+            if let ConfigValueKind::String(s) = &entry.value {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
 
         // external → externals (string or array)
         if let Some(kind) = find_value(values, "external") {
@@ -1229,6 +1756,16 @@ impl ConfigAdapter for RollupAdapter {
         // plugins — extract names as externals
         if let Some(kind) = find_value(values, "plugins") {
             inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // output.dir → ignore_patterns (build output directory)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "output.dir") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        // output.file → ignore_patterns
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "output.file") {
+            inputs.ignore_patterns.push(s.clone());
         }
 
         inputs
@@ -1294,6 +1831,7 @@ impl ConfigAdapter for RspackAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -1308,6 +1846,7 @@ impl ConfigAdapter for RspackAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -1386,6 +1925,7 @@ impl ConfigAdapter for RsbuildAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -1400,6 +1940,7 @@ impl ConfigAdapter for RsbuildAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -1423,13 +1964,57 @@ impl ConfigAdapter for ParcelAdapter {
         filename_starts_with(&config.path, ".parcelrc")
     }
 
-    fn extract(&self, _config: &ConfigReadResult) -> ConfigInputs {
-        // Limited static extraction from .parcelrc.
-        ConfigInputs {
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
             framework: Some(self.framework_name().to_string()),
             confidence: AdapterConfidence::Low,
             ..Default::default()
+        };
+
+        // source → entrypoints (from package.json "source" field read by parcel)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "source") {
+            inputs.entrypoints.push(PathBuf::from(s));
         }
+
+        // extends → external dependency (base config package)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "extends") {
+            inputs.externals.push(s.clone());
+        }
+
+        // Extract plugin package names from transformer, resolver, etc. sections
+        for section in &[
+            "transformers",
+            "resolvers",
+            "namers",
+            "packagers",
+            "optimizers",
+            "reporters",
+            "validators",
+            "bundler",
+            "runtimes",
+            "compressors",
+        ] {
+            let section_entries = find_values_with_prefix(values, &format!("{section}."));
+            for entry in section_entries {
+                // Plugin values can be strings (package names) or arrays of strings
+                match &entry.value {
+                    ConfigValueKind::String(s) if s != "..." => {
+                        inputs.externals.push(s.clone());
+                    }
+                    ConfigValueKind::Array(_) => {
+                        for s in strings_from_array(&entry.value) {
+                            if s != "..." {
+                                inputs.externals.push(s);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        inputs
     }
 }
 
@@ -1447,6 +2032,8 @@ impl ConfigAdapter for GatsbyAdapter {
     fn matches(&self, config: &ConfigReadResult) -> bool {
         filename_starts_with(&config.path, "gatsby-config")
             || filename_starts_with(&config.path, "gatsby-node")
+            || filename_starts_with(&config.path, "gatsby-browser")
+            || filename_starts_with(&config.path, "gatsby-ssr")
     }
 
     fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
@@ -1461,7 +2048,34 @@ impl ConfigAdapter for GatsbyAdapter {
             inputs.externals.extend(strings_from_array(kind));
         }
 
-        // siteMetadata → skip
+        // Gatsby page conventions: src/pages/**
+        inputs.source_roots.push(PathBuf::from("src/pages"));
+
+        // Gatsby API route conventions: src/api/**
+        inputs.source_roots.push(PathBuf::from("src/api"));
+
+        // Gatsby lifecycle files are config entrypoints
+        for name in &[
+            "gatsby-node.js",
+            "gatsby-node.ts",
+            "gatsby-browser.js",
+            "gatsby-browser.ts",
+            "gatsby-ssr.js",
+            "gatsby-ssr.ts",
+        ] {
+            inputs.entrypoints.push(PathBuf::from(name));
+        }
+
+        // Extract plugin names from resolve-style objects as well
+        // (plugins can be objects with `resolve` field)
+        let plugin_entries = find_values_with_prefix(values, "plugins.");
+        for entry in plugin_entries {
+            if entry.key.ends_with(".resolve") {
+                if let ConfigValueKind::String(s) = &entry.value {
+                    inputs.externals.push(s.clone());
+                }
+            }
+        }
 
         inputs
     }
@@ -1496,6 +2110,7 @@ impl ConfigAdapter for NitroAdapter {
                     inputs.aliases.push(AliasEntry {
                         pattern: pattern.clone(),
                         target: target.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -1507,6 +2122,7 @@ impl ConfigAdapter for NitroAdapter {
                 inputs.aliases.push(AliasEntry {
                     pattern: alias_key.to_string(),
                     target: target.clone(),
+                    ..Default::default()
                 });
             }
         }
@@ -1529,6 +2145,22 @@ impl ConfigAdapter for NitroAdapter {
                 }
                 _ => {}
             }
+        }
+
+        // scanDirs → auto_import_roots
+        if let Some(kind) = find_value(values, "scanDirs") {
+            for s in strings_from_array(kind) {
+                inputs.auto_import_roots.push(PathBuf::from(s));
+            }
+        }
+
+        // Nitro API route conventions: server/api/**, server/routes/**
+        inputs.source_roots.push(PathBuf::from("server/api"));
+        inputs.source_roots.push(PathBuf::from("server/routes"));
+
+        // typescript.generateTsConfig → ignore generated type file
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "typescript.tsConfig") {
+            inputs.ignore_patterns.push(s.clone());
         }
 
         inputs
@@ -1580,6 +2212,12 @@ impl ConfigAdapter for ReactRouterAdapter {
             inputs.ignore_patterns.push(s.clone());
         }
 
+        // Detect React Router route conventions.
+        if let Some(workspace_root) = config.path.parent() {
+            let route_inputs = detect_react_router_routes(workspace_root);
+            inputs.merge(route_inputs);
+        }
+
         inputs
     }
 }
@@ -1612,6 +2250,478 @@ impl ConfigAdapter for QwikAdapter {
             inputs.source_roots.push(PathBuf::from(s));
         }
 
+        // routesDir → source_roots (Qwik City route directory)
+        let has_routes_dir = if let Some(ConfigValueKind::String(s)) = find_value(values, "routesDir") {
+            inputs.source_roots.push(PathBuf::from(s));
+            true
+        } else {
+            false
+        };
+
+        // Qwik route directory conventions (only if routesDir not explicitly set)
+        if !has_routes_dir && inputs.source_roots.is_empty() {
+            inputs.source_roots.push(PathBuf::from("src/routes"));
+        }
+
+        // Qwik virtual modules
+        inputs.ignore_unresolved.push("@qwik-city-plan".to_string());
+
+        // Detect Qwik City route conventions.
+        if let Some(workspace_root) = config.path.parent() {
+            let route_inputs = detect_qwik_city_routes(workspace_root);
+            inputs.merge(route_inputs);
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BabelAdapter
+// ---------------------------------------------------------------------------
+
+pub struct BabelAdapter;
+
+impl ConfigAdapter for BabelAdapter {
+    fn framework_name(&self) -> &str {
+        "babel"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "babel.config")
+            || filename_starts_with(&config.path, ".babelrc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // presets → externals (package names)
+        if let Some(kind) = find_value(values, "presets") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // plugins → externals (package names)
+        if let Some(kind) = find_value(values, "plugins") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // module-resolver plugin aliases (babel-plugin-module-resolver)
+        // Stored as flat keys like "plugins.module-resolver.alias.@" or
+        // as nested objects under plugins entries.
+        let alias_entries = find_values_with_prefix(values, "plugins.module-resolver.alias.");
+        for entry in alias_entries {
+            let alias_key = entry
+                .key
+                .strip_prefix("plugins.module-resolver.alias.")
+                .unwrap_or(&entry.key);
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.aliases.push(AliasEntry {
+                    pattern: alias_key.to_string(),
+                    target: target.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+        if let Some(ConfigValueKind::Object(pairs)) =
+            find_value(values, "plugins.module-resolver.alias")
+        {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VueAdapter
+// ---------------------------------------------------------------------------
+
+pub struct VueAdapter;
+
+impl ConfigAdapter for VueAdapter {
+    fn framework_name(&self) -> &str {
+        "vue"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "vue.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // configureWebpack.resolve.alias → aliases
+        if let Some(ConfigValueKind::Object(pairs)) =
+            find_value(values, "configureWebpack.resolve.alias")
+        {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        let alias_entries =
+            find_values_with_prefix(values, "configureWebpack.resolve.alias.");
+        for entry in alias_entries {
+            let alias_key = entry
+                .key
+                .strip_prefix("configureWebpack.resolve.alias.")
+                .unwrap_or(&entry.key);
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.aliases.push(AliasEntry {
+                    pattern: alias_key.to_string(),
+                    target: target.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // pages → entrypoints (object with named page entries)
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "pages") {
+            for (_, v) in pairs {
+                if let ConfigValueKind::String(s) = v {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+            }
+        }
+        let page_entries = find_values_with_prefix(values, "pages.");
+        for entry in page_entries {
+            // pages.<name>.entry → entrypoint
+            if entry.key.ends_with(".entry") {
+                if let ConfigValueKind::String(s) = &entry.value {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+            }
+        }
+
+        // outputDir → ignore_patterns
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "outputDir") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SvelteAdapter
+// ---------------------------------------------------------------------------
+
+pub struct SvelteAdapter;
+
+impl ConfigAdapter for SvelteAdapter {
+    fn framework_name(&self) -> &str {
+        "svelte"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // Match svelte.config files that are NOT SvelteKit (no kit.* keys).
+        // SvelteKitAdapter handles svelte.config with kit keys.
+        // This adapter handles plain Svelte configs.
+        filename_starts_with(&config.path, "svelte.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // kit.alias → aliases (also handled by SvelteKitAdapter, but
+        // we extract here for standalone Svelte projects)
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "kit.alias") {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        let alias_entries = find_values_with_prefix(values, "kit.alias.");
+        for entry in alias_entries {
+            let alias_key = entry.key.strip_prefix("kit.alias.").unwrap_or(&entry.key);
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.aliases.push(AliasEntry {
+                    pattern: alias_key.to_string(),
+                    target: target.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // preprocess — extract preprocessor plugin names as externals
+        if let Some(kind) = find_value(values, "preprocess") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // extensions → test_patterns (custom file extensions Svelte compiles)
+        if let Some(kind) = find_value(values, "extensions") {
+            for ext in strings_from_array(kind) {
+                inputs.test_patterns.push(format!("**/*{ext}"));
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TanStackRouterAdapter
+// ---------------------------------------------------------------------------
+
+pub struct TanStackRouterAdapter;
+
+impl ConfigAdapter for TanStackRouterAdapter {
+    fn framework_name(&self) -> &str {
+        "tanstack-router"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "tsr.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // routesDirectory → source_roots
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "routesDirectory") {
+            inputs.source_roots.push(PathBuf::from(s));
+        }
+
+        // generatedRouteTree → ignore_patterns (generated file)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "generatedRouteTree") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        // Default route tree generated file
+        inputs.ignore_patterns.push("routeTree.gen.ts".to_string());
+
+        // Detect TanStack Router route files from generated route tree.
+        if let Some(workspace_root) = config.path.parent() {
+            let route_inputs = detect_tanstack_router_routes(workspace_root);
+            inputs.merge(route_inputs);
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VikeAdapter
+// ---------------------------------------------------------------------------
+
+pub struct VikeAdapter;
+
+impl ConfigAdapter for VikeAdapter {
+    fn framework_name(&self) -> &str {
+        "vike"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "vike.config")
+            || filename_starts_with(&config.path, "+config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // Vike page directory conventions
+        inputs.source_roots.push(PathBuf::from("pages"));
+
+        // extensions → file extensions for page files
+        if let Some(kind) = find_value(values, "extensions") {
+            for ext in strings_from_array(kind) {
+                inputs.test_patterns.push(format!("**/*{ext}"));
+            }
+        }
+
+        // prerender → skip (boolean flag, no paths)
+
+        // passToClient → skip (array of prop names, not paths)
+
+        // Detect Vike route pages.
+        if let Some(workspace_root) = config.path.parent() {
+            let route_inputs = detect_vike_routes(workspace_root);
+            inputs.merge(route_inputs);
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RslibAdapter
+// ---------------------------------------------------------------------------
+
+pub struct RslibAdapter;
+
+impl ConfigAdapter for RslibAdapter {
+    fn framework_name(&self) -> &str {
+        "rslib"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "rslib.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // source.entry → entrypoints (object with named entries or string)
+        if let Some(kind) = find_value(values, "source.entry") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+                ConfigValueKind::Object(pairs) => {
+                    for (_, v) in pairs {
+                        if let ConfigValueKind::String(s) = v {
+                            inputs.entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let entry_entries = find_values_with_prefix(values, "source.entry.");
+        for entry in entry_entries {
+            if let ConfigValueKind::String(s) = &entry.value {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // lib.format → skip (output format, not path-relevant)
+
+        // output.distPath → ignore_patterns (build output)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "output.distPath") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "output.distPath.root") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        // source.alias → aliases
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "source.alias") {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        let alias_entries = find_values_with_prefix(values, "source.alias.");
+        for entry in alias_entries {
+            let alias_key = entry
+                .key
+                .strip_prefix("source.alias.")
+                .unwrap_or(&entry.key);
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.aliases.push(AliasEntry {
+                    pattern: alias_key.to_string(),
+                    target: target.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PlaywrightCtAdapter (component testing)
+// ---------------------------------------------------------------------------
+
+pub struct PlaywrightCtAdapter;
+
+impl ConfigAdapter for PlaywrightCtAdapter {
+    fn framework_name(&self) -> &str {
+        "playwright-ct"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "playwright-ct.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // testDir → source_roots
+        if let Some(ConfigValueKind::String(dir)) = find_value(values, "testDir") {
+            inputs.source_roots.push(PathBuf::from(dir));
+        }
+
+        // testMatch — string or array of glob patterns
+        if let Some(kind) = find_value(values, "testMatch") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.test_patterns.push(s.clone());
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.test_patterns.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // testIgnore
+        if let Some(kind) = find_value(values, "testIgnore") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.ignore_patterns.push(s.clone());
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.ignore_patterns.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // ctPort, ctViteConfig → skip (not path-relevant)
+
         inputs
     }
 }
@@ -1627,6 +2737,7 @@ pub fn extract_all_inputs(configs: &[ConfigReadResult]) -> ConfigInputs {
         Box::new(NextAdapter),
         Box::new(JestAdapter),
         Box::new(PlaywrightAdapter),
+        Box::new(PlaywrightCtAdapter),
         Box::new(StorybookAdapter),
         Box::new(WebpackAdapter),
         // Tier A
@@ -1634,12 +2745,15 @@ pub fn extract_all_inputs(configs: &[ConfigReadResult]) -> ConfigInputs {
         Box::new(NuxtAdapter),
         Box::new(AstroAdapter),
         Box::new(SvelteKitAdapter),
+        Box::new(SvelteAdapter),
         Box::new(RemixAdapter),
         Box::new(AngularAdapter),
         Box::new(NxAdapter),
         Box::new(TurborepoAdapter),
         Box::new(VitePressAdapter),
         Box::new(DocusaurusAdapter),
+        Box::new(VueAdapter),
+        Box::new(BabelAdapter),
         // Tier B
         Box::new(RollupAdapter),
         Box::new(RspackAdapter),
@@ -1649,6 +2763,9 @@ pub fn extract_all_inputs(configs: &[ConfigReadResult]) -> ConfigInputs {
         Box::new(NitroAdapter),
         Box::new(ReactRouterAdapter),
         Box::new(QwikAdapter),
+        Box::new(TanStackRouterAdapter),
+        Box::new(VikeAdapter),
+        Box::new(RslibAdapter),
     ];
 
     let mut merged = ConfigInputs::default();

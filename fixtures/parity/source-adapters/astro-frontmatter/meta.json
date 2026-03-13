@@ -1,0 +1,6 @@
+{
+  "family": "source-adapters",
+  "name": "astro-frontmatter",
+  "reference_tool": "knip",
+  "description": "Astro component frontmatter imports are extracted and create graph edges"
+}

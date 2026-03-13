@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/modules/included.ts"],
+  "unreachable_files": ["./src/modules/excluded.ts"],
+  "expected_findings": ["unused-file:./src/modules/excluded.ts"],
+  "expected_no_findings": ["unused-file:./src/modules/included.ts"]
+}

@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "new-url-import-meta",
+  "reference_tool": "dependency-cruiser",
+  "description": "new URL('./file', import.meta.url) creates a resolved edge to the target file"
+}

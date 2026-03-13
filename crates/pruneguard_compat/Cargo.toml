@@ -18,4 +18,8 @@ workspace = true
 [dependencies]
 pruneguard_frameworks = { workspace = true }
 pruneguard_manifest = { workspace = true }
+pruneguard_report = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
+rustc-hash = { workspace = true }
