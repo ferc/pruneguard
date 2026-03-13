@@ -112,6 +112,41 @@ pub struct ResolverConfig {
     /// Whether to preserve symlinks during resolution.
     #[serde(default)]
     pub preserve_symlinks: bool,
+
+    // Non-standard edge detection toggles.
+    /// Whether to detect `require.resolve()` calls.
+    #[serde(default = "default_true")]
+    pub detect_require_resolve: bool,
+    /// Whether to detect `import.meta.resolve()` calls.
+    #[serde(default = "default_true")]
+    pub detect_import_meta_resolve: bool,
+    /// Whether to detect `import.meta.glob()` calls.
+    #[serde(default = "default_true")]
+    pub detect_import_meta_glob: bool,
+    /// Whether to detect `require.context()` calls.
+    #[serde(default = "default_true")]
+    pub detect_require_context: bool,
+    /// Whether to detect `new URL()` constructor patterns.
+    #[serde(default = "default_true")]
+    pub detect_url_constructor: bool,
+    /// Whether to detect JSDoc `@import` tags.
+    #[serde(default = "default_true")]
+    pub detect_jsdoc_imports: bool,
+    /// Whether to detect triple-slash reference directives.
+    #[serde(default = "default_true")]
+    pub detect_triple_slash: bool,
+    /// Whether to detect TypeScript `import =` statements.
+    #[serde(default = "default_true")]
+    pub detect_import_equals: bool,
+    /// Whether to detect type-only imports.
+    #[serde(default = "default_true")]
+    pub detect_type_imports: bool,
+    /// Whether to detect webpack alias patterns.
+    #[serde(default = "default_true")]
+    pub detect_webpack_aliases: bool,
+    /// Whether to detect Babel alias patterns.
+    #[serde(default = "default_true")]
+    pub detect_babel_aliases: bool,
 }
 
 impl Default for ResolverConfig {
@@ -122,6 +157,17 @@ impl Default for ResolverConfig {
             extensions: Vec::new(),
             respect_exports: true,
             preserve_symlinks: false,
+            detect_require_resolve: true,
+            detect_import_meta_resolve: true,
+            detect_import_meta_glob: true,
+            detect_require_context: true,
+            detect_url_constructor: true,
+            detect_jsdoc_imports: true,
+            detect_triple_slash: true,
+            detect_import_equals: true,
+            detect_type_imports: true,
+            detect_webpack_aliases: true,
+            detect_babel_aliases: true,
         }
     }
 }
@@ -231,7 +277,7 @@ pub struct AnalysisConfig {
 }
 
 /// Rule for suppressing specific finding kinds.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IgnoreIssueRule {
     /// The finding kind to suppress (e.g. "unusedExport", "unusedFile", "cycle").
@@ -242,6 +288,21 @@ pub struct IgnoreIssueRule {
     /// Optional comment explaining why this is suppressed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+    /// Workspace names to scope this rule to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<String>,
+    /// Package names to scope this rule to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<String>,
+    /// Symbol names to scope this rule to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<String>,
+    /// Parent symbol names to scope this rule to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parent_symbols: Vec<String>,
+    /// Additional finding codes to match (beyond the primary `kind`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

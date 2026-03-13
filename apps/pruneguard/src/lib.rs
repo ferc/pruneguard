@@ -116,8 +116,10 @@ pub fn scan_with_options(
                 .unwrap_or("partial-scope scan detected while --require-full-scope was enabled")
         );
     }
-    let findings = pruneguard_analyzers::run_analyzers(&build, config, profile);
+    let (findings, ignore_issues_suppressed) =
+        pruneguard_analyzers::run_analyzers(&build, config, profile);
     let mut report = report_from_build(cwd, &build, findings, profile);
+    report.stats.suppressed_findings += ignore_issues_suppressed;
     report.stats.full_scope_required = options.require_full_scope;
 
     // --- Compute compatibility report and enrich findings with trust context ---
@@ -258,7 +260,7 @@ pub fn explain_with_options(
     options: &ExplainOptions,
 ) -> miette::Result<ExplainReport> {
     let build = build_graph(cwd, config, &[], profile)?;
-    let findings = pruneguard_analyzers::run_analyzers(&build, config, profile);
+    let (findings, _suppressed) = pruneguard_analyzers::run_analyzers(&build, config, profile);
     let matched_finding_id = findings.iter().any(|finding| finding.id == query);
     let related_findings = findings
         .iter()
@@ -1948,7 +1950,7 @@ fn apply_baseline(report: &mut AnalysisReport, baseline: &BaselineSet) {
     report.findings.retain(|finding| !baseline.finding_ids.contains(&finding.id));
     report.stats.baseline_applied = true;
     report.stats.baseline_profile_mismatch = baseline.profile != report.profile;
-    report.stats.suppressed_findings = original_len.saturating_sub(report.findings.len());
+    report.stats.suppressed_findings += original_len.saturating_sub(report.findings.len());
     report.stats.new_findings = report.findings.len();
 
     if report.stats.baseline_profile_mismatch {
@@ -2403,6 +2405,15 @@ const fn edge_label(edge: ModuleEdge) -> &'static str {
         ModuleEdge::EntrypointToFile => "entrypoint",
         ModuleEdge::PackageToEntrypoint => "package-entrypoint",
         ModuleEdge::FileToDependency => "dependency",
+        ModuleEdge::RequireResolve => "require-resolve",
+        ModuleEdge::ImportMetaGlob => "import-meta-glob",
+        ModuleEdge::JsDocImport => "jsdoc-import",
+        ModuleEdge::TripleSlashFile => "triple-slash-file",
+        ModuleEdge::TripleSlashTypes => "triple-slash-types",
+        ModuleEdge::ImportMetaResolve => "import-meta-resolve",
+        ModuleEdge::RequireContext => "require-context",
+        ModuleEdge::UrlConstructor => "url-constructor",
+        ModuleEdge::ImportEquals => "import-equals",
     }
 }
 

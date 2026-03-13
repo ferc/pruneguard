@@ -97,6 +97,24 @@ pub enum ModuleEdge {
     EntrypointToFile,
     PackageToEntrypoint,
     FileToDependency,
+    /// `require.resolve('specifier')` — resolves but doesn't import at runtime.
+    RequireResolve,
+    /// `import.meta.glob('pattern')` — Vite glob import (expanded).
+    ImportMetaGlob,
+    /// JSDoc `@type {import('specifier')}` — type-level dependency.
+    JsDocImport,
+    /// `/// <reference path="..." />` — TypeScript file reference.
+    TripleSlashFile,
+    /// `/// <reference types="..." />` — TypeScript types reference.
+    TripleSlashTypes,
+    /// `import.meta.resolve('specifier')` — resolves a URL without importing.
+    ImportMetaResolve,
+    /// `require.context('./dir', ...)` — webpack dynamic context directory.
+    RequireContext,
+    /// `new URL('./worker.js', import.meta.url)` — worker/asset URL pattern.
+    UrlConstructor,
+    /// `import foo = require('bar')` — TypeScript import-equals.
+    ImportEquals,
 }
 
 impl ModuleGraph {

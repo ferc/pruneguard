@@ -114,6 +114,10 @@ pub enum FindingCategory {
     BoundaryViolation,
     OwnershipViolation,
     Impact,
+    /// An exported class member, enum variant, or namespace member is unused.
+    UnusedMember,
+    /// The same symbol is exported from multiple paths (barrel re-export collision).
+    DuplicateExport,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

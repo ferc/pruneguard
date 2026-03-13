@@ -1,7 +1,11 @@
+pub mod adapters;
+
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use thiserror::Error;
+
+pub use adapters::{AliasEntry, ConfigAdapter, ConfigInputs, extract_all_inputs};
 
 #[derive(Debug, Error)]
 pub enum ConfigReaderError {
@@ -621,6 +625,10 @@ pub fn read_workspace_configs(workspace_root: &Path) -> Vec<ConfigReadResult> {
         ".storybook/main.js",
         ".storybook/preview.ts",
         ".storybook/preview.js",
+        "webpack.config.js",
+        "webpack.config.ts",
+        "webpack.config.cjs",
+        "webpack.config.mjs",
     ];
 
     let mut results = Vec::new();

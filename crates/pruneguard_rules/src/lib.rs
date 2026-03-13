@@ -794,6 +794,15 @@ fn edge_kind_labels(edge: &ResolvedEdge) -> Vec<&'static str> {
         ResolvedEdgeKind::SideEffectImport => vec!["side-effect"],
         ResolvedEdgeKind::ReExportNamed => vec!["re-export", "re-export-named"],
         ResolvedEdgeKind::ReExportAll => vec!["re-export", "re-export-all"],
+        ResolvedEdgeKind::RequireResolve => vec!["require-resolve"],
+        ResolvedEdgeKind::ImportMetaGlob => vec!["import-meta-glob"],
+        ResolvedEdgeKind::JsDocImport => vec!["jsdoc-import", "type"],
+        ResolvedEdgeKind::TripleSlashFile => vec!["triple-slash", "triple-slash-file"],
+        ResolvedEdgeKind::TripleSlashTypes => vec!["triple-slash", "triple-slash-types", "type"],
+        ResolvedEdgeKind::ImportMetaResolve => vec!["import-meta-resolve"],
+        ResolvedEdgeKind::RequireContext => vec!["require-context"],
+        ResolvedEdgeKind::UrlConstructor => vec!["url-constructor"],
+        ResolvedEdgeKind::ImportEquals => vec!["import-equals", "require"],
     };
     if edge.to_dependency.is_some() {
         labels.push("external");

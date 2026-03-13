@@ -360,7 +360,7 @@ impl HotIndex {
             .as_ref()
             .ok_or_else(|| IndexError::Analysis("index not warmed yet".to_string()))?;
 
-        let findings =
+        let (findings, _suppressed) =
             pruneguard_analyzers::run_analyzers(build, &self.config, EntrypointProfile::Both);
         let report = serde_json::json!({
             "version": 1,

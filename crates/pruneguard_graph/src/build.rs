@@ -473,6 +473,119 @@ fn populate_extracted_file(
                 }
             }
 
+            // Resolve dependency_patterns into real graph edges.
+            for pattern in &facts.dependency_patterns {
+                match pattern {
+                    pruneguard_extract::DependencyPattern::RequireResolve { specifier, line } => {
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            specifier,
+                            ResolvedEdgeKind::RequireResolve,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::ImportMetaGlob { pattern: glob_pattern, line } => {
+                        // For literal glob patterns, expand against tracked source inventory.
+                        // Only create edges for literal specifiers (no wildcards) here;
+                        // glob expansion against inventory is deferred to Phase 1.
+                        if !glob_pattern.contains('*') && !glob_pattern.contains('?') {
+                            extracted_file.resolved_imports.push(resolve_edge(
+                                resolver,
+                                &extracted_file.file.path,
+                                glob_pattern,
+                                ResolvedEdgeKind::ImportMetaGlob,
+                                *line,
+                                repo_files,
+                            ));
+                        }
+                    }
+                    pruneguard_extract::DependencyPattern::TripleSlashReference { path: ref_path, is_types, line } => {
+                        let edge_kind = if *is_types {
+                            ResolvedEdgeKind::TripleSlashTypes
+                        } else {
+                            ResolvedEdgeKind::TripleSlashFile
+                        };
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            ref_path,
+                            edge_kind,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::JsDocImport { specifier, line } => {
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            specifier,
+                            ResolvedEdgeKind::JsDocImport,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::ImportMetaResolve { specifier, line } => {
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            specifier,
+                            ResolvedEdgeKind::ImportMetaResolve,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::RequireContext { directory, line, .. } => {
+                        // Resolve the context directory as a dependency edge.
+                        // Glob expansion of matched files is deferred.
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            directory,
+                            ResolvedEdgeKind::RequireContext,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::UrlConstructor { specifier, line } => {
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            specifier,
+                            ResolvedEdgeKind::UrlConstructor,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::ImportEquals { specifier, line } => {
+                        extracted_file.resolved_imports.push(resolve_edge(
+                            resolver,
+                            &extracted_file.file.path,
+                            specifier,
+                            ResolvedEdgeKind::ImportEquals,
+                            *line,
+                            repo_files,
+                        ));
+                    }
+                    pruneguard_extract::DependencyPattern::ImportMetaGlobArray { patterns, line } => {
+                        // Each pattern in the array becomes a separate edge.
+                        for glob_pattern in patterns {
+                            if !glob_pattern.contains('*') && !glob_pattern.contains('?') {
+                                extracted_file.resolved_imports.push(resolve_edge(
+                                    resolver,
+                                    &extracted_file.file.path,
+                                    glob_pattern,
+                                    ResolvedEdgeKind::ImportMetaGlob,
+                                    *line,
+                                    repo_files,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
             extracted_file.external_dependencies = extracted_file
                 .resolved_imports
                 .iter()
@@ -981,6 +1094,15 @@ const fn to_module_edge(kind: ResolvedEdgeKind) -> ModuleEdge {
         ResolvedEdgeKind::SideEffectImport => ModuleEdge::SideEffectImport,
         ResolvedEdgeKind::ReExportNamed => ModuleEdge::ReExportNamed,
         ResolvedEdgeKind::ReExportAll => ModuleEdge::ReExportAll,
+        ResolvedEdgeKind::RequireResolve => ModuleEdge::RequireResolve,
+        ResolvedEdgeKind::ImportMetaGlob => ModuleEdge::ImportMetaGlob,
+        ResolvedEdgeKind::JsDocImport => ModuleEdge::JsDocImport,
+        ResolvedEdgeKind::TripleSlashFile => ModuleEdge::TripleSlashFile,
+        ResolvedEdgeKind::TripleSlashTypes => ModuleEdge::TripleSlashTypes,
+        ResolvedEdgeKind::ImportMetaResolve => ModuleEdge::ImportMetaResolve,
+        ResolvedEdgeKind::RequireContext => ModuleEdge::RequireContext,
+        ResolvedEdgeKind::UrlConstructor => ModuleEdge::UrlConstructor,
+        ResolvedEdgeKind::ImportEquals => ModuleEdge::ImportEquals,
     }
 }
 

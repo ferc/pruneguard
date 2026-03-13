@@ -1,16 +1,19 @@
 pub mod boundaries;
 pub mod cycles;
+pub mod duplicate_exports;
 pub mod impact;
 pub mod ownership;
 pub mod suggest_rules;
 pub mod unused_dependencies;
 pub mod unused_exports;
 pub mod unused_files;
+pub mod unused_members;
 pub mod unused_packages;
 
 use std::hash::{Hash, Hasher};
 
-use pruneguard_config::{AnalysisSeverity, PruneguardConfig};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use pruneguard_config::{AnalysisSeverity, IgnoreIssueRule, PruneguardConfig};
 use pruneguard_entrypoints::EntrypointProfile;
 use pruneguard_graph::GraphBuildResult;
 use pruneguard_report::{
@@ -19,15 +22,23 @@ use pruneguard_report::{
 use pruneguard_rules::CompiledRules;
 
 /// Run all enabled analyzers and collect findings.
+///
+/// Returns the filtered findings and the count of findings suppressed by
+/// `ignoreIssues` rules.
 pub fn run_analyzers(
     build: &GraphBuildResult,
     config: &PruneguardConfig,
     profile: EntrypointProfile,
-) -> Vec<Finding> {
+) -> (Vec<Finding>, usize) {
     let mut findings = Vec::new();
 
     findings.extend(unused_files::analyze(build, config.analysis.unused_files, profile));
-    findings.extend(unused_exports::analyze(build, config.analysis.unused_exports, profile));
+    findings.extend(unused_exports::analyze(
+        build,
+        config.analysis.unused_exports,
+        profile,
+        config.analysis.ignore_exports_used_in_file,
+    ));
     findings.extend(unused_dependencies::analyze(
         build,
         config.analysis.unused_dependencies,
@@ -55,8 +66,17 @@ pub fn run_analyzers(
         config.analysis.ownership,
     ));
 
+    findings.extend(unused_members::analyze(build, config.analysis.unused_members));
+    findings.extend(duplicate_exports::analyze(build, config.analysis.duplicate_exports));
+
+    // Apply ignore_issues rules to suppress matching findings.
+    let suppressed = apply_ignore_issues(&mut findings, &config.ignore_issues);
+    if suppressed > 0 {
+        tracing::info!(suppressed, "findings suppressed by ignoreIssues rules");
+    }
+
     findings.sort_by(|left, right| left.id.cmp(&right.id));
-    findings
+    (findings, suppressed)
 }
 
 pub(crate) const fn severity(level: AnalysisSeverity) -> Option<FindingSeverity> {
@@ -138,4 +158,104 @@ fn finding_id(
     rule_name.hash(&mut hasher);
     primary_evidence.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Convert a camelCase string to kebab-case.
+///
+/// For example, `"unusedExport"` becomes `"unused-export"`.
+fn camel_to_kebab(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.char_indices() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('-');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// A compiled ignore-issue rule: a normalized kind and an optional glob set for file matching.
+struct CompiledIgnoreRule {
+    /// Normalized (kebab-case) finding kind.
+    kind: String,
+    /// When present, only suppress findings whose `subject` matches one of the globs.
+    file_matcher: Option<GlobSet>,
+}
+
+/// Compile `IgnoreIssueRule` entries into matchers, skipping any with invalid globs.
+fn compile_ignore_rules(rules: &[IgnoreIssueRule]) -> Vec<CompiledIgnoreRule> {
+    rules
+        .iter()
+        .filter_map(|rule| {
+            let kind = if rule.kind.contains('-') {
+                rule.kind.clone()
+            } else {
+                camel_to_kebab(&rule.kind)
+            };
+
+            let file_matcher = if rule.files.is_empty() {
+                None
+            } else {
+                let mut builder = GlobSetBuilder::new();
+                for pattern in &rule.files {
+                    match Glob::new(pattern) {
+                        Ok(glob) => {
+                            builder.add(glob);
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                pattern,
+                                %err,
+                                "invalid glob in ignoreIssues rule, skipping pattern"
+                            );
+                        }
+                    }
+                }
+                match builder.build() {
+                    Ok(set) => Some(set),
+                    Err(err) => {
+                        tracing::warn!(
+                            kind,
+                            %err,
+                            "failed to compile glob set for ignoreIssues rule, skipping rule"
+                        );
+                        return None;
+                    }
+                }
+            };
+
+            Some(CompiledIgnoreRule { kind, file_matcher })
+        })
+        .collect()
+}
+
+/// Remove findings that match any `ignore_issues` rule and return the number of
+/// suppressed findings.
+fn apply_ignore_issues(findings: &mut Vec<Finding>, rules: &[IgnoreIssueRule]) -> usize {
+    if rules.is_empty() {
+        return 0;
+    }
+
+    let compiled = compile_ignore_rules(rules);
+    if compiled.is_empty() {
+        return 0;
+    }
+
+    let before = findings.len();
+    findings.retain(|finding| {
+        !compiled.iter().any(|rule| {
+            if finding.code != rule.kind {
+                return false;
+            }
+            match &rule.file_matcher {
+                None => true,
+                Some(glob_set) => glob_set.is_match(&finding.subject),
+            }
+        })
+    });
+    before - findings.len()
 }

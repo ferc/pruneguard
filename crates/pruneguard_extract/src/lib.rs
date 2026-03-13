@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use compact_str::CompactString;
-use pruneguard_fs::{FileRecord, SourceKind};
+use pruneguard_fs::FileRecord;
 use pruneguard_resolver::ResolvedEdge;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -132,6 +132,16 @@ pub enum DependencyPattern {
     TripleSlashReference { path: String, is_types: bool, line: u32 },
     /// `JSDoc` `@typedef {import('specifier').Type}` or `@type {import('...')}`.
     JsDocImport { specifier: String, line: u32 },
+    /// `import.meta.resolve('specifier')` — resolves a URL without importing.
+    ImportMetaResolve { specifier: String, line: u32 },
+    /// `require.context('./dir', true, /\.ts$/)` — webpack dynamic context.
+    RequireContext { directory: String, recursive: bool, line: u32 },
+    /// `new URL('./worker.js', import.meta.url)` — worker/asset URL pattern.
+    UrlConstructor { specifier: String, line: u32 },
+    /// `import foo = require('bar')` — TypeScript import-equals.
+    ImportEquals { specifier: String, line: u32 },
+    /// `import.meta.glob(['./a/*.ts', './b/*.ts'])` — array-form Vite glob.
+    ImportMetaGlobArray { patterns: Vec<String>, line: u32 },
 }
 
 /// Extracted and resolved facts for a tracked repository file.
@@ -159,20 +169,119 @@ impl ExtractedFile {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Source adapter trait
+// ---------------------------------------------------------------------------
+
+/// Trait for adapting non-JS/TS source formats into extractable facts.
+///
+/// Each adapter knows how to detect its format and extract script content
+/// that can be fed through the core JS/TS extractor.
+pub trait SourceAdapter: Send + Sync {
+    /// Name of this adapter (e.g. "vue", "svelte", "astro", "mdx").
+    fn name(&self) -> &str;
+
+    /// Whether this adapter handles the given path based on extension.
+    fn matches(&self, path: &Path) -> bool;
+
+    /// Extract facts from the source file.
+    fn extract(&self, path: &Path, source: &str) -> Result<FileFacts, ExtractError>;
+}
+
+/// Vue single-file component adapter.
+pub struct VueAdapter;
+
+impl SourceAdapter for VueAdapter {
+    fn name(&self) -> &str {
+        "vue"
+    }
+    fn matches(&self, path: &Path) -> bool {
+        path.extension().and_then(|e| e.to_str()) == Some("vue")
+    }
+    fn extract(&self, path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+        Ok(extract_vue_facts(path, source))
+    }
+}
+
+/// Svelte component adapter.
+pub struct SvelteAdapter;
+
+impl SourceAdapter for SvelteAdapter {
+    fn name(&self) -> &str {
+        "svelte"
+    }
+    fn matches(&self, path: &Path) -> bool {
+        path.extension().and_then(|e| e.to_str()) == Some("svelte")
+    }
+    fn extract(&self, path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+        Ok(extract_svelte_facts(path, source))
+    }
+}
+
+/// Astro component adapter.
+pub struct AstroAdapter;
+
+impl SourceAdapter for AstroAdapter {
+    fn name(&self) -> &str {
+        "astro"
+    }
+    fn matches(&self, path: &Path) -> bool {
+        path.extension().and_then(|e| e.to_str()) == Some("astro")
+    }
+    fn extract(&self, path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+        extract_astro_facts(path, source)
+    }
+}
+
+/// MDX adapter.
+pub struct MdxAdapter;
+
+impl SourceAdapter for MdxAdapter {
+    fn name(&self) -> &str {
+        "mdx"
+    }
+    fn matches(&self, path: &Path) -> bool {
+        path.extension().and_then(|e| e.to_str()) == Some("mdx")
+    }
+    fn extract(&self, path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
+        extract_mdx_facts(path, source)
+    }
+}
+
+/// Return the built-in set of source adapters.
+pub fn built_in_adapters() -> Vec<Box<dyn SourceAdapter>> {
+    vec![
+        Box::new(VueAdapter),
+        Box::new(SvelteAdapter),
+        Box::new(AstroAdapter),
+        Box::new(MdxAdapter),
+    ]
+}
+
 /// Extract all import/export facts from a tracked source file.
 ///
 /// For JS/TS files this parses the full file. For framework SFCs (`.vue`,
 /// `.svelte`, `.astro`, `.mdx`) this first extracts the embedded script
 /// blocks and then feeds them through the JS/TS extractor.
 pub fn extract_file_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractError> {
-    let source_kind = SourceKind::from_path(path);
-    match source_kind {
-        Some(SourceKind::Vue) => Ok(extract_vue_facts(path, source)),
-        Some(SourceKind::Svelte) => Ok(extract_svelte_facts(path, source)),
-        Some(SourceKind::Astro) => extract_astro_facts(path, source),
-        Some(SourceKind::Mdx) => extract_mdx_facts(path, source),
-        _ => extract_js_ts_facts(path, source),
+    extract_file_facts_with_adapters(path, source, &built_in_adapters())
+}
+
+/// Extract facts using a custom set of source adapters.
+///
+/// Tries each adapter in order; falls through to core JS/TS extraction
+/// if no adapter matches.
+pub fn extract_file_facts_with_adapters(
+    path: &Path,
+    source: &str,
+    adapters: &[Box<dyn SourceAdapter>],
+) -> Result<FileFacts, ExtractError> {
+    for adapter in adapters {
+        if adapter.matches(path) {
+            return adapter.extract(path, source);
+        }
     }
+    extract_js_ts_facts(path, source)
 }
 
 /// Core JS/TS extraction — parse the full source and walk the AST.
@@ -199,6 +308,10 @@ fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractEr
     patterns.extend(detect_import_meta_glob(source));
     patterns.extend(detect_triple_slash_references(source));
     patterns.extend(detect_jsdoc_imports(source));
+    patterns.extend(detect_import_meta_resolve(source));
+    patterns.extend(detect_require_context(source));
+    patterns.extend(detect_url_constructor(source));
+    patterns.extend(detect_import_equals(program));
     facts.dependency_patterns = patterns;
 
     Ok(facts)
@@ -1076,6 +1189,192 @@ fn detect_jsdoc_imports(source: &str) -> Vec<DependencyPattern> {
         index = literal_end + 2;
     }
 
+    results
+}
+
+/// Detect `import.meta.resolve('specifier')` calls via simple text scanning.
+fn detect_import_meta_resolve(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"import.meta.resolve(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() || bytes.get(literal_end + 1) != Some(&b')') {
+            index += 1;
+            continue;
+        }
+
+        let specifier = source[literal_start..literal_end].to_string();
+        let line = 1 + count_newlines(&bytes[..index]);
+        results.push(DependencyPattern::ImportMetaResolve {
+            specifier,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
+        });
+        index = literal_end + 2;
+    }
+
+    results
+}
+
+/// Detect `require.context('./dir', ...)` calls via simple text scanning.
+///
+/// Extracts the directory argument. The `recursive` flag defaults to `true`
+/// when the second argument is not a literal `false`.
+fn detect_require_context(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"require.context(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        // Check word boundary before `require`
+        let before = index.checked_sub(1).and_then(|i| bytes.get(i).copied());
+        if before.is_some_and(is_identifier_byte) {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() {
+            index += 1;
+            continue;
+        }
+
+        let directory = source[literal_start..literal_end].to_string();
+        let line = 1 + count_newlines(&bytes[..index]);
+
+        // Check for `, false` after the closing quote to determine recursive flag
+        let after_quote = literal_end + 1;
+        let rest = &source[after_quote..source.len().min(after_quote + 20)];
+        let recursive = !rest.trim_start_matches([',', ' ']).starts_with("false");
+
+        results.push(DependencyPattern::RequireContext {
+            directory,
+            recursive,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
+        });
+        // Skip past the closing paren
+        index = literal_end + 1;
+    }
+
+    results
+}
+
+/// Detect `new URL('./path', import.meta.url)` patterns via text scanning.
+fn detect_url_constructor(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"new URL(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() {
+            index += 1;
+            continue;
+        }
+
+        // Check that the second argument contains `import.meta.url`
+        let after_first_arg = literal_end + 1;
+        let close_paren = source[after_first_arg..].find(')').map(|i| i + after_first_arg);
+        let Some(close) = close_paren else {
+            index += 1;
+            continue;
+        };
+        let between = &source[after_first_arg..close];
+        if !between.contains("import.meta.url") {
+            index += 1;
+            continue;
+        }
+
+        let specifier = source[literal_start..literal_end].to_string();
+        // Only track relative specifiers (not absolute URLs)
+        if specifier.starts_with('.') || specifier.starts_with('/') {
+            let line = 1 + count_newlines(&bytes[..index]);
+            results.push(DependencyPattern::UrlConstructor {
+                specifier,
+                line: u32::try_from(line).unwrap_or(u32::MAX),
+            });
+        }
+        index = close + 1;
+    }
+
+    results
+}
+
+/// Detect `import foo = require('bar')` from the parsed AST.
+fn detect_import_equals(program: &oxc_ast::ast::Program<'_>) -> Vec<DependencyPattern> {
+    let mut results = Vec::new();
+    for stmt in &program.body {
+        if let oxc_ast::ast::Statement::TSImportEqualsDeclaration(decl) = stmt {
+            if let oxc_ast::ast::TSModuleReference::ExternalModuleReference(ext) =
+                &decl.module_reference
+            {
+                let specifier = ext.expression.value.to_string();
+                let line = decl.span.start;
+                results.push(DependencyPattern::ImportEquals {
+                    specifier,
+                    line,
+                });
+            }
+        }
+    }
     results
 }
 

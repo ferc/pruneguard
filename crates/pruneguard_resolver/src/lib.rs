@@ -35,6 +35,24 @@ pub enum ResolvedEdgeKind {
     SideEffectImport,
     ReExportNamed,
     ReExportAll,
+    /// `require.resolve('specifier')` — resolves but doesn't import at runtime.
+    RequireResolve,
+    /// `import.meta.glob('pattern')` — Vite glob import (expanded to edges).
+    ImportMetaGlob,
+    /// JSDoc `@type {import('specifier')}` — type-level dependency.
+    JsDocImport,
+    /// `/// <reference path="..." />` — TypeScript file reference.
+    TripleSlashFile,
+    /// `/// <reference types="..." />` — TypeScript types reference.
+    TripleSlashTypes,
+    /// `import.meta.resolve('specifier')` — resolves a URL without importing.
+    ImportMetaResolve,
+    /// `require.context('./dir', ...)` — webpack dynamic context directory.
+    RequireContext,
+    /// `new URL('./worker.js', import.meta.url)` — worker/asset URL pattern.
+    UrlConstructor,
+    /// `import foo = require('bar')` — TypeScript import-equals.
+    ImportEquals,
 }
 
 /// A resolved edge emitted while extracting a file.
@@ -95,6 +113,15 @@ impl UnresolvedReason {
     }
 }
 
+/// Fallback main fields from a workspace package.json.
+#[derive(Debug, Clone, Default)]
+struct WorkspaceMainFields {
+    /// `"typings"` or `"types"` field — path to declaration entry.
+    types_entry: Option<String>,
+    /// `"module"` field — ESM entry.
+    module_entry: Option<String>,
+}
+
 /// Module resolver built on `oxc_resolver`.
 pub struct ModuleResolver {
     inner: Resolver,
@@ -107,6 +134,11 @@ pub struct ModuleResolver {
     /// Cached workspace package.json `imports` maps (subpath imports),
     /// keyed by workspace root directory.  Used to resolve `#`-prefixed specifiers.
     workspace_imports: FxHashMap<PathBuf, Option<serde_json::Value>>,
+    /// Cached workspace package.json `browser` field mappings.
+    /// `browser` can be a string (alternative main) or an object (per-module replacements).
+    workspace_browser: FxHashMap<String, Option<serde_json::Value>>,
+    /// Cached workspace package.json fallback main fields (`typings`, `types`, `module`).
+    workspace_main_fields: FxHashMap<String, WorkspaceMainFields>,
 }
 
 impl ModuleResolver {
@@ -169,6 +201,8 @@ impl ModuleResolver {
             workspace_roots: FxHashMap::default(),
             workspace_exports: FxHashMap::default(),
             workspace_imports: FxHashMap::default(),
+            workspace_browser: FxHashMap::default(),
+            workspace_main_fields: FxHashMap::default(),
         }
     }
 
@@ -181,6 +215,10 @@ impl ModuleResolver {
             self.workspace_exports.insert(pkg_name.clone(), exports);
             let imports = load_workspace_imports(root);
             self.workspace_imports.insert(root.clone(), imports);
+            let browser = load_workspace_field(root, "browser");
+            self.workspace_browser.insert(pkg_name.clone(), browser);
+            let main_fields = load_workspace_main_fields(root);
+            self.workspace_main_fields.insert(pkg_name.clone(), main_fields);
         }
         self.workspace_roots = roots;
     }
@@ -212,6 +250,10 @@ impl ModuleResolver {
                 })
             }
             Err(err) => {
+                // Try browser field remapping for workspace packages.
+                if let Some(resolved) = self.resolve_via_browser_field(specifier, from) {
+                    return Ok(resolved);
+                }
                 // Try workspace-aware resolution: map `@scope/pkg/sub/path` to
                 // the workspace root for `@scope/pkg` and resolve the subpath
                 // as a relative import from there.
@@ -263,7 +305,22 @@ impl ModuleResolver {
         }
 
         if subpath.is_empty() {
-            // Bare package import -- resolve via the package's main entry.
+            // Bare package import -- try `module` and `typings`/`types` fields,
+            // then fall back to `index`.
+            if let Some(main_fields) = self.workspace_main_fields.get(&pkg_name) {
+                if let Some(module_entry) = &main_fields.module_entry {
+                    let relative = module_entry.strip_prefix("./").unwrap_or(module_entry);
+                    if let Some(resolved) = resolve_with_extensions(workspace_root, relative) {
+                        return Some(resolved);
+                    }
+                }
+                if let Some(types_entry) = &main_fields.types_entry {
+                    let relative = types_entry.strip_prefix("./").unwrap_or(types_entry);
+                    if let Some(resolved) = resolve_with_extensions(workspace_root, relative) {
+                        return Some(resolved);
+                    }
+                }
+            }
             return resolve_with_extensions(workspace_root, "index");
         }
 
@@ -300,6 +357,44 @@ impl ModuleResolver {
         }
 
         resolve_with_extensions(workspace_root, relative)
+    }
+
+    /// Try to resolve a specifier via a workspace package's `browser` field.
+    ///
+    /// When the `browser` field is an object, it maps module specifiers to
+    /// replacement paths (or `false` to stub them out).  When it is a string,
+    /// it specifies an alternative main entry point.
+    fn resolve_via_browser_field(&self, specifier: &str, from: &Path) -> Option<ResolvedModule> {
+        // Find which workspace the importing file belongs to.
+        let (pkg_name, workspace_root) = self
+            .workspace_roots
+            .iter()
+            .find(|(_, root)| from.starts_with(root))?;
+        let browser = self.workspace_browser.get(pkg_name)?.as_ref()?;
+
+        match browser {
+            serde_json::Value::String(alt_main) if specifier == pkg_name.as_str() => {
+                let relative = alt_main.strip_prefix("./").unwrap_or(alt_main.as_str());
+                resolve_with_extensions(workspace_root, relative)
+            }
+            serde_json::Value::Object(map) => {
+                // Look for an exact match of the specifier in the browser map.
+                let replacement = map.get(specifier).and_then(|v| v.as_str())?;
+                let relative = replacement.strip_prefix("./").unwrap_or(replacement);
+                let candidate = workspace_root.join(relative);
+                if candidate.is_file() {
+                    Some(ResolvedModule {
+                        path: candidate,
+                        via_exports: false,
+                        exports_subpath: None,
+                        exports_condition: None,
+                    })
+                } else {
+                    resolve_with_extensions(workspace_root, relative)
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Check whether a specifier targets a workspace package whose `exports` map
@@ -631,6 +726,34 @@ fn load_workspace_imports(root: &Path) -> Option<serde_json::Value> {
     let content = std::fs::read_to_string(pkg_json_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
     parsed.get("imports").cloned()
+}
+
+/// Load an arbitrary field from a workspace package's `package.json`.
+fn load_workspace_field(root: &Path, field: &str) -> Option<serde_json::Value> {
+    let pkg_json_path = root.join("package.json");
+    let content = std::fs::read_to_string(pkg_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed.get(field).cloned()
+}
+
+/// Load `typings`/`types` and `module` fields from a workspace's package.json.
+fn load_workspace_main_fields(root: &Path) -> WorkspaceMainFields {
+    let pkg_json_path = root.join("package.json");
+    let content = match std::fs::read_to_string(pkg_json_path) {
+        Ok(c) => c,
+        Err(_) => return WorkspaceMainFields::default(),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return WorkspaceMainFields::default(),
+    };
+    let types_entry = parsed
+        .get("typings")
+        .or_else(|| parsed.get("types"))
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
+    let module_entry = parsed.get("module").and_then(|v| v.as_str()).map(ToString::to_string);
+    WorkspaceMainFields { types_entry, module_entry }
 }
 
 /// Resolve a `#`-prefixed specifier against an `imports` map value.

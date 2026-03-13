@@ -15,6 +15,7 @@ pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,
     profile: EntrypointProfile,
+    ignore_exports_used_in_file: bool,
 ) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
         return Vec::new();
@@ -79,6 +80,22 @@ pub fn analyze(
         }
     }
 
+    // When `ignore_exports_used_in_file` is enabled, collect exports that are
+    // consumed by an import edge where the importer is the same file as the source.
+    // These same-file references make the export "used in file" and should not be
+    // reported as unused.
+    let same_file_used: FxHashSet<(FileId, CompactString)> = if ignore_exports_used_in_file {
+        build
+            .symbol_graph
+            .import_edges
+            .iter()
+            .filter(|edge| edge.importer == edge.source)
+            .map(|edge| (edge.source, edge.export_name.clone()))
+            .collect()
+    } else {
+        FxHashSet::default()
+    };
+
     // Compute global unresolved pressure for confidence demotion (integer percentage).
     let total_specifiers = build.stats.files_resolved + build.stats.unresolved_specifiers;
     let global_pressure_pct = if total_specifiers > 0 {
@@ -111,6 +128,13 @@ pub fn analyze(
         }
 
         if live.is_export_live(export.file, &export.name, export.is_type) {
+            continue;
+        }
+
+        // Skip exports consumed within the same file when the option is enabled.
+        if ignore_exports_used_in_file
+            && same_file_used.contains(&(export.file, export.name.clone()))
+        {
             continue;
         }
 
