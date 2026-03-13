@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -11,7 +11,6 @@ use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence, F
 use crate::{make_finding, severity};
 
 /// Find files without an inferred owner and cross-owner dependency edges.
-#[allow(clippy::too_many_lines)]
 pub fn analyze(
     build: &GraphBuildResult,
     ownership: Option<&OwnershipConfig>,
@@ -31,6 +30,23 @@ pub fn analyze(
         .map(|file| (file.file.path.clone(), owner_for_file(build, &team_matchers, file)))
         .collect::<FxHashMap<_, _>>();
 
+    let mut findings = find_unowned_files(build, &owners, finding_severity);
+
+    let (cross_owner_findings, hotspots) = find_cross_owner_edges(build, &owners, finding_severity);
+    findings.extend(cross_owner_findings);
+
+    findings.extend(find_ownership_hotspots(hotspots));
+
+    findings
+}
+
+type HotspotMap = FxHashMap<String, (FxHashSet<String>, Option<String>, Option<String>, usize)>;
+
+fn find_unowned_files(
+    build: &GraphBuildResult,
+    owners: &FxHashMap<PathBuf, Option<String>>,
+    finding_severity: FindingSeverity,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     for extracted_file in &build.files {
         if should_skip_file(extracted_file.file.role, &extracted_file.file.relative_path) {
@@ -62,10 +78,18 @@ pub fn analyze(
             ));
         }
     }
+    findings
+}
 
+fn find_cross_owner_edges(
+    build: &GraphBuildResult,
+    owners: &FxHashMap<PathBuf, Option<String>>,
+    finding_severity: FindingSeverity,
+) -> (Vec<Finding>, HotspotMap) {
+    let mut findings = Vec::new();
     let mut seen_cross_edges = FxHashSet::default();
-    let mut hotspots =
-        FxHashMap::<String, (FxHashSet<String>, Option<String>, Option<String>, usize)>::default();
+    let mut hotspots = HotspotMap::default();
+
     for extracted_file in &build.files {
         if should_skip_file(extracted_file.file.role, &extracted_file.file.relative_path) {
             continue;
@@ -148,6 +172,11 @@ pub fn analyze(
         }
     }
 
+    (findings, hotspots)
+}
+
+fn find_ownership_hotspots(mut hotspots: HotspotMap) -> Vec<Finding> {
+    let mut findings = Vec::new();
     let mut hotspot_paths = hotspots.keys().cloned().collect::<Vec<_>>();
     hotspot_paths.sort();
     for relative_path in hotspot_paths {
@@ -183,7 +212,6 @@ pub fn analyze(
             None,
         ));
     }
-
     findings
 }
 

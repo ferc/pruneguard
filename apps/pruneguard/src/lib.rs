@@ -348,6 +348,40 @@ pub struct SuggestRulesOptions {
     pub no_cache: bool,
 }
 
+struct UnresolvedPressure {
+    unresolved: usize,
+    total: usize,
+}
+
+impl UnresolvedPressure {
+    const fn from_stats(stats: &pruneguard_report::Stats) -> Self {
+        let total = stats.files_resolved + stats.unresolved_specifiers;
+        Self { unresolved: stats.unresolved_specifiers, total }
+    }
+
+    const fn exceeds_percent(&self, threshold: usize) -> bool {
+        self.total > 0 && self.unresolved * 100 > threshold * self.total
+    }
+
+    fn display_percent(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let result = self.unresolved as f64 / self.total as f64 * 100.0;
+        result
+    }
+
+    fn as_f64(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let result = self.unresolved as f64 / self.total as f64;
+        result
+    }
+}
+
 // --- Framework debug and compatibility report types ---
 
 #[derive(Debug, serde::Serialize)]
@@ -623,7 +657,6 @@ fn compute_compat_report_from_build(
 ///
 /// Combines full-scope scan, `--changed-since`, baseline, and trust summary
 /// into a single report with blocking vs advisory findings.
-#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 pub fn review(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -641,43 +674,95 @@ pub fn review(
     let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
     let report = &execution.report;
 
-    let changed_files = if options.base_ref.is_some() {
+    let changed_files = collect_review_changed_files(options, &execution)?;
+    let new_findings = report.findings.clone();
+    let (mut blocking_findings, mut advisory_findings) = split_blocking_advisory(&new_findings);
+    let pressure = UnresolvedPressure::from_stats(&report.stats);
+
+    let (mut recommendations, recommended_actions) =
+        build_review_recommendations(&blocking_findings, &advisory_findings, &pressure, report);
+
+    let mut proposed_actions = build_review_proposed_actions(&blocking_findings);
+    rank_remediation_actions(&mut proposed_actions);
+
+    let (strict_trust_applied, compatibility_warnings) = apply_strict_trust(
+        options,
+        report,
+        cwd,
+        profile,
+        &execution,
+        &pressure,
+        &mut blocking_findings,
+        &mut advisory_findings,
+        &mut recommendations,
+    );
+
+    Ok(ReviewReport {
+        base_ref: options.base_ref.clone(),
+        changed_files,
+        new_findings,
+        blocking_findings,
+        advisory_findings,
+        trust: ReviewTrust {
+            full_scope: !report.stats.partial_scope,
+            baseline_applied: report.stats.baseline_applied,
+            unresolved_pressure: pressure.as_f64(),
+            confidence_counts: report.stats.confidence_counts.clone(),
+            execution_mode: report.stats.execution_mode,
+        },
+        recommendations,
+        recommended_actions,
+        proposed_actions,
+        execution_mode: report.stats.execution_mode,
+        latency_ms: None,
+        compatibility_warnings,
+        strict_trust_applied,
+    })
+}
+
+fn collect_review_changed_files(
+    options: &ReviewOptions,
+    execution: &ScanExecution,
+) -> miette::Result<Vec<String>> {
+    if options.base_ref.is_some() {
         let scope = collect_changed_scope(
             &execution.build.discovery.project_root,
             options.base_ref.as_deref().unwrap_or("HEAD~1"),
             &[],
         )?;
-        scope.changed_paths().iter().map(|path| path.to_string_lossy().to_string()).collect()
+        Ok(scope.changed_paths().iter().map(|path| path.to_string_lossy().to_string()).collect())
     } else {
-        Vec::new()
-    };
+        Ok(Vec::new())
+    }
+}
 
-    let new_findings = report.findings.clone();
-    let mut blocking_findings = new_findings
+fn split_blocking_advisory(findings: &[Finding]) -> (Vec<Finding>, Vec<Finding>) {
+    let blocking = findings
         .iter()
         .filter(|f| {
             f.confidence == FindingConfidence::High
                 && matches!(f.severity, FindingSeverity::Error | FindingSeverity::Warn)
         })
         .cloned()
-        .collect::<Vec<_>>();
-    let mut advisory_findings = new_findings
+        .collect();
+    let advisory = findings
         .iter()
         .filter(|f| {
             f.confidence != FindingConfidence::High || matches!(f.severity, FindingSeverity::Info)
         })
         .cloned()
-        .collect::<Vec<_>>();
+        .collect();
+    (blocking, advisory)
+}
 
-    let unresolved_pressure = if report.stats.files_resolved > 0 {
-        report.stats.unresolved_specifiers as f64
-            / (report.stats.files_resolved + report.stats.unresolved_specifiers) as f64
-    } else {
-        0.0
-    };
-
+fn build_review_recommendations(
+    blocking_findings: &[Finding],
+    advisory_findings: &[Finding],
+    pressure: &UnresolvedPressure,
+    report: &AnalysisReport,
+) -> (Vec<String>, Vec<RecommendedAction>) {
     let mut recommendations = Vec::new();
-    let mut recommended_actions: Vec<RecommendedAction> = Vec::new();
+    let mut actions: Vec<RecommendedAction> = Vec::new();
     let mut priority = 1usize;
 
     if !blocking_findings.is_empty() {
@@ -685,78 +770,19 @@ pub fn review(
             "{} blocking finding(s) should be resolved before merge.",
             blocking_findings.len()
         ));
-
-        // Collect safe-deletable targets (unused files/exports with high confidence).
-        let safe_delete_targets: Vec<String> = blocking_findings
-            .iter()
-            .filter(|f| {
-                matches!(f.code.as_str(), "unused-file" | "unused-export")
-                    && f.confidence == FindingConfidence::High
-            })
-            .map(|f| f.subject.clone())
-            .collect();
-
-        if !safe_delete_targets.is_empty() {
-            recommended_actions.push(RecommendedAction {
-                kind: RecommendedActionKind::RunSafeDelete,
-                description: format!(
-                    "Run safe-delete on {} unused target(s) to remove dead code.",
-                    safe_delete_targets.len()
-                ),
-                priority,
-                command: Some(format!("pruneguard safe-delete {}", safe_delete_targets.join(" "))),
-                targets: safe_delete_targets,
-            });
-            priority += 1;
-        }
-
-        // Collect targets that need fix-plan (non-deletable blocking findings).
-        let fix_plan_targets: Vec<String> = blocking_findings
-            .iter()
-            .filter(|f| {
-                !matches!(f.code.as_str(), "unused-file" | "unused-export")
-                    || f.confidence != FindingConfidence::High
-            })
-            .map(|f| f.subject.clone())
-            .collect();
-
-        if !fix_plan_targets.is_empty() {
-            recommended_actions.push(RecommendedAction {
-                kind: RecommendedActionKind::RunFixPlan,
-                description: format!(
-                    "Generate a fix plan for {} blocking finding(s).",
-                    fix_plan_targets.len()
-                ),
-                priority,
-                command: Some(format!("pruneguard fix-plan {}", fix_plan_targets.join(" "))),
-                targets: fix_plan_targets,
-            });
-            priority += 1;
-        }
-
-        recommended_actions.push(RecommendedAction {
-            kind: RecommendedActionKind::ResolveBlocking,
-            description: format!(
-                "Resolve all {} blocking finding(s) before merge.",
-                blocking_findings.len()
-            ),
-            priority,
-            command: None,
-            targets: blocking_findings.iter().map(|f| f.id.clone()).collect(),
-        });
-        priority += 1;
+        recommend_blocking_actions(blocking_findings, &mut actions, &mut priority);
     }
 
-    if unresolved_pressure > 0.05 {
+    if pressure.exceeds_percent(5) {
         recommendations.push(format!(
             "Unresolved pressure is {:.1}% — findings may be less accurate. Consider configuring resolver paths.",
-            unresolved_pressure * 100.0
+            pressure.display_percent()
         ));
-        recommended_actions.push(RecommendedAction {
+        actions.push(RecommendedAction {
             kind: RecommendedActionKind::FixResolverConfig,
             description: format!(
                 "Unresolved pressure is {:.1}%. Configure resolver paths to improve accuracy.",
-                unresolved_pressure * 100.0
+                pressure.display_percent()
             ),
             priority,
             command: None,
@@ -769,7 +795,7 @@ pub fn review(
         recommendations.push(
             "Partial-scope analysis was used. Dead-code findings are advisory only.".to_string(),
         );
-        recommended_actions.push(RecommendedAction {
+        actions.push(RecommendedAction {
             kind: RecommendedActionKind::RunFullScope,
             description: "Run a full-scope scan for higher-confidence dead-code detection."
                 .to_string(),
@@ -781,7 +807,7 @@ pub fn review(
     }
 
     if !advisory_findings.is_empty() {
-        recommended_actions.push(RecommendedAction {
+        actions.push(RecommendedAction {
             kind: RecommendedActionKind::ReviewAdvisory,
             description: format!(
                 "Review {} advisory finding(s) for potential improvements.",
@@ -796,7 +822,7 @@ pub fn review(
 
     if blocking_findings.is_empty() && advisory_findings.is_empty() {
         recommendations.push("No new findings. Branch is clean.".to_string());
-        recommended_actions.push(RecommendedAction {
+        actions.push(RecommendedAction {
             kind: RecommendedActionKind::None,
             description: "No new findings. Branch is clean.".to_string(),
             priority,
@@ -806,9 +832,76 @@ pub fn review(
         priority += 1;
     }
 
-    let _ = priority; // suppress unused assignment warning
+    let _ = priority;
+    (recommendations, actions)
+}
 
-    let mut proposed_actions: Vec<RemediationAction> = blocking_findings
+fn recommend_blocking_actions(
+    blocking_findings: &[Finding],
+    actions: &mut Vec<RecommendedAction>,
+    priority: &mut usize,
+) {
+    let safe_delete_targets: Vec<String> = blocking_findings
+        .iter()
+        .filter(|f| {
+            matches!(f.code.as_str(), "unused-file" | "unused-export")
+                && f.confidence == FindingConfidence::High
+        })
+        .map(|f| f.subject.clone())
+        .collect();
+
+    if !safe_delete_targets.is_empty() {
+        actions.push(RecommendedAction {
+            kind: RecommendedActionKind::RunSafeDelete,
+            description: format!(
+                "Run safe-delete on {} unused target(s) to remove dead code.",
+                safe_delete_targets.len()
+            ),
+            priority: *priority,
+            command: Some(format!("pruneguard safe-delete {}", safe_delete_targets.join(" "))),
+            targets: safe_delete_targets,
+        });
+        *priority += 1;
+    }
+
+    let fix_plan_targets: Vec<String> = blocking_findings
+        .iter()
+        .filter(|f| {
+            !matches!(f.code.as_str(), "unused-file" | "unused-export")
+                || f.confidence != FindingConfidence::High
+        })
+        .map(|f| f.subject.clone())
+        .collect();
+
+    if !fix_plan_targets.is_empty() {
+        actions.push(RecommendedAction {
+            kind: RecommendedActionKind::RunFixPlan,
+            description: format!(
+                "Generate a fix plan for {} blocking finding(s).",
+                fix_plan_targets.len()
+            ),
+            priority: *priority,
+            command: Some(format!("pruneguard fix-plan {}", fix_plan_targets.join(" "))),
+            targets: fix_plan_targets,
+        });
+        *priority += 1;
+    }
+
+    actions.push(RecommendedAction {
+        kind: RecommendedActionKind::ResolveBlocking,
+        description: format!(
+            "Resolve all {} blocking finding(s) before merge.",
+            blocking_findings.len()
+        ),
+        priority: *priority,
+        command: None,
+        targets: blocking_findings.iter().map(|f| f.id.clone()).collect(),
+    });
+    *priority += 1;
+}
+
+fn build_review_proposed_actions(blocking_findings: &[Finding]) -> Vec<RemediationAction> {
+    blocking_findings
         .iter()
         .filter_map(|finding| {
             let kind = finding.primary_action_kind?;
@@ -831,31 +924,29 @@ pub fn review(
                 finding_ids: vec![finding.id.clone()],
             })
         })
-        .collect();
+        .collect()
+}
 
-    // Apply ranking policy: sort by minimal blast radius first, then high
-    // confidence first, then low unresolved pressure first.
-    rank_remediation_actions(&mut proposed_actions);
-
-    // --- strict-trust enforcement ---
-    //
-    // When `strict_trust` is enabled, only findings that meet all trust
-    // criteria remain blocking:
-    //   1. Full-scope analysis (not partial)
-    //   2. High confidence
-    //   3. Low unresolved pressure (<=5%)
-    //   4. No heuristic-only framework detection
-    //   5. No unsupported signals
-    //
-    // If trust is insufficient, ALL findings are moved to advisory.
+#[allow(clippy::too_many_arguments)]
+fn apply_strict_trust(
+    options: &ReviewOptions,
+    report: &AnalysisReport,
+    cwd: &Path,
+    profile: EntrypointProfile,
+    execution: &ScanExecution,
+    pressure: &UnresolvedPressure,
+    blocking_findings: &mut Vec<Finding>,
+    advisory_findings: &mut Vec<Finding>,
+    recommendations: &mut Vec<String>,
+) -> (bool, Vec<String>) {
     let mut strict_trust_applied = report.stats.strict_trust_applied;
     let mut compatibility_warnings = report.stats.compatibility_warnings.clone();
 
     if options.strict_trust {
-        let compat = compatibility_report_from_scan(cwd, profile, &execution);
+        let compat = compatibility_report_from_scan(cwd, profile, execution);
         let has_heuristic = !compat.heuristic_frameworks.is_empty();
         let has_unsupported = !compat.unsupported_signals.is_empty();
-        let high_pressure = unresolved_pressure > 0.05;
+        let high_pressure = pressure.exceeds_percent(5);
 
         let insufficient_trust =
             has_heuristic || has_unsupported || high_pressure || report.stats.partial_scope;
@@ -882,12 +973,11 @@ pub fn review(
             if high_pressure {
                 compatibility_warnings.push(format!(
                     "Unresolved pressure is {:.1}%. Findings may be inaccurate.",
-                    unresolved_pressure * 100.0
+                    pressure.display_percent()
                 ));
             }
 
-            // Move all blocking findings to advisory.
-            advisory_findings.append(&mut blocking_findings);
+            advisory_findings.append(blocking_findings);
             recommendations.push(
                 "strict-trust: trust conditions not met — all findings downgraded to advisory."
                     .to_string(),
@@ -895,34 +985,13 @@ pub fn review(
         }
     }
 
-    Ok(ReviewReport {
-        base_ref: options.base_ref.clone(),
-        changed_files,
-        new_findings,
-        blocking_findings,
-        advisory_findings,
-        trust: ReviewTrust {
-            full_scope: !report.stats.partial_scope,
-            baseline_applied: report.stats.baseline_applied,
-            unresolved_pressure,
-            confidence_counts: report.stats.confidence_counts.clone(),
-            execution_mode: report.stats.execution_mode,
-        },
-        recommendations,
-        recommended_actions,
-        proposed_actions,
-        execution_mode: report.stats.execution_mode,
-        latency_ms: None,
-        compatibility_warnings,
-        strict_trust_applied,
-    })
+    (strict_trust_applied, compatibility_warnings)
 }
 
 /// Evaluate targets for safe deletion.
 ///
 /// Conservative by design: only marks targets as "safe" when trust is high
 /// and reverse impact is empty or explicitly ignorable.
-#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 pub fn safe_delete(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -941,35 +1010,10 @@ pub fn safe_delete(
     let report = &execution.report;
 
     if report.stats.partial_scope {
-        return Ok(SafeDeleteReport {
-            targets: targets.to_vec(),
-            safe: Vec::new(),
-            needs_review: Vec::new(),
-            blocked: targets
-                .iter()
-                .map(|target| SafeDeleteCandidate {
-                    target: target.clone(),
-                    classification: SafeDeleteClassification::Blocked,
-                    confidence: None,
-                    reasons: vec![
-                        "Partial-scope analysis was used. Full-scope is required for safe-delete."
-                            .to_string(),
-                    ],
-                    evidence: Vec::new(),
-                })
-                .collect(),
-            deletion_order: Vec::new(),
-            evidence: Vec::new(),
-        });
+        return Ok(partial_scope_safe_delete_report(targets));
     }
 
-    let unresolved_pressure = if report.stats.files_resolved > 0 {
-        report.stats.unresolved_specifiers as f64
-            / (report.stats.files_resolved + report.stats.unresolved_specifiers) as f64
-    } else {
-        0.0
-    };
-    let high_pressure = unresolved_pressure > 0.05;
+    let pressure = UnresolvedPressure::from_stats(&report.stats);
 
     let finding_subjects: BTreeSet<String> =
         report.findings.iter().map(|f| f.subject.clone()).collect();
@@ -981,175 +1025,274 @@ pub fn safe_delete(
     let mut all_evidence = Vec::new();
 
     for target in targets {
-        let is_finding = finding_subjects.contains(target)
-            || report.findings.iter().any(|f| {
-                f.subject.starts_with(target) || f.subject.split('#').next() == Some(target)
-            });
+        match classify_safe_delete_target(
+            target,
+            cwd,
+            config,
+            profile,
+            report,
+            &finding_subjects,
+            &pressure,
+        ) {
+            TargetClassification::Safe(candidate) => {
+                deletion_order_targets.push(target.clone());
+                safe.push(candidate);
+            }
+            TargetClassification::NeedsReview(candidate) => {
+                needs_review.push(candidate);
+            }
+            TargetClassification::Blocked(candidate, evidence) => {
+                all_evidence.extend(evidence);
+                blocked.push(candidate);
+            }
+        }
+    }
 
-        if !is_finding {
-            blocked.push(SafeDeleteCandidate {
+    apply_trust_downgrades(
+        &execution.build,
+        &pressure,
+        &mut safe,
+        &mut needs_review,
+        &mut deletion_order_targets,
+    );
+
+    compute_deletion_order(&mut deletion_order_targets, &execution.build);
+    let deletion_order = build_deletion_order_entries(&deletion_order_targets);
+
+    Ok(SafeDeleteReport {
+        targets: targets.to_vec(),
+        safe,
+        needs_review,
+        blocked,
+        deletion_order,
+        evidence: all_evidence,
+    })
+}
+
+fn partial_scope_safe_delete_report(targets: &[String]) -> SafeDeleteReport {
+    SafeDeleteReport {
+        targets: targets.to_vec(),
+        safe: Vec::new(),
+        needs_review: Vec::new(),
+        blocked: targets
+            .iter()
+            .map(|target| SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::Blocked,
+                confidence: None,
+                reasons: vec![
+                    "Partial-scope analysis was used. Full-scope is required for safe-delete."
+                        .to_string(),
+                ],
+                evidence: Vec::new(),
+            })
+            .collect(),
+        deletion_order: Vec::new(),
+        evidence: Vec::new(),
+    }
+}
+
+enum TargetClassification {
+    Safe(SafeDeleteCandidate),
+    NeedsReview(SafeDeleteCandidate),
+    Blocked(SafeDeleteCandidate, Vec<pruneguard_report::Evidence>),
+}
+
+fn classify_safe_delete_target(
+    target: &str,
+    cwd: &Path,
+    config: &PruneguardConfig,
+    profile: EntrypointProfile,
+    report: &AnalysisReport,
+    finding_subjects: &BTreeSet<String>,
+    pressure: &UnresolvedPressure,
+) -> TargetClassification {
+    let is_finding = finding_subjects.contains(target)
+        || report
+            .findings
+            .iter()
+            .any(|f| f.subject.starts_with(target) || f.subject.split('#').next() == Some(target));
+
+    if !is_finding {
+        return TargetClassification::Blocked(
+            SafeDeleteCandidate {
+                target: target.to_owned(),
                 classification: SafeDeleteClassification::Blocked,
                 confidence: None,
                 reasons: vec![format!("`{target}` was not flagged as unused by the analysis.")],
                 evidence: vec![pruneguard_report::Evidence {
                     kind: "absence".to_string(),
-                    file: Some(target.clone()),
+                    file: Some(target.to_owned()),
                     line: None,
                     description: "No unused-file or unused-export finding matches this target."
                         .to_string(),
                 }],
-            });
-            continue;
-        }
-
-        let related_findings: Vec<&Finding> = report
-            .findings
-            .iter()
-            .filter(|f| {
-                f.subject == *target
-                    || f.subject.starts_with(target)
-                    || f.subject.split('#').next() == Some(target.as_str())
-            })
-            .collect();
-
-        let impact_result =
-            impact_with_options(cwd, config, target, profile, &ImpactOptions::default());
-
-        let has_reverse_impact = match &impact_result {
-            Ok(ir) => {
-                // Exclude the target itself from affected-files check.
-                let other_affected = ir
-                    .affected_files
-                    .iter()
-                    .any(|f| f != target && !f.ends_with(target) && !target.ends_with(f));
-                !ir.affected_entrypoints.is_empty() || other_affected
-            }
-            Err(_) => false,
-        };
-
-        if has_reverse_impact {
-            let mut reasons = vec![format!(
-                "`{target}` has reverse impact — other files or entrypoints depend on it."
-            )];
-            let mut candidate_evidence = Vec::new();
-            if let Ok(ir) = &impact_result {
-                if !ir.affected_entrypoints.is_empty() {
-                    reasons.push(format!(
-                        "Affected entrypoints: {}",
-                        ir.affected_entrypoints
-                            .iter()
-                            .take(5)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ));
-                }
-                let impact_evidence = pruneguard_report::Evidence {
-                    kind: "impact".to_string(),
-                    file: Some(target.clone()),
-                    line: None,
-                    description: format!(
-                        "{} affected entrypoints, {} affected files",
-                        ir.affected_entrypoints.len(),
-                        ir.affected_files.len()
-                    ),
-                };
-                candidate_evidence.push(impact_evidence.clone());
-                all_evidence.push(impact_evidence);
-            }
-            blocked.push(SafeDeleteCandidate {
-                target: target.clone(),
-                classification: SafeDeleteClassification::Blocked,
-                confidence: None,
-                reasons,
-                evidence: candidate_evidence,
-            });
-            continue;
-        }
-
-        let all_high_confidence =
-            related_findings.iter().all(|f| f.confidence == FindingConfidence::High);
-        let any_low_confidence =
-            related_findings.iter().any(|f| f.confidence == FindingConfidence::Low);
-
-        // Collect evidence from related findings for all candidates.
-        let candidate_evidence: Vec<pruneguard_report::Evidence> = related_findings
-            .iter()
-            .map(|f| pruneguard_report::Evidence {
-                kind: "finding".to_string(),
-                file: Some(f.subject.clone()),
-                line: None,
-                description: format!("[{}] {} (confidence: {:?})", f.code, f.message, f.confidence),
-            })
-            .collect();
-
-        if high_pressure {
-            needs_review.push(SafeDeleteCandidate {
-                target: target.clone(),
-                classification: SafeDeleteClassification::NeedsReview,
-                confidence: Some(FindingConfidence::Low),
-                reasons: vec![
-                    format!(
-                        "Unresolved pressure is {:.1}% — cannot guarantee safety.",
-                        unresolved_pressure * 100.0
-                    ),
-                    "Resolve unresolved specifiers and re-run safe-delete for a definitive answer."
-                        .to_string(),
-                ],
-                evidence: candidate_evidence,
-            });
-        } else if any_low_confidence {
-            needs_review.push(SafeDeleteCandidate {
-                target: target.clone(),
-                classification: SafeDeleteClassification::NeedsReview,
-                confidence: Some(FindingConfidence::Low),
-                reasons: vec![
-                    "At least one related finding has low confidence — manual review required."
-                        .to_string(),
-                    "Consider running `pruneguard explain` on the target for more context."
-                        .to_string(),
-                ],
-                evidence: candidate_evidence,
-            });
-        } else if all_high_confidence {
-            safe.push(SafeDeleteCandidate {
-                target: target.clone(),
-                classification: SafeDeleteClassification::Safe,
-                confidence: Some(FindingConfidence::High),
-                reasons: vec![
-                    "No reverse impact detected and all related findings have high confidence."
-                        .to_string(),
-                ],
-                evidence: candidate_evidence,
-            });
-            deletion_order_targets.push(target.clone());
-        } else {
-            needs_review.push(SafeDeleteCandidate {
-                target: target.clone(),
-                classification: SafeDeleteClassification::NeedsReview,
-                confidence: Some(FindingConfidence::Medium),
-                reasons: vec![
-                    "Finding confidence is not uniformly high — manual review recommended."
-                        .to_string(),
-                ],
-                evidence: candidate_evidence,
-            });
-        }
+            },
+            Vec::new(),
+        );
     }
 
-    // --- Trust-aware downgrades for Safe candidates ---
-    //
-    // Even when the base classification is Safe, trust signals may lower
-    // confidence enough to warrant manual review.
-    let compat = compute_compat_report_from_build(&execution.build);
+    let related_findings: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|f| {
+            f.subject == target
+                || f.subject.starts_with(target)
+                || f.subject.split('#').next() == Some(target)
+        })
+        .collect();
 
-    #[allow(clippy::cast_precision_loss)]
-    let unresolved_pressure_high = unresolved_pressure > 0.10;
+    if let Some(result) = check_reverse_impact(target, cwd, config, profile) {
+        return result;
+    }
+
+    classify_by_confidence(target, &related_findings, pressure)
+}
+
+fn check_reverse_impact(
+    target: &str,
+    cwd: &Path,
+    config: &PruneguardConfig,
+    profile: EntrypointProfile,
+) -> Option<TargetClassification> {
+    let impact_result =
+        impact_with_options(cwd, config, target, profile, &ImpactOptions::default());
+
+    let has_reverse_impact = match &impact_result {
+        Ok(ir) => {
+            let other_affected = ir
+                .affected_files
+                .iter()
+                .any(|f| f != target && !f.ends_with(target) && !target.ends_with(f));
+            !ir.affected_entrypoints.is_empty() || other_affected
+        }
+        Err(_) => false,
+    };
+
+    if !has_reverse_impact {
+        return None;
+    }
+
+    let mut reasons =
+        vec![format!("`{target}` has reverse impact — other files or entrypoints depend on it.")];
+    let mut candidate_evidence = Vec::new();
+    let mut shared_evidence = Vec::new();
+    if let Ok(ir) = &impact_result {
+        if !ir.affected_entrypoints.is_empty() {
+            reasons.push(format!(
+                "Affected entrypoints: {}",
+                ir.affected_entrypoints.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        let impact_evidence = pruneguard_report::Evidence {
+            kind: "impact".to_string(),
+            file: Some(target.to_owned()),
+            line: None,
+            description: format!(
+                "{} affected entrypoints, {} affected files",
+                ir.affected_entrypoints.len(),
+                ir.affected_files.len()
+            ),
+        };
+        candidate_evidence.push(impact_evidence.clone());
+        shared_evidence.push(impact_evidence);
+    }
+
+    Some(TargetClassification::Blocked(
+        SafeDeleteCandidate {
+            target: target.to_owned(),
+            classification: SafeDeleteClassification::Blocked,
+            confidence: None,
+            reasons,
+            evidence: candidate_evidence,
+        },
+        shared_evidence,
+    ))
+}
+
+fn classify_by_confidence(
+    target: &str,
+    related_findings: &[&Finding],
+    pressure: &UnresolvedPressure,
+) -> TargetClassification {
+    let all_high_confidence =
+        related_findings.iter().all(|f| f.confidence == FindingConfidence::High);
+    let any_low_confidence =
+        related_findings.iter().any(|f| f.confidence == FindingConfidence::Low);
+
+    let candidate_evidence: Vec<pruneguard_report::Evidence> = related_findings
+        .iter()
+        .map(|f| pruneguard_report::Evidence {
+            kind: "finding".to_string(),
+            file: Some(f.subject.clone()),
+            line: None,
+            description: format!("[{}] {} (confidence: {:?})", f.code, f.message, f.confidence),
+        })
+        .collect();
+
+    if pressure.exceeds_percent(5) {
+        TargetClassification::NeedsReview(SafeDeleteCandidate {
+            target: target.to_owned(),
+            classification: SafeDeleteClassification::NeedsReview,
+            confidence: Some(FindingConfidence::Low),
+            reasons: vec![
+                format!(
+                    "Unresolved pressure is {:.1}% — cannot guarantee safety.",
+                    pressure.display_percent()
+                ),
+                "Resolve unresolved specifiers and re-run safe-delete for a definitive answer."
+                    .to_string(),
+            ],
+            evidence: candidate_evidence,
+        })
+    } else if any_low_confidence {
+        TargetClassification::NeedsReview(SafeDeleteCandidate {
+            target: target.to_owned(),
+            classification: SafeDeleteClassification::NeedsReview,
+            confidence: Some(FindingConfidence::Low),
+            reasons: vec![
+                "At least one related finding has low confidence — manual review required."
+                    .to_string(),
+                "Consider running `pruneguard explain` on the target for more context.".to_string(),
+            ],
+            evidence: candidate_evidence,
+        })
+    } else if all_high_confidence {
+        TargetClassification::Safe(SafeDeleteCandidate {
+            target: target.to_owned(),
+            classification: SafeDeleteClassification::Safe,
+            confidence: Some(FindingConfidence::High),
+            reasons: vec![
+                "No reverse impact detected and all related findings have high confidence."
+                    .to_string(),
+            ],
+            evidence: candidate_evidence,
+        })
+    } else {
+        TargetClassification::NeedsReview(SafeDeleteCandidate {
+            target: target.to_owned(),
+            classification: SafeDeleteClassification::NeedsReview,
+            confidence: Some(FindingConfidence::Medium),
+            reasons: vec![
+                "Finding confidence is not uniformly high — manual review recommended.".to_string(),
+            ],
+            evidence: candidate_evidence,
+        })
+    }
+}
+
+fn apply_trust_downgrades(
+    build: &GraphBuildResult,
+    pressure: &UnresolvedPressure,
+    safe: &mut Vec<SafeDeleteCandidate>,
+    needs_review: &mut Vec<SafeDeleteCandidate>,
+    deletion_order_targets: &mut Vec<String>,
+) {
+    let compat = compute_compat_report_from_build(build);
+    let unresolved_pressure_high = pressure.exceeds_percent(10);
 
     let mut downgraded_safe = Vec::new();
     safe.retain(|candidate| {
-        // Check: compatibility trust downgrades affect this target
         if compat.is_path_affected(&candidate.target) {
             let trust_reason = compat
                 .trust_notes_for_path(&candidate.target)
@@ -1167,7 +1310,6 @@ pub fn safe_delete(
             return false;
         }
 
-        // Check: high unresolved pressure (>10%)
         if unresolved_pressure_high {
             downgraded_safe.push(SafeDeleteCandidate {
                 target: candidate.target.clone(),
@@ -1183,17 +1325,14 @@ pub fn safe_delete(
         true
     });
     needs_review.extend(downgraded_safe);
+}
 
-    // Compute a stable deletion order: files with fewer dependencies on other
-    // targets (leaves) should be deleted first to avoid breaking intermediate
-    // references during batch deletion.
-    compute_deletion_order(&mut deletion_order_targets, &execution.build);
-
-    let deletion_order: Vec<DeletionOrderEntry> = deletion_order_targets
+fn build_deletion_order_entries(targets: &[String]) -> Vec<DeletionOrderEntry> {
+    targets
         .iter()
         .enumerate()
         .map(|(i, target)| {
-            let reason = if deletion_order_targets.len() <= 1 {
+            let reason = if targets.len() <= 1 {
                 None
             } else if i == 0 {
                 Some("Leaf target — no other safe targets depend on it.".to_string())
@@ -1202,23 +1341,13 @@ pub fn safe_delete(
             };
             DeletionOrderEntry { target: target.clone(), step: i + 1, reason }
         })
-        .collect();
-
-    Ok(SafeDeleteReport {
-        targets: targets.to_vec(),
-        safe,
-        needs_review,
-        blocked,
-        deletion_order,
-        evidence: all_evidence,
-    })
+        .collect()
 }
 
 /// Generate a fix plan for the given targets.
 ///
 /// Matches targets against findings by ID, file path, or export name,
 /// then generates remediation actions for each matched finding.
-#[allow(clippy::too_many_lines)]
 pub fn fix_plan(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -1236,8 +1365,16 @@ pub fn fix_plan(
     let execution = scan_with_options(cwd, config, &[], profile, &scan_options)?;
     let report = &execution.report;
 
-    let matched_findings: Vec<Finding> = report
-        .findings
+    let matched_findings = match_findings_to_targets(&report.findings, targets);
+    let (mut actions, blocked_by) = build_fix_actions(&matched_findings);
+    apply_trust_confidence_adjustments(&mut actions, report);
+    rank_remediation_actions(&mut actions);
+
+    Ok(assemble_fix_plan_report(targets, matched_findings, actions, blocked_by))
+}
+
+fn match_findings_to_targets(findings: &[Finding], targets: &[String]) -> Vec<Finding> {
+    findings
         .iter()
         .filter(|finding| {
             targets.iter().any(|target| {
@@ -1248,12 +1385,14 @@ pub fn fix_plan(
             })
         })
         .cloned()
-        .collect();
+        .collect()
+}
 
+fn build_fix_actions(matched_findings: &[Finding]) -> (Vec<RemediationAction>, Vec<String>) {
     let mut actions = Vec::new();
     let mut blocked_by = Vec::new();
 
-    for finding in &matched_findings {
+    for finding in matched_findings {
         let kind = match finding.code.as_str() {
             "unused-file" => RemediationActionKind::DeleteFile,
             "unused-export" => RemediationActionKind::DeleteExport,
@@ -1290,40 +1429,43 @@ pub fn fix_plan(
         });
     }
 
-    // --- Trust-aware confidence adjustments ---
-    //
-    // If the scan conditions reduce trust, lower the confidence of each
-    // remediation action so that agents treat the plan more cautiously.
+    (actions, blocked_by)
+}
+
+fn apply_trust_confidence_adjustments(actions: &mut [RemediationAction], report: &AnalysisReport) {
     let is_partial_scope = report.stats.partial_scope;
     let has_heuristic_framework = !report.stats.heuristic_frameworks.is_empty();
 
-    if is_partial_scope || has_heuristic_framework {
-        for action in &mut actions {
-            if is_partial_scope {
+    if !is_partial_scope && !has_heuristic_framework {
+        return;
+    }
+
+    for action in actions.iter_mut() {
+        if is_partial_scope {
+            action.confidence = lower_confidence(action.confidence);
+        }
+        if has_heuristic_framework {
+            let heuristic_affects_target = action.targets.iter().any(|target| {
+                report.findings.iter().any(|f| {
+                    (f.subject == *target
+                        || f.subject.starts_with(target)
+                        || f.subject.split('#').next() == Some(target.as_str()))
+                        && f.framework_context.is_some()
+                })
+            });
+            if heuristic_affects_target {
                 action.confidence = lower_confidence(action.confidence);
-            }
-            if has_heuristic_framework {
-                // Check if any heuristic framework is relevant to this action's targets.
-                let heuristic_affects_target = action.targets.iter().any(|target| {
-                    report.findings.iter().any(|f| {
-                        (f.subject == *target
-                            || f.subject.starts_with(target)
-                            || f.subject.split('#').next() == Some(target.as_str()))
-                            && f.framework_context.is_some()
-                    })
-                });
-                if heuristic_affects_target {
-                    action.confidence = lower_confidence(action.confidence);
-                }
             }
         }
     }
+}
 
-    // Apply ranking policy: minimal blast radius first, high confidence first,
-    // low unresolved pressure first, boundary/ownership fixes after dead-code
-    // cleanup.
-    rank_remediation_actions(&mut actions);
-
+fn assemble_fix_plan_report(
+    targets: &[String],
+    matched_findings: Vec<Finding>,
+    actions: Vec<RemediationAction>,
+    blocked_by: Vec<String>,
+) -> FixPlanReport {
     let risk_level = actions
         .iter()
         .map(|action| action.risk)
@@ -1347,8 +1489,6 @@ pub fn fix_plan(
     let total_actions = actions.len();
     let high_confidence_actions =
         actions.iter().filter(|a| matches!(a.confidence, FindingConfidence::High)).count();
-
-    // Build phase summary.
     let phase_summary = build_phase_summary(&actions);
 
     let verification_steps = vec![
@@ -1357,7 +1497,7 @@ pub fn fix_plan(
         "Run `pruneguard review` to confirm no new blocking findings.".to_string(),
     ];
 
-    Ok(FixPlanReport {
+    FixPlanReport {
         query: targets.to_vec(),
         matched_findings,
         actions,
@@ -1368,7 +1508,7 @@ pub fn fix_plan(
         total_actions,
         high_confidence_actions,
         phase_summary,
-    })
+    }
 }
 
 /// Suggest governance rules based on graph analysis.

@@ -167,13 +167,11 @@ struct CrossPackageCouplingMetrics {
 }
 
 /// Suggest forbidden-dependency boundary rules by analyzing cross-package import edges.
-#[allow(clippy::too_many_lines)]
 fn suggest_boundary_rules(
     graph: &GraphBuildResult,
     config: &PruneguardConfig,
     report: &mut SuggestRulesReport,
 ) {
-    // Already has rules configured -- skip boundary suggestions.
     if config.rules.is_some() {
         report
             .rationale
@@ -181,7 +179,21 @@ fn suggest_boundary_rules(
         return;
     }
 
-    // Count cross-package edges with coupling strength metrics.
+    let coupling = collect_cross_package_coupling(graph);
+
+    emit_boundary_rules_from_coupling(&coupling, report);
+
+    if !coupling.is_empty() && report.suggested_rules.is_empty() {
+        report.rationale.push(
+            "Cross-package imports exist but none exceed the threshold for a boundary suggestion."
+                .to_string(),
+        );
+    }
+}
+
+fn collect_cross_package_coupling(
+    graph: &GraphBuildResult,
+) -> BTreeMap<(String, String), CrossPackageCouplingMetrics> {
     let mut coupling: BTreeMap<(String, String), CrossPackageCouplingMetrics> = BTreeMap::new();
 
     for node_idx in graph.module_graph.graph.node_indices() {
@@ -215,8 +227,14 @@ fn suggest_boundary_rules(
         }
     }
 
-    // Find heavily-crossed boundaries.
-    for ((source, target), metrics) in &coupling {
+    coupling
+}
+
+fn emit_boundary_rules_from_coupling(
+    coupling: &BTreeMap<(String, String), CrossPackageCouplingMetrics>,
+    report: &mut SuggestRulesReport,
+) {
+    for ((source, target), metrics) in coupling {
         if metrics.total_edges < BOUNDARY_EDGE_THRESHOLD {
             continue;
         }
@@ -231,7 +249,6 @@ fn suggest_boundary_rules(
             FindingConfidence::Low
         };
 
-        // For type-only coupling, suggest a type-only boundary (less restrictive).
         let is_type_only = metrics.type_only_edges == metrics.total_edges;
 
         let config_fragment = if is_type_only {
@@ -296,13 +313,6 @@ fn suggest_boundary_rules(
             ],
             rationale: Some(rationale),
         });
-    }
-
-    if !coupling.is_empty() && report.suggested_rules.is_empty() {
-        report.rationale.push(
-            "Cross-package imports exist but none exceed the threshold for a boundary suggestion."
-                .to_string(),
-        );
     }
 }
 
@@ -973,153 +983,180 @@ fn suggest_layer_enforcement(graph: &GraphBuildResult, report: &mut SuggestRules
 // ---------------------------------------------------------------------------
 
 /// Detect files with high fan-in / fan-out as hotspots, enriched with ownership data.
-#[allow(clippy::too_many_lines)]
 fn suggest_hotspots(
     graph: &GraphBuildResult,
     ownership_map: &FxHashMap<String, String>,
     report: &mut SuggestRulesReport,
 ) {
     for node_idx in graph.module_graph.graph.node_indices() {
-        let ModuleNode::File {
-            relative_path,
-            package: source_package,
-            workspace: source_workspace,
-            ..
-        } = &graph.module_graph.graph[node_idx]
-        else {
-            continue;
-        };
-
-        let file_owner = ownership_map.get(relative_path);
-        let mut outgoing = 0usize;
-        let mut cross_package_out = 0usize;
-        let mut cross_owner_out = 0usize;
-        let mut teams_seen = FxHashSet::<String>::default();
-
-        if let Some(owner) = file_owner {
-            teams_seen.insert(owner.clone());
+        if let Some(hotspot) = compute_file_hotspot(graph, ownership_map, node_idx) {
+            report.hotspots.push(hotspot);
         }
-
-        for edge in graph.module_graph.graph.edges(node_idx) {
-            if !is_import_edge(*edge.weight()) {
-                continue;
-            }
-            outgoing += 1;
-
-            if let ModuleNode::File {
-                package: Some(target_pkg), relative_path: target_path, ..
-            } = &graph.module_graph.graph[edge.target()]
-            {
-                if source_package.as_ref() != Some(target_pkg) {
-                    cross_package_out += 1;
-                }
-                if let Some(target_owner) = ownership_map.get(target_path) {
-                    teams_seen.insert(target_owner.clone());
-                    if file_owner.is_some_and(|o| o != target_owner) {
-                        cross_owner_out += 1;
-                    }
-                }
-            }
-        }
-
-        let mut incoming = 0usize;
-        let mut cross_package_in = 0usize;
-        let mut cross_owner_in = 0usize;
-
-        for edge in graph.module_graph.graph.edges_directed(node_idx, petgraph::Direction::Incoming)
-        {
-            if !is_import_edge(*edge.weight()) {
-                continue;
-            }
-            incoming += 1;
-
-            if let ModuleNode::File {
-                package: Some(importer_pkg),
-                relative_path: importer_path,
-                ..
-            } = &graph.module_graph.graph[edge.source()]
-            {
-                if source_package.as_ref() != Some(importer_pkg) {
-                    cross_package_in += 1;
-                }
-                if let Some(importer_owner) = ownership_map.get(importer_path) {
-                    teams_seen.insert(importer_owner.clone());
-                    if file_owner.is_some_and(|o| o != importer_owner) {
-                        cross_owner_in += 1;
-                    }
-                }
-            }
-        }
-
-        let total_edges = incoming + outgoing;
-        let cross_package_imports = cross_package_in + cross_package_out;
-        let cross_owner_imports = cross_owner_in + cross_owner_out;
-
-        if total_edges < HOTSPOT_EDGE_THRESHOLD {
-            continue;
-        }
-
-        let suggestion = if cross_owner_imports > 0 && cross_owner_imports > total_edges / 3 {
-            format!(
-                "`{relative_path}` has high cross-owner traffic ({cross_owner_imports} \
-                 cross-owner of {total_edges} total edges, {teams} teams involved). \
-                 Consider assigning shared ownership or extracting the shared surface \
-                 into a dedicated package with explicit API boundaries.",
-                teams = teams_seen.len()
-            )
-        } else if cross_package_imports > total_edges / 2 {
-            format!(
-                "`{relative_path}` has high cross-package traffic ({cross_package_imports} \
-                 cross-package of {total_edges} total edges). Consider extracting a shared \
-                 package or adding boundary rules to control access."
-            )
-        } else if incoming > outgoing * 3 && outgoing > 0 {
-            format!(
-                "`{relative_path}` has very high fan-in ({incoming} incoming vs {outgoing} \
-                 outgoing). This file is a critical hub -- consider whether it should be an \
-                 explicit public API surface with a defined contract."
-            )
-        } else if outgoing > incoming * 3 && incoming > 0 {
-            format!(
-                "`{relative_path}` has very high fan-out ({outgoing} outgoing vs {incoming} \
-                 incoming). This file may be doing too much -- consider splitting into \
-                 focused modules."
-            )
-        } else {
-            format!(
-                "`{relative_path}` has high edge count ({total_edges} total, \
-                 fan-in: {incoming}, fan-out: {outgoing}). \
-                 Consider whether ownership assignment or boundary rules would help."
-            )
-        };
-
-        let mut teams_involved: Vec<String> = teams_seen.into_iter().collect();
-        teams_involved.sort();
-
-        report.hotspots.push(Hotspot {
-            file: relative_path.clone(),
-            workspace: source_workspace.clone(),
-            package: source_package.clone(),
-            cross_package_imports,
-            cross_owner_imports,
-            incoming_edges: incoming,
-            outgoing_edges: outgoing,
-            rank: 0, // filled in after sorting
-            teams_involved,
-            suggestion,
-        });
     }
 
-    // Sort hotspots by total edges descending, then by cross-owner imports descending.
-    report.hotspots.sort_by(|a, b| {
+    rank_and_truncate_hotspots(&mut report.hotspots);
+}
+
+fn compute_file_hotspot(
+    graph: &GraphBuildResult,
+    ownership_map: &FxHashMap<String, String>,
+    node_idx: petgraph::graph::NodeIndex,
+) -> Option<Hotspot> {
+    let ModuleNode::File {
+        relative_path,
+        package: source_package,
+        workspace: source_workspace,
+        ..
+    } = &graph.module_graph.graph[node_idx]
+    else {
+        return None;
+    };
+
+    let file_owner = ownership_map.get(relative_path);
+    let mut outgoing = 0usize;
+    let mut cross_package_out = 0usize;
+    let mut cross_owner_out = 0usize;
+    let mut teams_seen = FxHashSet::<String>::default();
+
+    if let Some(owner) = file_owner {
+        teams_seen.insert(owner.clone());
+    }
+
+    for edge in graph.module_graph.graph.edges(node_idx) {
+        if !is_import_edge(*edge.weight()) {
+            continue;
+        }
+        outgoing += 1;
+
+        if let ModuleNode::File { package: Some(target_pkg), relative_path: target_path, .. } =
+            &graph.module_graph.graph[edge.target()]
+        {
+            if source_package.as_ref() != Some(target_pkg) {
+                cross_package_out += 1;
+            }
+            if let Some(target_owner) = ownership_map.get(target_path) {
+                teams_seen.insert(target_owner.clone());
+                if file_owner.is_some_and(|o| o != target_owner) {
+                    cross_owner_out += 1;
+                }
+            }
+        }
+    }
+
+    let mut incoming = 0usize;
+    let mut cross_package_in = 0usize;
+    let mut cross_owner_in = 0usize;
+
+    for edge in graph.module_graph.graph.edges_directed(node_idx, petgraph::Direction::Incoming) {
+        if !is_import_edge(*edge.weight()) {
+            continue;
+        }
+        incoming += 1;
+
+        if let ModuleNode::File {
+            package: Some(importer_pkg), relative_path: importer_path, ..
+        } = &graph.module_graph.graph[edge.source()]
+        {
+            if source_package.as_ref() != Some(importer_pkg) {
+                cross_package_in += 1;
+            }
+            if let Some(importer_owner) = ownership_map.get(importer_path) {
+                teams_seen.insert(importer_owner.clone());
+                if file_owner.is_some_and(|o| o != importer_owner) {
+                    cross_owner_in += 1;
+                }
+            }
+        }
+    }
+
+    let total_edges = incoming + outgoing;
+    let cross_package_imports = cross_package_in + cross_package_out;
+    let cross_owner_imports = cross_owner_in + cross_owner_out;
+
+    if total_edges < HOTSPOT_EDGE_THRESHOLD {
+        return None;
+    }
+
+    let suggestion = describe_hotspot(
+        relative_path,
+        incoming,
+        outgoing,
+        cross_package_imports,
+        cross_owner_imports,
+        &teams_seen,
+    );
+
+    let mut teams_involved: Vec<String> = teams_seen.into_iter().collect();
+    teams_involved.sort();
+
+    Some(Hotspot {
+        file: relative_path.clone(),
+        workspace: source_workspace.clone(),
+        package: source_package.clone(),
+        cross_package_imports,
+        cross_owner_imports,
+        incoming_edges: incoming,
+        outgoing_edges: outgoing,
+        rank: 0,
+        teams_involved,
+        suggestion,
+    })
+}
+
+fn describe_hotspot(
+    relative_path: &str,
+    incoming: usize,
+    outgoing: usize,
+    cross_package_imports: usize,
+    cross_owner_imports: usize,
+    teams_seen: &FxHashSet<String>,
+) -> String {
+    let total_edges = incoming + outgoing;
+
+    if cross_owner_imports > 0 && cross_owner_imports > total_edges / 3 {
+        format!(
+            "`{relative_path}` has high cross-owner traffic ({cross_owner_imports} \
+             cross-owner of {total_edges} total edges, {teams} teams involved). \
+             Consider assigning shared ownership or extracting the shared surface \
+             into a dedicated package with explicit API boundaries.",
+            teams = teams_seen.len()
+        )
+    } else if cross_package_imports > total_edges / 2 {
+        format!(
+            "`{relative_path}` has high cross-package traffic ({cross_package_imports} \
+             cross-package of {total_edges} total edges). Consider extracting a shared \
+             package or adding boundary rules to control access."
+        )
+    } else if incoming > outgoing * 3 && outgoing > 0 {
+        format!(
+            "`{relative_path}` has very high fan-in ({incoming} incoming vs {outgoing} \
+             outgoing). This file is a critical hub -- consider whether it should be an \
+             explicit public API surface with a defined contract."
+        )
+    } else if outgoing > incoming * 3 && incoming > 0 {
+        format!(
+            "`{relative_path}` has very high fan-out ({outgoing} outgoing vs {incoming} \
+             incoming). This file may be doing too much -- consider splitting into \
+             focused modules."
+        )
+    } else {
+        format!(
+            "`{relative_path}` has high edge count ({total_edges} total, \
+             fan-in: {incoming}, fan-out: {outgoing}). \
+             Consider whether ownership assignment or boundary rules would help."
+        )
+    }
+}
+
+fn rank_and_truncate_hotspots(hotspots: &mut Vec<Hotspot>) {
+    hotspots.sort_by(|a, b| {
         let total_a = a.incoming_edges + a.outgoing_edges;
         let total_b = b.incoming_edges + b.outgoing_edges;
         total_b.cmp(&total_a).then_with(|| b.cross_owner_imports.cmp(&a.cross_owner_imports))
     });
 
-    // Assign ranks and truncate.
-    report.hotspots.truncate(MAX_HOTSPOTS);
-    for (i, hotspot) in report.hotspots.iter_mut().enumerate() {
+    hotspots.truncate(MAX_HOTSPOTS);
+    for (i, hotspot) in hotspots.iter_mut().enumerate() {
         hotspot.rank = i + 1;
     }
 }
@@ -1341,239 +1378,267 @@ fn suggest_ownership_from_codeowners(graph: &GraphBuildResult, report: &mut Sugg
 // ---------------------------------------------------------------------------
 
 /// Synthesize prioritized governance actions from all gathered suggestions.
-#[allow(clippy::too_many_lines)]
 fn synthesize_governance_actions(report: &mut SuggestRulesReport) {
     let mut actions: Vec<GovernanceAction> = Vec::new();
 
-    // High-confidence boundary rules are the highest-value action.
+    if let Some(action) = action_for_high_confidence_boundaries(&report.suggested_rules) {
+        actions.push(action);
+    }
+    if let Some(action) = action_for_ownership_hints(&report.ownership_hints) {
+        actions.push(action);
+    }
+    if let Some(action) = action_for_tags(&report.tags, &report.suggested_rules) {
+        actions.push(action);
+    }
+    if let Some(action) = action_for_severe_hotspots(&report.hotspots) {
+        actions.push(action);
+    }
+    if let Some(action) = action_for_layer_enforcement(&report.suggested_rules) {
+        actions.push(action);
+    }
+    if let Some(action) = action_for_reachability_fences(&report.suggested_rules) {
+        actions.push(action);
+    }
+
+    prioritize_actions(&mut actions);
+
+    report.governance_actions = actions;
+}
+
+fn action_for_high_confidence_boundaries(
+    suggested_rules: &[SuggestedRule],
+) -> Option<GovernanceAction> {
     let high_confidence_rules: Vec<&SuggestedRule> =
-        report.suggested_rules.iter().filter(|r| r.confidence == FindingConfidence::High).collect();
-    if !high_confidence_rules.is_empty() {
-        let mut merged_forbidden: Vec<serde_json::Value> = Vec::new();
-        for rule in &high_confidence_rules {
-            if let Some(forbidden) = rule.config_fragment["rules"]["forbidden"].as_array() {
-                merged_forbidden.extend(forbidden.iter().cloned());
+        suggested_rules.iter().filter(|r| r.confidence == FindingConfidence::High).collect();
+    if high_confidence_rules.is_empty() {
+        return None;
+    }
+
+    let mut merged_forbidden: Vec<serde_json::Value> = Vec::new();
+    for rule in &high_confidence_rules {
+        if let Some(forbidden) = rule.config_fragment["rules"]["forbidden"].as_array() {
+            merged_forbidden.extend(forbidden.iter().cloned());
+        }
+    }
+
+    let config_fragment = if merged_forbidden.is_empty() {
+        None
+    } else {
+        Some(serde_json::json!({
+            "rules": {
+                "forbidden": merged_forbidden
             }
-        }
+        }))
+    };
 
-        let config_fragment = if merged_forbidden.is_empty() {
-            None
-        } else {
-            Some(serde_json::json!({
-                "rules": {
-                    "forbidden": merged_forbidden
-                }
-            }))
-        };
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::AddBoundaryRule,
+        description: format!(
+            "Add {} high-confidence forbidden boundary rule(s). \
+             These rules have the strongest evidence from actual import traffic.",
+            high_confidence_rules.len()
+        ),
+        effort: EffortLevel::Low,
+        impact: ImpactLevel::High,
+        config_fragment,
+    })
+}
 
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::AddBoundaryRule,
-            description: format!(
-                "Add {} high-confidence forbidden boundary rule(s). \
-                 These rules have the strongest evidence from actual import traffic.",
-                high_confidence_rules.len()
-            ),
-            effort: EffortLevel::Low,
-            impact: ImpactLevel::High,
-            config_fragment,
-        });
+fn action_for_ownership_hints(ownership_hints: &[OwnershipHint]) -> Option<GovernanceAction> {
+    if ownership_hints.is_empty() {
+        return None;
     }
 
-    // Ownership hints.
-    if !report.ownership_hints.is_empty() {
-        let total_cross_edges: usize =
-            report.ownership_hints.iter().map(|h| h.cross_team_edges).sum();
+    let total_cross_edges: usize = ownership_hints.iter().map(|h| h.cross_team_edges).sum();
 
-        let mut teams_obj = serde_json::Map::new();
-        for hint in &report.ownership_hints {
-            let team_name = &hint.suggested_owner;
-            teams_obj.insert(
-                team_name.clone(),
-                serde_json::json!({
-                    "paths": [&hint.path_glob],
-                    "tags": [team_name]
-                }),
-            );
-        }
-
-        let config_fragment = if teams_obj.is_empty() {
-            None
-        } else {
-            Some(serde_json::json!({
-                "ownership": {
-                    "teams": teams_obj
-                }
-            }))
-        };
-
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::AssignOwnership,
-            description: format!(
-                "Configure ownership for {} directory area(s) with {total_cross_edges} \
-                 total cross-boundary edges. Ownership enables cross-team import tracking \
-                 and automatic review routing.",
-                report.ownership_hints.len()
-            ),
-            effort: EffortLevel::Medium,
-            impact: ImpactLevel::High,
-            config_fragment,
-        });
+    let mut teams_obj = serde_json::Map::new();
+    for hint in ownership_hints {
+        let team_name = &hint.suggested_owner;
+        teams_obj.insert(
+            team_name.clone(),
+            serde_json::json!({
+                "paths": [&hint.path_glob],
+                "tags": [team_name]
+            }),
+        );
     }
 
-    // Tag suggestions.
-    if !report.tags.is_empty() {
-        let workspace_tags =
-            report.tags.iter().filter(|t| t.source.as_deref() == Some("workspace")).count();
-        let package_tags =
-            report.tags.iter().filter(|t| t.source.as_deref() == Some("package")).count();
-        let dir_tags =
-            report.tags.iter().filter(|t| t.source.as_deref() == Some("directory-cluster")).count();
-        let owner_tags =
-            report.tags.iter().filter(|t| t.source.as_deref() == Some("ownership")).count();
-        let framework_tags = report
-            .tags
-            .iter()
-            .filter(|t| t.source.as_deref() == Some("framework-detection"))
-            .count();
-        let pattern_tags =
-            report.tags.iter().filter(|t| t.source.as_deref() == Some("file-pattern")).count();
+    let config_fragment = if teams_obj.is_empty() {
+        None
+    } else {
+        Some(serde_json::json!({
+            "ownership": {
+                "teams": teams_obj
+            }
+        }))
+    };
 
-        let mut details = Vec::new();
-        if workspace_tags > 0 {
-            details.push(format!("{workspace_tags} workspace"));
-        }
-        if package_tags > 0 {
-            details.push(format!("{package_tags} package"));
-        }
-        if dir_tags > 0 {
-            details.push(format!("{dir_tags} directory"));
-        }
-        if owner_tags > 0 {
-            details.push(format!("{owner_tags} ownership"));
-        }
-        if framework_tags > 0 {
-            details.push(format!("{framework_tags} framework"));
-        }
-        if pattern_tags > 0 {
-            details.push(format!("{pattern_tags} file-pattern"));
-        }
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::AssignOwnership,
+        description: format!(
+            "Configure ownership for {} directory area(s) with {total_cross_edges} \
+             total cross-boundary edges. Ownership enables cross-team import tracking \
+             and automatic review routing.",
+            ownership_hints.len()
+        ),
+        effort: EffortLevel::Medium,
+        impact: ImpactLevel::High,
+        config_fragment,
+    })
+}
 
-        let tag_assignment = report
-            .suggested_rules
-            .iter()
-            .find(|r| matches!(r.kind, SuggestedRuleKind::TagAssignment));
-        let config_fragment = tag_assignment.map(|r| r.config_fragment.clone());
-
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::IntroduceTags,
-            description: format!(
-                "Introduce {} tag(s) ({}) to enable tag-based boundary rules. \
-                 Tags decouple rules from directory structure.",
-                report.tags.len(),
-                details.join(", ")
-            ),
-            effort: EffortLevel::Low,
-            impact: ImpactLevel::Medium,
-            config_fragment,
-        });
+fn action_for_tags(
+    tags: &[SuggestedTag],
+    suggested_rules: &[SuggestedRule],
+) -> Option<GovernanceAction> {
+    if tags.is_empty() {
+        return None;
     }
 
-    // Severe hotspots.
-    let severe_hotspots: Vec<&Hotspot> = report
-        .hotspots
+    let workspace_tags = tags.iter().filter(|t| t.source.as_deref() == Some("workspace")).count();
+    let package_tags = tags.iter().filter(|t| t.source.as_deref() == Some("package")).count();
+    let dir_tags = tags.iter().filter(|t| t.source.as_deref() == Some("directory-cluster")).count();
+    let owner_tags = tags.iter().filter(|t| t.source.as_deref() == Some("ownership")).count();
+    let framework_tags =
+        tags.iter().filter(|t| t.source.as_deref() == Some("framework-detection")).count();
+    let pattern_tags = tags.iter().filter(|t| t.source.as_deref() == Some("file-pattern")).count();
+
+    let mut details = Vec::new();
+    if workspace_tags > 0 {
+        details.push(format!("{workspace_tags} workspace"));
+    }
+    if package_tags > 0 {
+        details.push(format!("{package_tags} package"));
+    }
+    if dir_tags > 0 {
+        details.push(format!("{dir_tags} directory"));
+    }
+    if owner_tags > 0 {
+        details.push(format!("{owner_tags} ownership"));
+    }
+    if framework_tags > 0 {
+        details.push(format!("{framework_tags} framework"));
+    }
+    if pattern_tags > 0 {
+        details.push(format!("{pattern_tags} file-pattern"));
+    }
+
+    let tag_assignment =
+        suggested_rules.iter().find(|r| matches!(r.kind, SuggestedRuleKind::TagAssignment));
+    let config_fragment = tag_assignment.map(|r| r.config_fragment.clone());
+
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::IntroduceTags,
+        description: format!(
+            "Introduce {} tag(s) ({}) to enable tag-based boundary rules. \
+             Tags decouple rules from directory structure.",
+            tags.len(),
+            details.join(", ")
+        ),
+        effort: EffortLevel::Low,
+        impact: ImpactLevel::Medium,
+        config_fragment,
+    })
+}
+
+fn action_for_severe_hotspots(hotspots: &[Hotspot]) -> Option<GovernanceAction> {
+    let severe_hotspots: Vec<&Hotspot> = hotspots
         .iter()
         .filter(|h| h.incoming_edges + h.outgoing_edges >= HOTSPOT_EDGE_THRESHOLD * 3)
         .collect();
-    if !severe_hotspots.is_empty() {
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::SplitHotspot,
-            description: format!(
-                "{} file(s) have very high edge traffic (>{} edges). \
-                 Splitting these hotspots reduces coupling and makes ownership clearer. \
-                 Top hotspots: {}.",
-                severe_hotspots.len(),
-                HOTSPOT_EDGE_THRESHOLD * 3,
-                severe_hotspots
-                    .iter()
-                    .take(3)
-                    .map(|h| format!(
-                        "`{}` ({} edges)",
-                        h.file,
-                        h.incoming_edges + h.outgoing_edges
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            effort: EffortLevel::High,
-            impact: ImpactLevel::High,
-            config_fragment: None,
-        });
+    if severe_hotspots.is_empty() {
+        return None;
     }
 
-    // Layer enforcement.
-    let layer_rules: Vec<&SuggestedRule> = report
-        .suggested_rules
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::SplitHotspot,
+        description: format!(
+            "{} file(s) have very high edge traffic (>{} edges). \
+             Splitting these hotspots reduces coupling and makes ownership clearer. \
+             Top hotspots: {}.",
+            severe_hotspots.len(),
+            HOTSPOT_EDGE_THRESHOLD * 3,
+            severe_hotspots
+                .iter()
+                .take(3)
+                .map(|h| format!("`{}` ({} edges)", h.file, h.incoming_edges + h.outgoing_edges))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        effort: EffortLevel::High,
+        impact: ImpactLevel::High,
+        config_fragment: None,
+    })
+}
+
+fn action_for_layer_enforcement(suggested_rules: &[SuggestedRule]) -> Option<GovernanceAction> {
+    let layer_rules: Vec<&SuggestedRule> = suggested_rules
         .iter()
         .filter(|r| matches!(r.kind, SuggestedRuleKind::LayerEnforcement))
         .collect();
-    if !layer_rules.is_empty() {
-        let mut merged_forbidden: Vec<serde_json::Value> = Vec::new();
-        for rule in &layer_rules {
-            if let Some(forbidden) = rule.config_fragment["rules"]["forbidden"].as_array() {
-                merged_forbidden.extend(forbidden.iter().cloned());
-            }
-        }
-
-        let config_fragment = if merged_forbidden.is_empty() {
-            None
-        } else {
-            Some(serde_json::json!({
-                "rules": {
-                    "forbidden": merged_forbidden
-                }
-            }))
-        };
-
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::EnforceLayering,
-            description: format!(
-                "Add {} layer enforcement rule(s) to codify the workspace \
-                 dependency DAG. This prevents accidental circular dependencies between \
-                 workspaces.",
-                layer_rules.len()
-            ),
-            effort: EffortLevel::Low,
-            impact: ImpactLevel::Medium,
-            config_fragment,
-        });
+    if layer_rules.is_empty() {
+        return None;
     }
 
-    // Reachability fences.
-    let fence_rules = report
-        .suggested_rules
+    let mut merged_forbidden: Vec<serde_json::Value> = Vec::new();
+    for rule in &layer_rules {
+        if let Some(forbidden) = rule.config_fragment["rules"]["forbidden"].as_array() {
+            merged_forbidden.extend(forbidden.iter().cloned());
+        }
+    }
+
+    let config_fragment = if merged_forbidden.is_empty() {
+        None
+    } else {
+        Some(serde_json::json!({
+            "rules": {
+                "forbidden": merged_forbidden
+            }
+        }))
+    };
+
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::EnforceLayering,
+        description: format!(
+            "Add {} layer enforcement rule(s) to codify the workspace \
+             dependency DAG. This prevents accidental circular dependencies between \
+             workspaces.",
+            layer_rules.len()
+        ),
+        effort: EffortLevel::Low,
+        impact: ImpactLevel::Medium,
+        config_fragment,
+    })
+}
+
+fn action_for_reachability_fences(suggested_rules: &[SuggestedRule]) -> Option<GovernanceAction> {
+    let fence_rules = suggested_rules
         .iter()
         .filter(|r| matches!(r.kind, SuggestedRuleKind::ReachabilityFence))
         .count();
-    if fence_rules > 0 {
-        actions.push(GovernanceAction {
-            priority: 0,
-            kind: GovernanceActionKind::AddReachabilityFence,
-            description: format!(
-                "Add {fence_rules} reachability fence(s) to prevent test-only code from \
-                 leaking into production bundles."
-            ),
-            effort: EffortLevel::Low,
-            impact: ImpactLevel::Medium,
-            config_fragment: None,
-        });
+    if fence_rules == 0 {
+        return None;
     }
 
-    // Sort by impact (high first), then effort (low first).
+    Some(GovernanceAction {
+        priority: 0,
+        kind: GovernanceActionKind::AddReachabilityFence,
+        description: format!(
+            "Add {fence_rules} reachability fence(s) to prevent test-only code from \
+             leaking into production bundles."
+        ),
+        effort: EffortLevel::Low,
+        impact: ImpactLevel::Medium,
+        config_fragment: None,
+    })
+}
+
+fn prioritize_actions(actions: &mut [GovernanceAction]) {
     actions.sort_by(|a, b| {
         impact_ord(b.impact)
             .cmp(&impact_ord(a.impact))
@@ -1583,8 +1648,6 @@ fn synthesize_governance_actions(report: &mut SuggestRulesReport) {
     for (i, action) in actions.iter_mut().enumerate() {
         action.priority = i + 1;
     }
-
-    report.governance_actions = actions;
 }
 
 const fn impact_ord(level: ImpactLevel) -> u8 {
