@@ -84,6 +84,7 @@ pub fn scan(
     Ok(scan_with_options(cwd, config, paths, profile, &ScanOptions::default())?.report)
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn scan_with_options(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -189,22 +190,21 @@ pub fn scan_with_options(
     }
 
     // Optionally compute external parity score and attach to the report.
-    if let Some(corpus_path) = &options.parity_corpus {
-        if corpus_path.exists() {
-            if let Ok(parity_result) = evaluate_parity_corpus(corpus_path) {
-                let parity_report =
-                    parity_score_to_report(&parity_result.score, &parity_result.stale_deltas);
-                report.stats.external_parity_pct = Some(parity_result.score.overall_pct);
-                report.stats.external_parity = Some(pruneguard_report::ExternalParitySummary {
-                    overall_pct: parity_result.score.overall_pct,
-                    total_cases: parity_result.score.total_cases,
-                    passed_cases: parity_result.score.passed_cases,
-                    total_checks: parity_result.score.total_checks,
-                    passed_checks: parity_result.score.passed_checks,
-                });
-                report.parity_score = Some(parity_report);
-            }
-        }
+    if let Some(corpus_path) = &options.parity_corpus
+        && corpus_path.exists()
+        && let Ok(parity_result) = evaluate_parity_corpus(corpus_path)
+    {
+        let parity_report =
+            parity_score_to_report(&parity_result.score, &parity_result.stale_deltas);
+        report.stats.external_parity_pct = Some(parity_result.score.overall_pct);
+        report.stats.external_parity = Some(pruneguard_report::ExternalParitySummary {
+            overall_pct: parity_result.score.overall_pct,
+            total_cases: parity_result.score.total_cases,
+            passed_cases: parity_result.score.passed_cases,
+            total_checks: parity_result.score.total_checks,
+            passed_checks: parity_result.score.passed_checks,
+        });
+        report.parity_score = Some(parity_report);
     }
 
     refresh_summary(&mut report);
@@ -2461,6 +2461,7 @@ pub struct ParityCorpusResult {
 
 /// Evaluate the external parity corpus against real scans and return the
 /// aggregate replacement score plus stale-delta information.
+#[allow(clippy::unnecessary_wraps)]
 pub fn evaluate_parity_corpus(corpus_root: &Path) -> miette::Result<ParityCorpusResult> {
     use pruneguard_analyzers::external_parity::{
         compute_external_parity_score, discover_parity_cases,
@@ -2501,6 +2502,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 ///
 /// Each case is run in a temporary directory with a minimal package.json
 /// to isolate it from the pruneguard workspace.
+#[allow(clippy::too_many_lines)]
 fn evaluate_parity_case(
     case_dir: &Path,
     meta: &pruneguard_analyzers::external_parity::ParityCaseMeta,
@@ -2612,7 +2614,7 @@ fn evaluate_parity_case(
 
     // Build a set of finding keys as `code:normalized_reference` for matching.
     let finding_keys: BTreeSet<String> =
-        report.findings.iter().flat_map(|f| finding_match_keys(f)).collect();
+        report.findings.iter().flat_map(finding_match_keys).collect();
 
     // Check reachable files: should NOT appear as unused-file findings.
     for reachable in &expected.reachable_files {
@@ -2684,20 +2686,17 @@ fn collect_source_files(dir: &Path, root: &Path) -> std::io::Result<Vec<String>>
                 continue;
             }
             files.extend(collect_source_files(&path, root)?);
-        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            match ext {
-                "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte" | "astro" | "mdx" => {
-                    // Skip config files — they shouldn't be entrypoints.
-                    let name = entry.file_name();
-                    let name = name.to_string_lossy();
-                    if name.contains(".config.") || name == "package.json" {
-                        continue;
-                    }
-                    if let Ok(rel) = path.strip_prefix(root) {
-                        files.push(rel.to_string_lossy().to_string());
-                    }
-                }
-                _ => {}
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str())
+            && matches!(ext, "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte" | "astro" | "mdx")
+        {
+            // Skip config files — they shouldn't be entrypoints.
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.contains(".config.") || name == "package.json" {
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(root) {
+                files.push(rel.to_string_lossy().to_string());
             }
         }
     }
@@ -2734,11 +2733,11 @@ fn finding_match_keys(finding: &Finding) -> Vec<String> {
     if finding.code == "unused-member" {
         for ev in &finding.evidence {
             // Evidence description: "`Color.Yellow` is never referenced..."
-            if let Some(start) = ev.description.find('`') {
-                if let Some(end) = ev.description[start + 1..].find('`') {
-                    let member_ref = &ev.description[start + 1..start + 1 + end];
-                    keys.push(format!("unused-member:{member_ref}"));
-                }
+            if let Some(start) = ev.description.find('`')
+                && let Some(end) = ev.description[start + 1..].find('`')
+            {
+                let member_ref = &ev.description[start + 1..start + 1 + end];
+                keys.push(format!("unused-member:{member_ref}"));
             }
         }
     }

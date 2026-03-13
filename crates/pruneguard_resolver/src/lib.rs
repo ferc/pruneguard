@@ -77,7 +77,7 @@ pub enum ResolvedEdgeKind {
     RequireResolve,
     /// `import.meta.glob('pattern')` — Vite glob import (expanded to edges).
     ImportMetaGlob,
-    /// JSDoc `@type {import('specifier')}` — type-level dependency.
+    /// `JSDoc` `@type {import('specifier')}` — type-level dependency.
     JsDocImport,
     /// `/// <reference path="..." />` — TypeScript file reference.
     TripleSlashFile,
@@ -320,7 +320,7 @@ impl ModuleResolver {
         self.ignore_unresolved = patterns;
     }
 
-    /// Check if a specifier matches any ignore_unresolved pattern.
+    /// Check if a specifier matches any `ignore_unresolved` pattern.
     pub fn is_ignored_unresolved(&self, specifier: &str) -> bool {
         self.ignore_unresolved
             .iter()
@@ -907,9 +907,8 @@ fn load_workspace_field(root: &Path, field: &str) -> Option<serde_json::Value> {
 /// Load `typings`/`types` and `module` fields from a workspace's package.json.
 fn load_workspace_main_fields(root: &Path) -> WorkspaceMainFields {
     let pkg_json_path = root.join("package.json");
-    let content = match std::fs::read_to_string(pkg_json_path) {
-        Ok(c) => c,
-        Err(_) => return WorkspaceMainFields::default(),
+    let Ok(content) = std::fs::read_to_string(pkg_json_path) else {
+        return WorkspaceMainFields::default();
     };
     let parsed: serde_json::Value = match serde_json::from_str(&content) {
         Ok(v) => v,

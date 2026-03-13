@@ -79,7 +79,7 @@ pub struct ExportInfo {
 /// Individual members of an exported class, enum, or namespace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemberExportInfo {
-    /// The name of the parent export (e.g. "MyClass", "MyEnum").
+    /// The name of the parent export (e.g. "`MyClass`", "`MyEnum`").
     pub parent_name: CompactString,
     /// The member name (e.g. method name, enum variant, namespace member).
     pub member_name: CompactString,
@@ -87,7 +87,7 @@ pub struct MemberExportInfo {
     pub member_kind: MemberKind,
     /// Line number where the member is defined.
     pub line: u32,
-    /// Whether this member has a `@public` JSDoc tag in its leading comment.
+    /// Whether this member has a `@public` `JSDoc` tag in its leading comment.
     #[serde(default)]
     pub is_public_tagged: bool,
 }
@@ -332,7 +332,7 @@ impl ExtractedFile {
 /// that can be fed through the core JS/TS extractor.
 pub trait SourceAdapter: Send + Sync {
     /// Name of this adapter (e.g. "vue", "svelte", "astro", "mdx").
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Whether this adapter handles the given path based on extension.
     fn matches(&self, path: &Path) -> bool;
@@ -345,7 +345,7 @@ pub trait SourceAdapter: Send + Sync {
 pub struct VueAdapter;
 
 impl SourceAdapter for VueAdapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "vue"
     }
     fn matches(&self, path: &Path) -> bool {
@@ -488,7 +488,7 @@ impl SourceAdapter for VueAdapter {
 pub struct SvelteAdapter;
 
 impl SourceAdapter for SvelteAdapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "svelte"
     }
     fn matches(&self, path: &Path) -> bool {
@@ -573,7 +573,7 @@ impl SourceAdapter for SvelteAdapter {
 pub struct AstroAdapter;
 
 impl SourceAdapter for AstroAdapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "astro"
     }
     fn matches(&self, path: &Path) -> bool {
@@ -587,8 +587,8 @@ impl SourceAdapter for AstroAdapter {
 
         // Also extract inline <script> tags from the template portion.
         let template_content = extract_astro_template(source);
-        let inline_script_facts = if let Some(ref tmpl) = template_content {
-            let inline_blocks = extract_html_script_blocks(tmpl, &["<script"]);
+        let inline_script_facts = {
+            let inline_blocks = extract_html_script_blocks(&template_content, &["<script"]);
             if !inline_blocks.is_empty() {
                 diagnostics.push(AdapterDiagnostic {
                     level: DiagnosticLevel::Info,
@@ -600,8 +600,6 @@ impl SourceAdapter for AstroAdapter {
                 });
             }
             extract_from_script_blocks(path, &inline_blocks)
-        } else {
-            FileFacts::default()
         };
 
         let mut facts = frontmatter_facts;
@@ -612,8 +610,8 @@ impl SourceAdapter for AstroAdapter {
         // Detect client:* hydration directives on components in the template.
         // Components with client:load, client:idle, client:visible, etc. are
         // hydration boundaries and are definitely used at runtime.
-        if let Some(ref tmpl) = template_content {
-            let hydrated = detect_astro_client_directives(tmpl);
+        {
+            let hydrated = detect_astro_client_directives(&template_content);
             for (component_name, directive, line) in &hydrated {
                 diagnostics.push(AdapterDiagnostic {
                     level: DiagnosticLevel::Info,
@@ -654,7 +652,7 @@ impl SourceAdapter for AstroAdapter {
 pub struct MdxAdapter;
 
 impl SourceAdapter for MdxAdapter {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "mdx"
     }
     fn matches(&self, path: &Path) -> bool {
@@ -849,6 +847,7 @@ fn determine_source_type(path: &Path) -> oxc_span::SourceType {
 }
 
 /// Extract facts from a single AST statement.
+#[allow(clippy::too_many_lines)]
 fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFacts) {
     use oxc_ast::ast::Statement;
 
@@ -1452,23 +1451,20 @@ fn extract_namespace_members(
     };
 
     for stmt in &block.body {
-        match stmt {
-            // `export const foo = ...;` / `export function bar() {}` etc.
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(decl) = &export.declaration {
-                    extract_namespace_decl_members(ns_name, decl, facts);
-                }
-                for spec in &export.specifiers {
-                    facts.member_exports.push(MemberExportInfo {
-                        parent_name: ns_name.clone(),
-                        member_name: CompactString::new(spec.exported.name().as_str()),
-                        member_kind: MemberKind::NamespaceMember,
-                        line: spec.span.start,
-                        is_public_tagged: false,
-                    });
-                }
+        // `export const foo = ...;` / `export function bar() {}` etc.
+        if let Statement::ExportNamedDeclaration(export) = stmt {
+            if let Some(decl) = &export.declaration {
+                extract_namespace_decl_members(ns_name, decl, facts);
             }
-            _ => {}
+            for spec in &export.specifiers {
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: ns_name.clone(),
+                    member_name: CompactString::new(spec.exported.name().as_str()),
+                    member_kind: MemberKind::NamespaceMember,
+                    line: spec.span.start,
+                    is_public_tagged: false,
+                });
+            }
         }
     }
 }
@@ -2006,7 +2002,7 @@ fn is_vue_builtin(name: &str) -> bool {
 
 /// Detect component references in the template portion of an SFC.
 ///
-/// Scans for PascalCase (e.g. `<MyComponent>`) and kebab-case component tags
+/// Scans for `PascalCase` (e.g. `<MyComponent>`) and kebab-case component tags
 /// (e.g. `<my-component>`) that aren't standard HTML/SVG elements and aren't
 /// already imported in the script section. Returns synthetic imports for unresolved
 /// component references.
@@ -2018,7 +2014,7 @@ fn detect_template_component_refs(
     let template_content = match format {
         "vue" => extract_vue_template(source),
         "svelte" => extract_svelte_template(source),
-        "astro" => extract_astro_template(source),
+        "astro" => Some(extract_astro_template(source)),
         _ => return Vec::new(),
     };
     let Some(template) = template_content else {
@@ -2169,22 +2165,21 @@ fn extract_svelte_template(source: &str) -> Option<String> {
 }
 
 /// Extract template content from Astro (everything after the frontmatter fence).
-fn extract_astro_template(source: &str) -> Option<String> {
+fn extract_astro_template(source: &str) -> String {
     let trimmed = source.trim_start();
-    if trimmed.starts_with("---") {
-        let after_first = &trimmed[3..];
-        if let Some(close) = after_first.find("---") {
-            let template = &after_first[close + 3..];
-            if !template.trim().is_empty() {
-                return Some(template.to_string());
-            }
+    if let Some(after_first) = trimmed.strip_prefix("---")
+        && let Some(close) = after_first.find("---")
+    {
+        let template = &after_first[close + 3..];
+        if !template.trim().is_empty() {
+            return template.to_string();
         }
     }
     // No frontmatter — entire file is template.
-    Some(source.to_string())
+    source.to_string()
 }
 
-/// Scan template content for component tag names (PascalCase or kebab-case with hyphens).
+/// Scan template content for component tag names (`PascalCase` or kebab-case with hyphens).
 fn scan_component_tags(template: &str) -> Vec<(String, u32)> {
     let bytes = template.as_bytes();
     let mut tags = Vec::new();
@@ -2241,7 +2236,7 @@ fn kebab_to_pascal(kebab: &str) -> String {
         .collect()
 }
 
-/// Convert PascalCase to kebab-case (e.g. `MyComponent` -> `my-component`).
+/// Convert `PascalCase` to kebab-case (e.g. `MyComponent` -> `my-component`).
 fn pascal_to_kebab(s: &str) -> String {
     let mut result = String::with_capacity(s.len() + 4);
     for (i, c) in s.chars().enumerate() {
@@ -2267,7 +2262,7 @@ fn pascal_to_kebab(s: &str) -> String {
 ///
 /// In Vue 3's `<script setup>`:
 ///   - All top-level imports are available in the template
-///   - PascalCase imports can be used as components directly (`<MyComponent>`)
+///   - `PascalCase` imports can be used as components directly (`<MyComponent>`)
 ///   - They can also be used in kebab-case form (`<my-component>`)
 ///   - Non-component imports (functions, constants) are also available
 ///
@@ -2521,7 +2516,7 @@ fn detect_svelte_snippets(template: &str) -> bool {
 
 /// Detect Astro `client:*` hydration directives on component tags.
 ///
-/// Scans for PascalCase component tags that have a `client:` attribute
+/// Scans for `PascalCase` component tags that have a `client:` attribute
 /// (e.g. `client:load`, `client:idle`, `client:visible`, `client:media`,
 /// `client:only`). Returns a vec of `(component_name, directive, line)`.
 fn detect_astro_client_directives(template: &str) -> Vec<(String, String, u32)> {
@@ -2561,14 +2556,13 @@ fn detect_astro_client_directives(template: &str) -> Vec<(String, String, u32)> 
                     // Look for client: directives.
                     if let Some(directive) = extract_client_directive(tag_content) {
                         let key = format!("{tag_name}:{directive}");
-                        if !seen.contains(&key) {
+                        if seen.insert(key) {
                             let line = 1 + count_newlines(&bytes[..tag_open]);
                             results.push((
                                 tag_name.to_string(),
                                 directive,
                                 u32::try_from(line).unwrap_or(u32::MAX),
                             ));
-                            seen.insert(key);
                         }
                     }
                     i = te + 1;
@@ -2611,6 +2605,7 @@ fn extract_client_directive(attrs: &str) -> Option<String> {
 /// For each named import, scans the source for `Name.identifier` patterns
 /// and records them as member accesses. This is a lightweight heuristic
 /// that covers the common case of enum/namespace member access.
+#[allow(clippy::cast_possible_truncation)]
 fn detect_member_accesses(
     source: &str,
     imports: &[ImportInfo],
@@ -2668,6 +2663,7 @@ fn detect_member_accesses(
 ///
 /// Finds `new ImportedName(` assignments and tracks the variable, then
 /// detects `variable.member` patterns.
+#[allow(clippy::cast_possible_truncation)]
 fn detect_instance_member_accesses(
     source: &str,
     imports: &[ImportInfo],
@@ -2696,7 +2692,7 @@ fn detect_instance_member_accesses(
                         .rsplit_once(char::is_whitespace)
                         .map_or(var_part, |(_, name)| name)
                         .trim();
-                    if !var_name.is_empty() && var_name.bytes().all(|b| is_ident_char(b)) {
+                    if !var_name.is_empty() && var_name.bytes().all(is_ident_char) {
                         var_to_class.push((var_name, class_name));
                     }
                 }
@@ -2828,11 +2824,11 @@ fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
 
         if first_char == b'[' {
             // Array form: import.meta.glob(['./a/*.ts', './b/*.ts'])
-            if let Some(patterns) = extract_string_array(&source[after_paren..]) {
-                if !patterns.is_empty() {
-                    results
-                        .push(DependencyPattern::ImportMetaGlobArray { patterns, line: line_u32 });
-                }
+            if let Some(patterns) = extract_string_array(&source[after_paren..])
+                && !patterns.is_empty()
+            {
+                results
+                    .push(DependencyPattern::ImportMetaGlobArray { patterns, line: line_u32 });
             }
             // Skip past the closing bracket.
             let mut skip = after_paren + 1;
@@ -3238,14 +3234,13 @@ fn detect_url_constructor(source: &str) -> Vec<DependencyPattern> {
 fn detect_import_equals(program: &oxc_ast::ast::Program<'_>) -> Vec<DependencyPattern> {
     let mut results = Vec::new();
     for stmt in &program.body {
-        if let oxc_ast::ast::Statement::TSImportEqualsDeclaration(decl) = stmt {
-            if let oxc_ast::ast::TSModuleReference::ExternalModuleReference(ext) =
+        if let oxc_ast::ast::Statement::TSImportEqualsDeclaration(decl) = stmt
+            && let oxc_ast::ast::TSModuleReference::ExternalModuleReference(ext) =
                 &decl.module_reference
-            {
-                let specifier = ext.expression.value.to_string();
-                let line = decl.span.start;
-                results.push(DependencyPattern::ImportEquals { specifier, line });
-            }
+        {
+            let specifier = ext.expression.value.to_string();
+            let line = decl.span.start;
+            results.push(DependencyPattern::ImportEquals { specifier, line });
         }
     }
     results

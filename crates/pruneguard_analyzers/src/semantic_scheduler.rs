@@ -151,7 +151,7 @@ pub fn evaluate_semantic_decision(
     }
 
     // Check batch size
-    let unique_files: std::collections::HashSet<&Path> =
+    let unique_files: rustc_hash::FxHashSet<&Path> =
         candidates.iter().map(|c| c.file_path.as_path()).collect();
     if unique_files.len() > config.max_files_per_query_batch {
         return SemanticDecision::Skip {
@@ -243,15 +243,15 @@ fn has_typescript_files(project_root: &Path) -> bool {
     }
     // Check src/ for .ts/.tsx files
     let src_dir = project_root.join("src");
-    if src_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&src_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(ext) = path.extension() {
-                    if ext == "ts" || ext == "tsx" {
-                        return true;
-                    }
-                }
+    if src_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&src_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension()
+                && (ext == "ts" || ext == "tsx")
+            {
+                return true;
             }
         }
     }
@@ -267,13 +267,13 @@ fn find_tsconfig_paths(project_root: &Path) -> Vec<String> {
     }
     // Also check for project references in packages/
     let packages_dir = project_root.join("packages");
-    if packages_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&packages_dir) {
-            for entry in entries.flatten() {
-                let tsconfig = entry.path().join("tsconfig.json");
-                if tsconfig.exists() {
-                    paths.push(tsconfig.to_string_lossy().to_string());
-                }
+    if packages_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&packages_dir)
+    {
+        for entry in entries.flatten() {
+            let tsconfig = entry.path().join("tsconfig.json");
+            if tsconfig.exists() {
+                paths.push(tsconfig.to_string_lossy().to_string());
             }
         }
     }
@@ -281,7 +281,7 @@ fn find_tsconfig_paths(project_root: &Path) -> Vec<String> {
 }
 
 /// Estimate the overhead of running the semantic helper in milliseconds.
-fn estimate_overhead(candidate_count: usize, project_count: usize) -> u64 {
+const fn estimate_overhead(candidate_count: usize, project_count: usize) -> u64 {
     // Rough heuristic: base cost + per-project init + per-candidate query
     let base_ms: u64 = 200;
     let per_project_ms: u64 = 300;
@@ -291,6 +291,7 @@ fn estimate_overhead(candidate_count: usize, project_count: usize) -> u64 {
 
 /// Cache key for semantic results.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[allow(clippy::struct_field_names)]
 pub struct SemanticCacheKey {
     /// Hash of the tsconfig content.
     pub tsconfig_hash: u64,

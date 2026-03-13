@@ -96,6 +96,7 @@ pub enum PackageManager {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ResolverConfig {
     /// Paths to tsconfig files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -133,7 +134,7 @@ pub struct ResolverConfig {
     /// Whether to detect `new URL()` constructor patterns.
     #[serde(default = "default_true")]
     pub detect_url_constructor: bool,
-    /// Whether to detect JSDoc `@import` tags.
+    /// Whether to detect `JSDoc` `@import` tags.
     #[serde(default = "default_true")]
     pub detect_jsdoc_imports: bool,
     /// Whether to detect triple-slash reference directives.
@@ -283,7 +284,7 @@ pub struct AnalysisConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore_members: Vec<String>,
 
-    /// JSDoc tag names that mark a member as public/intentionally exported.
+    /// `JSDoc` tag names that mark a member as public/intentionally exported.
     /// When empty, `@public` is used as the default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub public_tag_names: Vec<String>,

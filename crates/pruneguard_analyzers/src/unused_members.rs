@@ -15,6 +15,7 @@ use crate::{make_finding, severity};
 /// Completely dead exports (those with no imports at all) are already reported
 /// by the `unused_exports` analyzer; this analyzer only flags *partially* used
 /// exports where some members are live and others are not.
+#[allow(clippy::too_many_lines)]
 pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding> {
     let Some(finding_severity) = severity(config.unused_members) else {
         return Vec::new();
@@ -147,7 +148,7 @@ pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding
                     &export.name,
                     dead_member,
                     config,
-                    &ignore_members_matcher,
+                    ignore_members_matcher.as_ref(),
                 ) {
                     continue;
                 }
@@ -203,7 +204,7 @@ fn should_suppress_member(
     parent_export: &CompactString,
     member_name: &CompactString,
     config: &AnalysisConfig,
-    ignore_members_matcher: &Option<GlobSet>,
+    ignore_members_matcher: Option<&GlobSet>,
 ) -> bool {
     // Look up the member node to check kind and public tag.
     let member_node = build.symbol_graph.member_exports.iter().find(|m| {
@@ -232,10 +233,10 @@ fn should_suppress_member(
     }
 
     // 3. Ignore members matching glob patterns.
-    if let Some(matcher) = ignore_members_matcher {
-        if matcher.is_match(member_name.as_str()) {
-            return true;
-        }
+    if let Some(matcher) = ignore_members_matcher
+        && matcher.is_match(member_name.as_str())
+    {
+        return true;
     }
 
     false

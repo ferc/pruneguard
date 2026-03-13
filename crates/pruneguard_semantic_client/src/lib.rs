@@ -132,12 +132,12 @@ impl SemanticClient {
         }
 
         // 3. System PATH
-        if let Ok(output) = Command::new("which").arg("pruneguard-tsgo").output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return HelperDiscovery::Found(PathBuf::from(path));
-                }
+        if let Ok(output) = Command::new("which").arg("pruneguard-tsgo").output()
+            && output.status.success()
+        {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                return HelperDiscovery::Found(PathBuf::from(path_str));
             }
         }
 
@@ -184,7 +184,8 @@ impl SemanticClient {
             SemanticClientError::ProtocolError("failed to get stdout handle".to_string())
         })?;
 
-        let (msg_type, payload) = read_message(stdout, Some(timeout - started.elapsed()))?;
+        let (msg_type, payload) =
+            read_message(stdout, Some(timeout.saturating_sub(started.elapsed())))?;
         match msg_type {
             MessageType::Ready => {
                 let ready: ReadyMessage = serde_json::from_slice(&payload)?;
@@ -211,15 +212,14 @@ impl SemanticClient {
                 }
             }
             _ => Err(SemanticClientError::ProtocolError(format!(
-                "expected Ready or Error, got {:?}",
-                msg_type
+                "expected Ready or Error, got {msg_type:?}"
             ))),
         }
     }
 
     /// Send a query batch and receive results.
-    pub fn query(&mut self, batch: QueryBatch) -> Result<ResponseBatch, SemanticClientError> {
-        let payload = serde_json::to_vec(&batch)?;
+    pub fn query(&mut self, batch: &QueryBatch) -> Result<ResponseBatch, SemanticClientError> {
+        let payload = serde_json::to_vec(batch)?;
         let msg = encode_message(MessageType::Query, &payload);
 
         let stdin = self
@@ -254,13 +254,13 @@ impl SemanticClient {
                 }
             }
             _ => Err(SemanticClientError::ProtocolError(format!(
-                "expected Response or Error, got {:?}",
-                msg_type
+                "expected Response or Error, got {msg_type:?}"
             ))),
         }
     }
 
     /// Gracefully shut down the helper.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn shutdown(mut self) -> Result<(), SemanticClientError> {
         let msg = encode_message(MessageType::Shutdown, b"{}");
         if let Some(stdin) = self.child.stdin.as_mut() {
@@ -272,17 +272,17 @@ impl SemanticClient {
     }
 
     /// Get the ready message from initialization.
-    pub fn ready_info(&self) -> &ReadyMessage {
+    pub const fn ready_info(&self) -> &ReadyMessage {
         &self.ready
     }
 
     /// Total wall-clock milliseconds spent in queries.
-    pub fn total_query_ms(&self) -> u64 {
+    pub const fn total_query_ms(&self) -> u64 {
         self.total_query_ms
     }
 
     /// Total number of individual queries sent.
-    pub fn total_queries(&self) -> usize {
+    pub const fn total_queries(&self) -> usize {
         self.total_queries
     }
 }
@@ -319,8 +319,8 @@ fn read_message(
         }
     })?;
 
-    let (size, msg_type) = decode_header(&header).ok_or_else(|| {
-        SemanticClientError::ProtocolError(format!("invalid header: {:?}", header))
+    let (size, msg_type) = decode_header(header).ok_or_else(|| {
+        SemanticClientError::ProtocolError(format!("invalid header: {header:?}"))
     })?;
 
     if size > MAX_PAYLOAD_SIZE {

@@ -41,7 +41,7 @@ pub enum MessageType {
 }
 
 impl MessageType {
-    pub fn from_byte(b: u8) -> Option<Self> {
+    pub const fn from_byte(b: u8) -> Option<Self> {
         match b {
             0x00 => Some(Self::Error),
             0x01 => Some(Self::Query),
@@ -200,6 +200,7 @@ pub struct ErrorMessage {
 
 /// Encode a message into the wire format.
 pub fn encode_message(msg_type: MessageType, payload: &[u8]) -> Vec<u8> {
+    #[allow(clippy::cast_possible_truncation)]
     let len = payload.len() as u32;
     let mut buf = Vec::with_capacity(HEADER_SIZE + payload.len());
     buf.extend_from_slice(&len.to_le_bytes());
@@ -210,7 +211,7 @@ pub fn encode_message(msg_type: MessageType, payload: &[u8]) -> Vec<u8> {
 
 /// Decode the header from a 5-byte buffer.
 /// Returns `(payload_size, message_type)`.
-pub fn decode_header(header: &[u8; HEADER_SIZE]) -> Option<(u32, MessageType)> {
+pub fn decode_header(header: [u8; HEADER_SIZE]) -> Option<(u32, MessageType)> {
     let size = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
     let msg_type = MessageType::from_byte(header[4])?;
     Some((size, msg_type))
@@ -228,7 +229,7 @@ mod tests {
 
         let mut header = [0u8; HEADER_SIZE];
         header.copy_from_slice(&encoded[..HEADER_SIZE]);
-        let (size, msg_type) = decode_header(&header).unwrap();
+        let (size, msg_type) = decode_header(header).unwrap();
         assert_eq!(size, payload.len() as u32);
         assert_eq!(msg_type, MessageType::Query);
         assert_eq!(&encoded[HEADER_SIZE..], payload);

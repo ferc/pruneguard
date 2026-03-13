@@ -10,6 +10,7 @@ use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 use crate::{make_finding, severity};
 
 /// Find tracked files that are unreachable from the active entrypoints.
+#[allow(clippy::implicit_hasher)]
 pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,

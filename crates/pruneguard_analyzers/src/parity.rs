@@ -14,11 +14,11 @@ pub enum SupportLevel {
 }
 
 impl SupportLevel {
-    fn symbol(self) -> &'static str {
+    const fn symbol(self) -> &'static str {
         match self {
-            SupportLevel::Supported => "OK",
-            SupportLevel::Partial => "PARTIAL",
-            SupportLevel::Unsupported => "MISSING",
+            Self::Supported => "OK",
+            Self::Partial => "PARTIAL",
+            Self::Unsupported => "MISSING",
         }
     }
 }
@@ -34,6 +34,7 @@ pub struct ParityFeature {
 }
 
 /// Build the full parity matrix.
+#[allow(clippy::too_many_lines)]
 pub fn parity_matrix() -> Vec<ParityFeature> {
     vec![
         // ── Dynamic patterns ────────────────────────────────────────────
@@ -408,6 +409,7 @@ pub struct FamilyStats {
 }
 
 /// Compute parity statistics from the full matrix.
+#[allow(clippy::cast_precision_loss, clippy::suboptimal_flops)]
 pub fn compute_parity_stats() -> ParityStats {
     let matrix = parity_matrix();
 
@@ -480,8 +482,8 @@ pub fn format_parity_table() -> String {
     // Header.
     let _ = writeln!(
         out,
-        "{:<w_family$}  {:<w_name$}  {:<w_ref$}  {:<w_level$}  {}",
-        "FAMILY", "FEATURE", "REF TOOL", "STATUS", "NOTES"
+        "{:<w_family$}  {:<w_name$}  {:<w_ref$}  {:<w_level$}  NOTES",
+        "FAMILY", "FEATURE", "REF TOOL", "STATUS"
     );
     let _ = writeln!(
         out,
@@ -491,11 +493,11 @@ pub fn format_parity_table() -> String {
 
     let mut last_family = "";
     for f in &matrix {
-        let family_display = if f.family != last_family {
+        let family_display = if f.family == last_family {
+            ""
+        } else {
             last_family = f.family;
             f.family
-        } else {
-            ""
         };
         let _ = writeln!(
             out,
@@ -568,18 +570,22 @@ pub fn stale_delta(corpus_results: &[crate::external_parity::ParityCaseResult]) 
         let matching = matrix.iter().find(|f| {
             f.family == result.family
                 && (f.name == result.name
-                    || f.name.replace('.', "-").replace(' ', "-").to_lowercase()
-                        == result.name.replace('.', "-").replace(' ', "-").to_lowercase())
+                    || {
+                        let normalize = |s: &str| {
+                            let mut out = s.replace('.', "-");
+                            out = out.replace(' ', "-");
+                            out.to_lowercase()
+                        };
+                        normalize(f.name) == normalize(&result.name)
+                    })
         });
 
         if let Some(feature) = matching {
             let is_stale = match feature.level {
                 // Matrix says supported but corpus says it fails.
                 SupportLevel::Supported => !result.passed,
-                // Matrix says unsupported but corpus says it passes.
-                SupportLevel::Unsupported => result.passed,
-                // Matrix says partial -- stale if corpus fully passes.
-                SupportLevel::Partial => result.passed,
+                // Matrix says unsupported/partial but corpus says it passes.
+                SupportLevel::Unsupported | SupportLevel::Partial => result.passed,
             };
 
             deltas.push(StaleDelta {

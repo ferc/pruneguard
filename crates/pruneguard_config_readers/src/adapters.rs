@@ -112,7 +112,7 @@ pub struct ConfigInputs {
     pub ignore_unresolved: Vec<String>,
     /// Generated entrypoints from framework build artifacts (e.g. .nuxt/imports.d.ts).
     pub generated_entrypoints: Vec<GeneratedEntrypoint>,
-    /// Route-generated entry globs for frameworks like TanStack Router, React Router.
+    /// Route-generated entry globs for frameworks like `TanStack` Router, React Router.
     pub route_entry_globs: Vec<RouteEntryGlob>,
     /// Synthetic import maps from generated .d.ts files.
     pub synthetic_import_maps: Vec<SyntheticImportMap>,
@@ -136,14 +136,14 @@ pub struct AliasEntry {
 }
 
 impl AliasEntry {
-    fn new(pattern: String, target: String, origin: AliasOrigin) -> Self {
+    const fn new(pattern: String, target: String, origin: AliasOrigin) -> Self {
         Self { pattern, target, origin }
     }
 }
 
 impl ConfigInputs {
     /// Merge another `ConfigInputs` into this one, combining all fields.
-    pub fn merge(&mut self, other: ConfigInputs) {
+    pub fn merge(&mut self, other: Self) {
         self.aliases.extend(other.aliases);
         self.entrypoints.extend(other.entrypoints);
         self.source_roots.extend(other.source_roots);
@@ -184,7 +184,7 @@ impl ConfigInputs {
 /// Trait for framework-specific config adapters.
 pub trait ConfigAdapter {
     /// The framework name this adapter handles.
-    fn framework_name(&self) -> &str;
+    fn framework_name(&self) -> &'static str;
 
     /// Check if this adapter can handle the given config file.
     fn matches(&self, config: &ConfigReadResult) -> bool;
@@ -224,7 +224,7 @@ fn strings_from_array(kind: &ConfigValueKind) -> Vec<String> {
 
 /// Returns `true` if the file-name component of `path` starts with `stem`.
 fn filename_starts_with(path: &std::path::Path, stem: &str) -> bool {
-    path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with(stem))
+    path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(stem))
 }
 
 /// Returns `true` if *any* ancestor directory of `path` is named `dir`.
@@ -244,16 +244,16 @@ fn parse_dts_for_synthetic_mappings(content: &str) -> Vec<SyntheticMapping> {
         let trimmed = line.trim();
 
         // Match: export { foo, bar } from './path'
-        if trimmed.starts_with("export") && trimmed.contains("from") {
-            if let Some(from_part) = extract_from_specifier(trimmed) {
-                let names = extract_export_names(trimmed);
-                for (name, is_type) in names {
-                    mappings.push(SyntheticMapping {
-                        import_name: name,
-                        resolved_path: Some(from_part.clone()),
-                        is_type,
-                    });
-                }
+        if trimmed.starts_with("export") && trimmed.contains("from")
+            && let Some(from_part) = extract_from_specifier(trimmed)
+        {
+            let names = extract_export_names(trimmed);
+            for (name, is_type) in names {
+                mappings.push(SyntheticMapping {
+                    import_name: name,
+                    resolved_path: Some(from_part.clone()),
+                    is_type,
+                });
             }
         }
 
@@ -273,16 +273,16 @@ fn parse_dts_for_synthetic_mappings(content: &str) -> Vec<SyntheticMapping> {
         }
 
         // Match: const foo: typeof import('./path')['default']
-        if trimmed.starts_with("const ") && trimmed.contains("typeof import(") {
-            if let Some(name) = trimmed.strip_prefix("const ").and_then(|s| s.split(':').next()) {
-                let name = name.trim().to_string();
-                let resolved = extract_typeof_import_path(trimmed);
-                mappings.push(SyntheticMapping {
-                    import_name: name,
-                    resolved_path: resolved,
-                    is_type: false,
-                });
-            }
+        if trimmed.starts_with("const ") && trimmed.contains("typeof import(")
+            && let Some(name) = trimmed.strip_prefix("const ").and_then(|s| s.split(':').next())
+        {
+            let name = name.trim().to_string();
+            let resolved = extract_typeof_import_path(trimmed);
+            mappings.push(SyntheticMapping {
+                import_name: name,
+                resolved_path: resolved,
+                is_type: false,
+            });
         }
     }
 
@@ -304,24 +304,24 @@ fn extract_from_specifier(line: &str) -> Option<String> {
 
 fn extract_export_names(line: &str) -> Vec<(String, bool)> {
     let mut results = Vec::new();
-    if let Some(brace_start) = line.find('{') {
-        if let Some(brace_end) = line.find('}') {
-            let names_str = &line[brace_start + 1..brace_end];
-            for name in names_str.split(',') {
-                let name = name.trim();
-                if name.is_empty() {
-                    continue;
+    if let Some(brace_start) = line.find('{')
+        && let Some(brace_end) = line.find('}')
+    {
+        let names_str = &line[brace_start + 1..brace_end];
+        for name in names_str.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            if let Some(stripped) = name.strip_prefix("type ") {
+                let clean = stripped.trim().split(" as ").next().unwrap_or("").trim();
+                if !clean.is_empty() {
+                    results.push((clean.to_string(), true));
                 }
-                if let Some(stripped) = name.strip_prefix("type ") {
-                    let clean = stripped.trim().split(" as ").next().unwrap_or("").trim();
-                    if !clean.is_empty() {
-                        results.push((clean.to_string(), true));
-                    }
-                } else {
-                    let clean = name.split(" as ").next().unwrap_or("").trim();
-                    if !clean.is_empty() {
-                        results.push((clean.to_string(), false));
-                    }
+            } else {
+                let clean = name.split(" as ").next().unwrap_or("").trim();
+                if !clean.is_empty() {
+                    results.push((clean.to_string(), false));
                 }
             }
         }
@@ -331,25 +331,25 @@ fn extract_export_names(line: &str) -> Vec<(String, bool)> {
 
 fn extract_import_names(line: &str) -> Vec<String> {
     let mut results = Vec::new();
-    if let Some(brace_start) = line.find('{') {
-        if let Some(brace_end) = line.find('}') {
-            let names_str = &line[brace_start + 1..brace_end];
-            for name in names_str.split(',') {
-                let name = name.trim();
-                if name.is_empty() {
-                    continue;
-                }
-                let clean = name
-                    .strip_prefix("type ")
-                    .unwrap_or(name)
-                    .trim()
-                    .split(" as ")
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                if !clean.is_empty() {
-                    results.push(clean.to_string());
-                }
+    if let Some(brace_start) = line.find('{')
+        && let Some(brace_end) = line.find('}')
+    {
+        let names_str = &line[brace_start + 1..brace_end];
+        for name in names_str.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let clean = name
+                .strip_prefix("type ")
+                .unwrap_or(name)
+                .trim()
+                .split(" as ")
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !clean.is_empty() {
+                results.push(clean.to_string());
             }
         }
     }
@@ -414,31 +414,30 @@ fn ingest_nuxt_generated_files(workspace_root: &Path) -> ConfigInputs {
     }
 
     let nitro_types_dir = workspace_root.join(".nitro/types");
-    if nitro_types_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&nitro_types_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("ts")
-                    && path.to_string_lossy().ends_with(".d.ts")
-                {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let mappings = parse_dts_for_synthetic_mappings(&content);
-                        if !mappings.is_empty() {
-                            inputs.synthetic_import_maps.push(SyntheticImportMap {
-                                source_file: path.clone(),
-                                mappings,
-                                framework: "nitro".to_string(),
-                            });
-                            inputs.generated_entrypoints.push(GeneratedEntrypoint {
-                                path: path.clone(),
-                                kind: "nitro-types".to_string(),
-                                reason: format!(
-                                    "Nitro generated {}",
-                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
-                                ),
-                            });
-                        }
-                    }
+    if nitro_types_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&nitro_types_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("ts")
+                && path.to_string_lossy().ends_with(".d.ts")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                let mappings = parse_dts_for_synthetic_mappings(&content);
+                if !mappings.is_empty() {
+                    inputs.synthetic_import_maps.push(SyntheticImportMap {
+                        source_file: path.clone(),
+                        mappings,
+                        framework: "nitro".to_string(),
+                    });
+                    inputs.generated_entrypoints.push(GeneratedEntrypoint {
+                        path: path.clone(),
+                        kind: "nitro-types".to_string(),
+                        reason: format!(
+                            "Nitro generated {}",
+                            path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
+                        ),
+                    });
                 }
             }
         }
@@ -468,20 +467,19 @@ fn parse_tanstack_route_tree(workspace_root: &Path, content: &str) -> Vec<RouteE
     for line in content.lines() {
         let trimmed = line.trim();
 
-        if trimmed.starts_with("import") && trimmed.contains("from") {
-            if let Some(specifier) = extract_from_specifier(trimmed) {
-                if specifier.starts_with("./routes/") || specifier.starts_with("../routes/") {
-                    route_files.push(specifier);
-                }
-            }
+        if trimmed.starts_with("import") && trimmed.contains("from")
+            && let Some(specifier) = extract_from_specifier(trimmed)
+            && (specifier.starts_with("./routes/") || specifier.starts_with("../routes/"))
+        {
+            route_files.push(specifier);
         }
 
-        if trimmed.contains("createFileRoute") || trimmed.contains("createLazyFileRoute") {
-            if let Some(path_start) = trimmed.find("'./") {
-                let after = &trimmed[path_start + 1..];
-                if let Some(end) = after.find('\'') {
-                    route_files.push(after[..end].to_string());
-                }
+        if (trimmed.contains("createFileRoute") || trimmed.contains("createLazyFileRoute"))
+            && let Some(path_start) = trimmed.find("'./")
+        {
+            let after = &trimmed[path_start + 1..];
+            if let Some(end) = after.find('\'') {
+                route_files.push(after[..end].to_string());
             }
         }
     }
@@ -632,7 +630,7 @@ pub fn detect_route_entrypoints(workspace_root: &Path) -> ConfigInputs {
 pub struct ViteAdapter;
 
 impl ConfigAdapter for ViteAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "vite"
     }
 
@@ -737,7 +735,7 @@ impl ConfigAdapter for ViteAdapter {
 pub struct NextAdapter;
 
 impl ConfigAdapter for NextAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "next"
     }
 
@@ -797,7 +795,7 @@ impl ConfigAdapter for NextAdapter {
 pub struct JestAdapter;
 
 impl ConfigAdapter for JestAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "jest"
     }
 
@@ -861,6 +859,31 @@ impl ConfigAdapter for JestAdapter {
             }
         }
 
+        // setupFiles — array of file paths that run before each test suite.
+        if let Some(kind) = find_value(values, "setupFiles") {
+            for path in strings_from_array(kind) {
+                inputs.setup_files.push(PathBuf::from(path));
+            }
+        }
+
+        // setupFilesAfterFramework — array of file paths that run after the
+        // test framework is installed but before each test suite.
+        if let Some(kind) = find_value(values, "setupFilesAfterFramework") {
+            for path in strings_from_array(kind) {
+                inputs.setup_files.push(PathBuf::from(path));
+            }
+        }
+
+        // globalSetup — a single file path for global setup.
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "globalSetup") {
+            inputs.global_setup_files.push(PathBuf::from(s));
+        }
+
+        // globalTeardown — a single file path for global teardown.
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "globalTeardown") {
+            inputs.global_setup_files.push(PathBuf::from(s));
+        }
+
         // roots
         if let Some(kind) = find_value(values, "roots") {
             for root in strings_from_array(kind) {
@@ -879,7 +902,7 @@ impl ConfigAdapter for JestAdapter {
 pub struct PlaywrightAdapter;
 
 impl ConfigAdapter for PlaywrightAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "playwright"
     }
 
@@ -936,7 +959,7 @@ impl ConfigAdapter for PlaywrightAdapter {
 pub struct StorybookAdapter;
 
 impl ConfigAdapter for StorybookAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "storybook"
     }
 
@@ -975,7 +998,7 @@ impl ConfigAdapter for StorybookAdapter {
 pub struct WebpackAdapter;
 
 impl ConfigAdapter for WebpackAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "webpack"
     }
 
@@ -1079,7 +1102,7 @@ impl ConfigAdapter for WebpackAdapter {
 pub struct VitestAdapter;
 
 impl ConfigAdapter for VitestAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "vitest"
     }
 
@@ -1174,7 +1197,7 @@ impl ConfigAdapter for VitestAdapter {
 pub struct NuxtAdapter;
 
 impl ConfigAdapter for NuxtAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "nuxt"
     }
 
@@ -1277,7 +1300,7 @@ impl ConfigAdapter for NuxtAdapter {
 pub struct AstroAdapter;
 
 impl ConfigAdapter for AstroAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "astro"
     }
 
@@ -1346,7 +1369,7 @@ impl ConfigAdapter for AstroAdapter {
 pub struct SvelteKitAdapter;
 
 impl ConfigAdapter for SvelteKitAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "sveltekit"
     }
 
@@ -1414,7 +1437,7 @@ impl ConfigAdapter for SvelteKitAdapter {
 pub struct RemixAdapter;
 
 impl ConfigAdapter for RemixAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "remix"
     }
 
@@ -1464,7 +1487,7 @@ impl ConfigAdapter for RemixAdapter {
 pub struct AngularAdapter;
 
 impl ConfigAdapter for AngularAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "angular"
     }
 
@@ -1483,32 +1506,32 @@ impl ConfigAdapter for AngularAdapter {
         // projects.*.architect.build.options.main → entrypoints
         let build_main_entries = find_values_with_prefix(values, "projects.");
         for entry in &build_main_entries {
-            if entry.key.contains(".architect.build.options.main") {
-                if let ConfigValueKind::String(s) = &entry.value {
+            if entry.key.contains(".architect.build.options.main")
+                && let ConfigValueKind::String(s) = &entry.value
+            {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+            // projects.*.architect.build.options.styles → entrypoints
+            if entry.key.contains(".architect.build.options.styles")
+                && let ConfigValueKind::Array(_) = &entry.value
+            {
+                for s in strings_from_array(&entry.value) {
                     inputs.entrypoints.push(PathBuf::from(s));
                 }
             }
-            // projects.*.architect.build.options.styles → entrypoints
-            if entry.key.contains(".architect.build.options.styles") {
-                if let ConfigValueKind::Array(_) = &entry.value {
-                    for s in strings_from_array(&entry.value) {
-                        inputs.entrypoints.push(PathBuf::from(s));
-                    }
-                }
-            }
             // projects.*.architect.build.options.scripts → entrypoints
-            if entry.key.contains(".architect.build.options.scripts") {
-                if let ConfigValueKind::Array(_) = &entry.value {
-                    for s in strings_from_array(&entry.value) {
-                        inputs.entrypoints.push(PathBuf::from(s));
-                    }
+            if entry.key.contains(".architect.build.options.scripts")
+                && let ConfigValueKind::Array(_) = &entry.value
+            {
+                for s in strings_from_array(&entry.value) {
+                    inputs.entrypoints.push(PathBuf::from(s));
                 }
             }
             // projects.*.architect.test.options.main → setup_files
-            if entry.key.contains(".architect.test.options.main") {
-                if let ConfigValueKind::String(s) = &entry.value {
-                    inputs.setup_files.push(PathBuf::from(s));
-                }
+            if entry.key.contains(".architect.test.options.main")
+                && let ConfigValueKind::String(s) = &entry.value
+            {
+                inputs.setup_files.push(PathBuf::from(s));
             }
         }
 
@@ -1523,7 +1546,7 @@ impl ConfigAdapter for AngularAdapter {
 pub struct NxAdapter;
 
 impl ConfigAdapter for NxAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "nx"
     }
 
@@ -1560,7 +1583,7 @@ impl ConfigAdapter for NxAdapter {
 pub struct TurborepoAdapter;
 
 impl ConfigAdapter for TurborepoAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "turborepo"
     }
 
@@ -1625,7 +1648,7 @@ impl ConfigAdapter for TurborepoAdapter {
 pub struct VitePressAdapter;
 
 impl ConfigAdapter for VitePressAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "vitepress"
     }
 
@@ -1665,7 +1688,7 @@ impl ConfigAdapter for VitePressAdapter {
 pub struct DocusaurusAdapter;
 
 impl ConfigAdapter for DocusaurusAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "docusaurus"
     }
 
@@ -1703,7 +1726,7 @@ impl ConfigAdapter for DocusaurusAdapter {
 pub struct RollupAdapter;
 
 impl ConfigAdapter for RollupAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "rollup"
     }
 
@@ -1788,7 +1811,7 @@ impl ConfigAdapter for RollupAdapter {
 pub struct RspackAdapter;
 
 impl ConfigAdapter for RspackAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "rspack"
     }
 
@@ -1886,7 +1909,7 @@ impl ConfigAdapter for RspackAdapter {
 pub struct RsbuildAdapter;
 
 impl ConfigAdapter for RsbuildAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "rsbuild"
     }
 
@@ -1959,7 +1982,7 @@ impl ConfigAdapter for RsbuildAdapter {
 pub struct ParcelAdapter;
 
 impl ConfigAdapter for ParcelAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "parcel"
     }
 
@@ -2028,7 +2051,7 @@ impl ConfigAdapter for ParcelAdapter {
 pub struct GatsbyAdapter;
 
 impl ConfigAdapter for GatsbyAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "gatsby"
     }
 
@@ -2073,10 +2096,10 @@ impl ConfigAdapter for GatsbyAdapter {
         // (plugins can be objects with `resolve` field)
         let plugin_entries = find_values_with_prefix(values, "plugins.");
         for entry in plugin_entries {
-            if entry.key.ends_with(".resolve") {
-                if let ConfigValueKind::String(s) = &entry.value {
-                    inputs.externals.push(s.clone());
-                }
+            if entry.key.ends_with(".resolve")
+                && let ConfigValueKind::String(s) = &entry.value
+            {
+                inputs.externals.push(s.clone());
             }
         }
 
@@ -2091,7 +2114,7 @@ impl ConfigAdapter for GatsbyAdapter {
 pub struct NitroAdapter;
 
 impl ConfigAdapter for NitroAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "nitro"
     }
 
@@ -2177,7 +2200,7 @@ impl ConfigAdapter for NitroAdapter {
 pub struct ReactRouterAdapter;
 
 impl ConfigAdapter for ReactRouterAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "react-router"
     }
 
@@ -2232,7 +2255,7 @@ impl ConfigAdapter for ReactRouterAdapter {
 pub struct QwikAdapter;
 
 impl ConfigAdapter for QwikAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "qwik"
     }
 
@@ -2287,7 +2310,7 @@ impl ConfigAdapter for QwikAdapter {
 pub struct BabelAdapter;
 
 impl ConfigAdapter for BabelAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "babel"
     }
 
@@ -2353,7 +2376,7 @@ impl ConfigAdapter for BabelAdapter {
 pub struct VueAdapter;
 
 impl ConfigAdapter for VueAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "vue"
     }
 
@@ -2406,10 +2429,11 @@ impl ConfigAdapter for VueAdapter {
         let page_entries = find_values_with_prefix(values, "pages.");
         for entry in page_entries {
             // pages.<name>.entry → entrypoint
-            if entry.key.ends_with(".entry") {
-                if let ConfigValueKind::String(s) = &entry.value {
-                    inputs.entrypoints.push(PathBuf::from(s));
-                }
+            #[allow(clippy::case_sensitive_file_extension_comparisons)]
+            if entry.key.ends_with(".entry")
+                && let ConfigValueKind::String(s) = &entry.value
+            {
+                inputs.entrypoints.push(PathBuf::from(s));
             }
         }
 
@@ -2429,7 +2453,7 @@ impl ConfigAdapter for VueAdapter {
 pub struct SvelteAdapter;
 
 impl ConfigAdapter for SvelteAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "svelte"
     }
 
@@ -2495,7 +2519,7 @@ impl ConfigAdapter for SvelteAdapter {
 pub struct TanStackRouterAdapter;
 
 impl ConfigAdapter for TanStackRouterAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "tanstack-router"
     }
 
@@ -2540,7 +2564,7 @@ impl ConfigAdapter for TanStackRouterAdapter {
 pub struct VikeAdapter;
 
 impl ConfigAdapter for VikeAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "vike"
     }
 
@@ -2587,7 +2611,7 @@ impl ConfigAdapter for VikeAdapter {
 pub struct RslibAdapter;
 
 impl ConfigAdapter for RslibAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "rslib"
     }
 
@@ -2670,7 +2694,7 @@ impl ConfigAdapter for RslibAdapter {
 pub struct PlaywrightCtAdapter;
 
 impl ConfigAdapter for PlaywrightCtAdapter {
-    fn framework_name(&self) -> &str {
+    fn framework_name(&self) -> &'static str {
         "playwright-ct"
     }
 

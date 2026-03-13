@@ -156,7 +156,7 @@ pub fn build_graph_with_options(
     // Wire synthetic import maps as resolver aliases so auto-imported
     // symbols from Nuxt/Nitro generated .d.ts files create real edges.
     for sim in &config_inputs.synthetic_import_maps {
-        let source_dir = sim.source_file.parent().unwrap_or(Path::new(""));
+        let source_dir = sim.source_file.parent().unwrap_or_else(|| Path::new(""));
         for mapping in &sim.mappings {
             if let Some(ref resolved) = mapping.resolved_path {
                 let target = if resolved.starts_with('.') {
@@ -257,10 +257,7 @@ pub fn build_graph_with_options(
         .enumerate()
         .filter(|(i, _)| needs_extract[*i])
         .filter_map(|(_, extracted_file)| {
-            match extract_file(extracted_file, &resolver, &repo_files) {
-                Ok(()) => None,
-                Err(e) => Some(e),
-            }
+            extract_file(extracted_file, &resolver, &repo_files).err()
         })
         .collect();
 
@@ -617,6 +614,7 @@ pub fn build_graph_with_options(
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn extract_file(
     extracted_file: &mut ExtractedFile,
     resolver: &ModuleResolver,
@@ -820,7 +818,7 @@ fn extract_file(
                         let negations: Vec<&str> = patterns
                             .iter()
                             .filter(|p| p.starts_with('!'))
-                            .map(|p| p.as_str())
+                            .map(String::as_str)
                             .collect();
                         for glob_pattern in patterns {
                             if glob_pattern.starts_with('!') {
@@ -1286,6 +1284,7 @@ fn add_resolved_edge(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn add_symbol_edges(
     symbol_graph: &mut SymbolGraph,
     importer_id: crate::FileId,
@@ -1462,9 +1461,8 @@ fn expand_glob_into_edges(
     // Normalize `./` prefix: globset treats `./foo` literally, but import.meta.glob
     // uses `./` to mean "relative to current file's directory".
     let normalized_pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-    let glob = match Glob::new(normalized_pattern) {
-        Ok(g) => g,
-        Err(_) => return,
+    let Ok(glob) = Glob::new(normalized_pattern) else {
+        return;
     };
     let matcher = glob.compile_matcher();
 
@@ -1499,10 +1497,10 @@ fn expand_glob_into_edges(
             continue;
         }
         // Apply negation filter: if the file matches any negation glob, skip it.
-        if let Some(ref neg_set) = negation_set {
-            if neg_set.is_match(relative) {
-                continue;
-            }
+        if let Some(ref neg_set) = negation_set
+            && neg_set.is_match(relative)
+        {
+            continue;
         }
         extracted_file.resolved_imports.push(resolve_edge(
             resolver,
@@ -1579,10 +1577,10 @@ fn expand_require_context_into_edges(
             if !re.is_match(&rel_str) {
                 continue;
             }
-        } else if let Some(ref glob_matcher) = compiled_regex {
-            if !glob_matcher.is_match(relative) {
-                continue;
-            }
+        } else if let Some(ref glob_matcher) = compiled_regex
+            && !glob_matcher.is_match(relative)
+        {
+            continue;
         }
         extracted_file.resolved_imports.push(resolve_edge(
             resolver,
@@ -1611,6 +1609,7 @@ fn expand_require_context_into_edges(
 }
 
 /// Inject entrypoints discovered from framework config adapters.
+#[allow(clippy::too_many_lines)]
 fn inject_config_entrypoints(
     entrypoint_seeds: &mut Vec<EntrypointSeed>,
     config_inputs: &pruneguard_config_readers::ConfigInputs,

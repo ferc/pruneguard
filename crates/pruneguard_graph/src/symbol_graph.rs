@@ -84,17 +84,12 @@ pub struct MemberRef {
 }
 
 /// The kind of access to a member (read, write, or both).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum MemberAccessKind {
+    #[default]
     Read,
     Write,
     ReadWrite,
-}
-
-impl Default for MemberAccessKind {
-    fn default() -> Self {
-        Self::Read
-    }
 }
 
 /// Tracks when an export is referenced within its own file (not via import).
@@ -121,7 +116,7 @@ pub struct MemberExportNode {
     pub is_live: bool,
     /// The kind of member (method, property, getter, setter, enum variant, etc.).
     pub member_kind: MemberNodeKind,
-    /// Whether this member has a @public JSDoc tag.
+    /// Whether this member has a @public `JSDoc` tag.
     pub is_public_tagged: bool,
 }
 
@@ -366,18 +361,18 @@ impl SymbolGraph {
                             .map(|((_, name), _)| name.clone())
                             .collect();
                         for name in source_keys {
-                            if let Some(node) = self.exports.get_mut(&(source, name)) {
-                                if !node.is_live {
-                                    node.is_live = true;
-                                    changed = true;
-                                }
+                            if let Some(node) = self.exports.get_mut(&(source, name))
+                                && !node.is_live
+                            {
+                                node.is_live = true;
+                                changed = true;
                             }
                         }
-                    } else if let Some(node) = self.exports.get_mut(&(source, original_name)) {
-                        if !node.is_live {
-                            node.is_live = true;
-                            changed = true;
-                        }
+                    } else if let Some(node) = self.exports.get_mut(&(source, original_name))
+                        && !node.is_live
+                    {
+                        node.is_live = true;
+                        changed = true;
                     }
                 }
             }

@@ -9,7 +9,7 @@ use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 use crate::{make_finding, severity};
 
 /// Find declared package dependencies that are never referenced by reachable files.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::implicit_hasher)]
 pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,

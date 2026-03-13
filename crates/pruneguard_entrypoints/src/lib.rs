@@ -305,8 +305,7 @@ pub fn detect_entrypoints(
                             let pattern_label = compiled_patterns
                                 .iter()
                                 .find(|(_, m)| m.is_match(relative))
-                                .map(|(p, _)| p.as_str())
-                                .unwrap_or("auto-load");
+                                .map_or("auto-load", |(p, _)| p.as_str());
                             push_entrypoint(
                                 &mut entrypoints,
                                 &mut seen,

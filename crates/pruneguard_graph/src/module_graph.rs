@@ -101,7 +101,7 @@ pub enum ModuleEdge {
     RequireResolve,
     /// `import.meta.glob('pattern')` — Vite glob import (expanded).
     ImportMetaGlob,
-    /// JSDoc `@type {import('specifier')}` — type-level dependency.
+    /// `JSDoc` `@type {import('specifier')}` — type-level dependency.
     JsDocImport,
     /// `/// <reference path="..." />` — TypeScript file reference.
     TripleSlashFile,

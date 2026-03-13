@@ -10,7 +10,7 @@ use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 use crate::{make_finding, severity};
 
 /// Find exports that are never consumed by reachable imports or re-export chains.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::implicit_hasher)]
 pub fn analyze(
     build: &GraphBuildResult,
     level: AnalysisSeverity,

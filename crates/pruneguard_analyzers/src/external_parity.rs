@@ -101,6 +101,7 @@ impl Default for ReplacementWeights {
 
 /// Inputs for computing the weighted replacement score.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)]
 pub struct ReplacementInputs {
     /// Parity corpus pass rate (0.0 - 1.0).
     pub parity_score: f64,
@@ -120,11 +121,12 @@ pub struct ReplacementInputs {
 /// Each input is expected to be in the range `[0.0, 1.0]`. The final score is
 /// clamped to `[0.0, 100.0]`.
 pub fn compute_replacement_score(inputs: &ReplacementInputs, weights: &ReplacementWeights) -> f64 {
+    #[allow(clippy::suboptimal_flops)]
     let raw = inputs.parity_score * weights.parity_corpus
         + inputs.canary_score * weights.canary_repos
         + inputs.false_positive_score * weights.false_positive
         + inputs.performance_score * weights.performance;
-    (raw * 100.0).min(100.0).max(0.0)
+    (raw * 100.0).clamp(0.0, 100.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -239,12 +241,12 @@ pub fn discover_family_names(corpus_root: &Path) -> Vec<String> {
         return families;
     };
     for entry in entries.flatten() {
-        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
-            if let Some(name) = entry.file_name().to_str() {
-                // Skip hidden directories (e.g. .git, .DS_Store).
-                if !name.starts_with('.') {
-                    families.push(name.to_string());
-                }
+        if entry.file_type().is_ok_and(|ft| ft.is_dir())
+            && let Some(name) = entry.file_name().to_str()
+        {
+            // Skip hidden directories (e.g. .git, .DS_Store).
+            if !name.starts_with('.') {
+                families.push(name.to_string());
             }
         }
     }
@@ -258,7 +260,7 @@ pub fn discover_family_names(corpus_root: &Path) -> Vec<String> {
 /// containing case subdirectories. Each case must have a `meta.json` file;
 /// an `expected.json` file is optional (defaults to empty expectations).
 ///
-/// Returns a sorted list of (meta, expected, case_dir) tuples.
+/// Returns a sorted list of (meta, expected, `case_dir`) tuples.
 pub fn discover_parity_cases(
     corpus_root: &Path,
 ) -> Vec<(ParityCaseMeta, ParityCaseExpected, PathBuf)> {
@@ -273,14 +275,14 @@ pub fn discover_parity_cases(
     };
 
     for family_entry in families.flatten() {
-        if !family_entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if !family_entry.file_type().is_ok_and(|ft| ft.is_dir()) {
             continue;
         }
         let Ok(cases_in_family) = std::fs::read_dir(family_entry.path()) else {
             continue;
         };
         for case_entry in cases_in_family.flatten() {
-            if !case_entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if !case_entry.file_type().is_ok_and(|ft| ft.is_dir()) {
                 continue;
             }
             let case_dir = case_entry.path();
@@ -312,6 +314,7 @@ pub fn discover_parity_cases(
 }
 
 /// Compute the aggregate external parity score from a slice of case results.
+#[allow(clippy::cast_precision_loss)]
 pub fn compute_external_parity_score(results: &[ParityCaseResult]) -> ExternalParityScore {
     let total_cases = results.len();
     let passed_cases = results.iter().filter(|r| r.passed).count();

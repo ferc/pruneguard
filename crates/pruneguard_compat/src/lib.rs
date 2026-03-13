@@ -292,8 +292,7 @@ impl CompatibilityReport {
             // Lower confidence by one level
             finding.confidence = match finding.confidence {
                 FindingConfidence::High => FindingConfidence::Medium,
-                FindingConfidence::Medium => FindingConfidence::Low,
-                FindingConfidence::Low => FindingConfidence::Low,
+                FindingConfidence::Medium | FindingConfidence::Low => FindingConfidence::Low,
             };
 
             // Attach trust notes

@@ -1,3 +1,4 @@
+#![allow(clippy::print_stdout, clippy::print_stderr)]
 //! `pruneguard-tsgo` — optional semantic helper for pruneguard.
 //!
 //! This binary communicates with the pruneguard Rust core over stdio using
@@ -71,7 +72,7 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 1: Read handshake from Rust core
     let (msg_type, payload) = read_message(&mut stdin)?;
     if msg_type != MessageType::Query {
-        return Err(format!("expected Query (handshake), got {:?}", msg_type).into());
+        return Err(format!("expected Query (handshake), got {msg_type:?}").into());
     }
 
     let handshake: HandshakeRequest = serde_json::from_slice(&payload)?;
@@ -101,11 +102,13 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
     let projects_loaded = 0;
     let files_indexed = 0;
 
+    #[allow(clippy::cast_possible_truncation)]
+    let init_ms = started.elapsed().as_millis() as u64;
     let ready = ReadyMessage {
         version: PROTOCOL_VERSION,
         projects_loaded,
         files_indexed,
-        init_ms: started.elapsed().as_millis() as u64,
+        init_ms,
     };
     send_message(&mut stdout, MessageType::Ready, &serde_json::to_vec(&ready)?)?;
 
@@ -158,13 +161,14 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .collect();
 
-                let response =
-                    ResponseBatch { results, batch_ms: batch_started.elapsed().as_millis() as u64 };
+                #[allow(clippy::cast_possible_truncation)]
+                let batch_ms = batch_started.elapsed().as_millis() as u64;
+                let response = ResponseBatch { results, batch_ms };
                 send_message(&mut stdout, MessageType::Response, &serde_json::to_vec(&response)?)?;
             }
             _ => {
                 let err = ErrorMessage {
-                    error: format!("unexpected message type: {:?}", msg_type),
+                    error: format!("unexpected message type: {msg_type:?}"),
                     fatal: false,
                 };
                 send_message(&mut stdout, MessageType::Error, &serde_json::to_vec(&err)?)?;
@@ -182,7 +186,7 @@ fn read_message(
     reader.read_exact(&mut header)?;
 
     let (size, msg_type) =
-        decode_header(&header).ok_or_else(|| format!("invalid header: {:?}", header))?;
+        decode_header(header).ok_or_else(|| format!("invalid header: {header:?}"))?;
 
     let mut payload = vec![0u8; size as usize];
     reader.read_exact(&mut payload)?;
