@@ -390,10 +390,7 @@ pub fn debug_frameworks(
         .chain(build.stats.heuristic_frameworks.iter().map(|name| DetectedPackInfo {
             name: name.clone(),
             confidence: "heuristic".to_string(),
-            signals: vec![format!(
-                "heuristic detection for profile {}",
-                profile.as_str()
-            )],
+            signals: vec![format!("heuristic detection for profile {}", profile.as_str())],
             reasons: vec!["matched via file-pattern heuristics".to_string()],
         }))
         .collect();
@@ -417,17 +414,13 @@ pub fn debug_frameworks(
         })
         .collect();
 
-    let all_ignore_patterns: Vec<String> = config.ignore_patterns.clone();
+    let all_ignore_patterns = config.ignore_patterns;
 
     // Classification rules are not a top-level config field; return empty for now.
     let all_classification_rules: Vec<ClassificationRuleInfo> = Vec::new();
 
-    let heuristic_detections: Vec<String> = build
-        .stats
-        .heuristic_frameworks
-        .iter()
-        .map(|name| format!("heuristic: {name}"))
-        .collect();
+    let heuristic_detections: Vec<String> =
+        build.stats.heuristic_frameworks.iter().map(|name| format!("heuristic: {name}")).collect();
 
     Ok(FrameworkDebugReport {
         detected_packs,
@@ -463,9 +456,7 @@ fn compatibility_report_from_scan(
 }
 
 /// Build a `CompatibilityReportOutput` from graph build stats.
-fn build_compat_output_from_stats(
-    stats: &pruneguard_report::Stats,
-) -> CompatibilityReportOutput {
+fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> CompatibilityReportOutput {
     let supported_frameworks = stats.frameworks_detected.clone();
     let heuristic_frameworks = stats.heuristic_frameworks.clone();
 
@@ -777,7 +768,7 @@ pub fn review(
             }
 
             // Move all blocking findings to advisory.
-            advisory_findings.extend(blocking_findings.drain(..));
+            advisory_findings.append(&mut blocking_findings);
             recommendations.push(
                 "strict-trust: trust conditions not met — all findings downgraded to advisory."
                     .to_string(),

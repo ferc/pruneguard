@@ -167,6 +167,7 @@ struct CrossPackageCouplingMetrics {
 }
 
 /// Suggest forbidden-dependency boundary rules by analyzing cross-package import edges.
+#[allow(clippy::too_many_lines)]
 fn suggest_boundary_rules(
     graph: &GraphBuildResult,
     config: &PruneguardConfig,

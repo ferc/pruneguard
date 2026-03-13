@@ -108,6 +108,20 @@
         "source"
       ],
       "properties": {
+        "framework": {
+          "description": "Framework that contributed this entrypoint, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "heuristic": {
+          "description": "Whether this entrypoint was detected via heuristics.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "kind": {
           "type": "string"
         },
@@ -116,6 +130,13 @@
         },
         "profile": {
           "type": "string"
+        },
+        "reason": {
+          "description": "Reason this entrypoint was detected.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "source": {
           "type": "string"
@@ -161,6 +182,14 @@
           "minimum": 0.0
         }
       }
+    },
+    "ExecutionMode": {
+      "description": "Execution mode for daemon/oneshot distinction.",
+      "type": "string",
+      "enum": [
+        "oneshot",
+        "daemon"
+      ]
     },
     "FileInfo": {
       "description": "Info about a discovered file.",
@@ -233,6 +262,13 @@
         "subject"
       ],
       "properties": {
+        "actionKinds": {
+          "description": "All applicable remediation action kinds.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RemediationActionKind"
+          }
+        },
         "category": {
           "description": "Category of the finding.",
           "allOf": [
@@ -260,6 +296,16 @@
             "$ref": "#/definitions/Evidence"
           }
         },
+        "frameworkContext": {
+          "description": "Framework context relevant to this finding.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "id": {
           "description": "Stable deterministic ID for this finding.",
           "type": "string"
@@ -273,6 +319,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "primaryActionKind": {
+          "description": "Primary remediation action kind for this finding.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemediationActionKind"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ruleName": {
@@ -300,6 +357,16 @@
             "string",
             "null"
           ]
+        },
+        "trustNotes": {
+          "description": "Trust-related notes for this finding.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "workspace": {
           "description": "Workspace this finding belongs to, if applicable.",
@@ -338,6 +405,32 @@
         "warn",
         "info"
       ]
+    },
+    "FrameworkConfidenceCounts": {
+      "description": "Breakdown of framework detection confidence levels.",
+      "type": "object",
+      "required": [
+        "exact",
+        "heuristic",
+        "unsupported"
+      ],
+      "properties": {
+        "exact": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "heuristic": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "unsupported": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
     },
     "Inventories": {
       "description": "Inventories of discovered entities.",
@@ -393,6 +486,22 @@
           "type": "string"
         }
       }
+    },
+    "RemediationActionKind": {
+      "description": "The kind of remediation action to take.",
+      "type": "string",
+      "enum": [
+        "delete-file",
+        "delete-export",
+        "remove-dependency",
+        "break-cycle",
+        "move-import",
+        "tighten-entrypoint",
+        "update-boundary-rule",
+        "assign-owner",
+        "split-package",
+        "acknowledge-baseline"
+      ]
     },
     "Stats": {
       "description": "Performance statistics.",
@@ -479,6 +588,13 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "compatibilityWarnings": {
+          "description": "Compatibility warnings from framework detection.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "confidenceCounts": {
           "$ref": "#/definitions/ConfidenceCounts"
         },
@@ -491,6 +607,17 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "executionMode": {
+          "description": "Execution mode used for this analysis.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExecutionMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "filesCached": {
           "type": "integer",
@@ -525,6 +652,26 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "frameworkConfidenceCounts": {
+          "description": "Framework confidence breakdown.",
+          "default": {
+            "exact": 0,
+            "heuristic": 0,
+            "unsupported": 0
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/FrameworkConfidenceCounts"
+            }
+          ]
+        },
+        "frameworksDetected": {
+          "description": "Frameworks detected during analysis.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "fullScopeRequired": {
           "type": "boolean"
         },
@@ -537,6 +684,36 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "heuristicEntrypoints": {
+          "description": "Number of entrypoints added by heuristic detection.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "heuristicFrameworks": {
+          "description": "Frameworks detected via heuristics (lower confidence).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "indexAgeMs": {
+          "description": "Age of the reused graph index in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "indexWarm": {
+          "description": "Whether the graph index was warm (reused from a previous run).",
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "newFindings": {
           "type": "integer",
@@ -563,6 +740,29 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "reusedGraphEdges": {
+          "description": "Number of graph edges reused from a warm index.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "reusedGraphNodes": {
+          "description": "Number of graph nodes reused from a warm index.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "strictTrustApplied": {
+          "description": "Whether strict trust mode was applied.",
+          "default": false,
+          "type": "boolean"
+        },
         "suppressedFindings": {
           "type": "integer",
           "format": "uint",
@@ -574,6 +774,15 @@
         "unresolvedSpecifiers": {
           "type": "integer",
           "format": "uint",
+          "minimum": 0.0
+        },
+        "watcherLagMs": {
+          "description": "Lag of the file-system watcher in milliseconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
           "minimum": 0.0
         }
       }
@@ -665,6 +874,13 @@
           "minimum": 0.0
         },
         "unsupportedSpecifier": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "workspaceExportsMiss": {
+          "description": "Subpath not declared in a workspace package's `exports` map.",
+          "default": 0,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0

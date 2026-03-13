@@ -1,45 +1,8 @@
+pub use pruneguard_frameworks::{
+    DetectionConfidence, FrameworkDetection, FrameworkTrustNote, TrustNoteScope,
+};
 use pruneguard_manifest::PackageManifest;
 use serde::Serialize;
-
-// These types represent framework detection metadata that feeds into compatibility
-// analysis. They are defined here because the upstream `pruneguard_frameworks`
-// crate currently exposes a trait-based `FrameworkPack` API rather than these
-// concrete signal structs. When the frameworks crate grows richer detection
-// metadata, these can be re-exported from there instead.
-
-/// A concrete framework detection result with confidence metadata.
-#[derive(Debug, Clone, Serialize)]
-pub struct FrameworkDetection {
-    pub name: String,
-    pub confidence: DetectionConfidence,
-    pub reasons: Vec<String>,
-}
-
-/// How confident the detection is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum DetectionConfidence {
-    /// Detected via an authoritative signal (e.g. dependency + config file).
-    Exact,
-    /// Detected via weaker heuristics (e.g. directory conventions only).
-    Heuristic,
-}
-
-/// A trust note emitted by a framework pack that may lower confidence in
-/// specific findings.
-#[derive(Debug, Clone, Serialize)]
-pub struct FrameworkTrustNote {
-    pub message: String,
-    pub affects: TrustNoteScope,
-}
-
-/// The scope a trust note applies to.
-#[derive(Debug, Clone, Serialize)]
-pub enum TrustNoteScope {
-    AllFindings,
-    EntrypointsOnly,
-    Workspace(String),
-    Path(String),
-}
 
 /// Result of compatibility analysis for a workspace.
 #[derive(Debug, Clone, Serialize)]

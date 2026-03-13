@@ -259,6 +259,46 @@
     "FrameworksConfig": {
       "type": "object",
       "properties": {
+        "angular": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "astro": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cypress": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "docusaurus": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "jest": {
           "anyOf": [
             {
@@ -279,6 +319,46 @@
             }
           ]
         },
+        "nuxt": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nx": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "playwright": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remix": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "storybook": {
           "anyOf": [
             {
@@ -289,7 +369,37 @@
             }
           ]
         },
+        "sveltekit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turborepo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "vite": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vitepress": {
           "anyOf": [
             {
               "$ref": "#/definitions/FrameworkToggle"

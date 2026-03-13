@@ -55,8 +55,8 @@ pub enum ConfigValueKind {
     String(String),
     Bool(bool),
     Number(f64),
-    Array(Vec<ConfigValueKind>),
-    Object(Vec<(String, ConfigValueKind)>),
+    Array(Vec<Self>),
+    Object(Vec<(String, Self)>),
     Dynamic(String), // description of what it is but can't evaluate
 }
 
@@ -68,7 +68,7 @@ pub fn read_config(path: &Path) -> Result<ConfigReadResult, ConfigReaderError> {
 
     match ext {
         "json" => read_json(path, &content),
-        "yaml" | "yml" => read_yaml_stub(path),
+        "yaml" | "yml" => Ok(read_yaml_stub(path)),
         "js" | "mjs" | "cjs" => read_js_static(path, &content),
         "ts" | "mts" | "cts" => read_ts_static(path, &content),
         _ => Ok(ConfigReadResult {
@@ -121,13 +121,10 @@ fn strip_jsonc_comments(content: &str) -> String {
         if in_string {
             if c == '\\' {
                 escaped = true;
-                result.push(c);
             } else if c == '"' {
                 in_string = false;
-                result.push(c);
-            } else {
-                result.push(c);
             }
+            result.push(c);
             continue;
         }
         if c == '"' {
@@ -208,15 +205,15 @@ fn json_to_config_value(value: &serde_json::Value) -> ConfigValueKind {
     }
 }
 
-fn read_yaml_stub(path: &Path) -> Result<ConfigReadResult, ConfigReaderError> {
+fn read_yaml_stub(path: &Path) -> ConfigReadResult {
     // YAML support is stubbed - would need serde_yaml dependency
-    Ok(ConfigReadResult {
+    ConfigReadResult {
         path: path.to_path_buf(),
         format: ConfigFormat::Yaml,
         status: ConfigReadStatus::Unreadable,
         values: vec![],
         warnings: vec!["YAML config reading not yet implemented".to_string()],
-    })
+    }
 }
 
 fn read_js_static(path: &Path, content: &str) -> Result<ConfigReadResult, ConfigReaderError> {

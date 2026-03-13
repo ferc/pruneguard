@@ -18,10 +18,10 @@
       }
     },
     "deletionOrder": {
-      "description": "Recommended deletion order (safe targets only).",
+      "description": "Recommended deletion order (safe targets only, dependency-aware).",
       "type": "array",
       "items": {
-        "type": "string"
+        "$ref": "#/definitions/DeletionOrderEntry"
       }
     },
     "evidence": {
@@ -54,6 +54,33 @@
     }
   },
   "definitions": {
+    "DeletionOrderEntry": {
+      "description": "An entry in the dependency-aware deletion order.",
+      "type": "object",
+      "required": [
+        "step",
+        "target"
+      ],
+      "properties": {
+        "reason": {
+          "description": "Why this target is at this position in the order.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "description": "Position in the deletion sequence (1-based).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "target": {
+          "description": "The target to delete.",
+          "type": "string"
+        }
+      }
+    },
     "Evidence": {
       "description": "Evidence supporting a finding.",
       "type": "object",
@@ -100,9 +127,18 @@
       "description": "A candidate in a safe-delete evaluation.",
       "type": "object",
       "required": [
+        "classification",
         "target"
       ],
       "properties": {
+        "classification": {
+          "description": "Explicit classification for this candidate.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SafeDeleteClassification"
+            }
+          ]
+        },
         "confidence": {
           "description": "Confidence in the safety assessment.",
           "anyOf": [
@@ -113,6 +149,13 @@
               "type": "null"
             }
           ]
+        },
+        "evidence": {
+          "description": "Per-candidate evidence supporting the classification.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Evidence"
+          }
         },
         "reasons": {
           "description": "Reasons for the classification.",
@@ -126,6 +169,32 @@
           "type": "string"
         }
       }
+    },
+    "SafeDeleteClassification": {
+      "description": "Explicit classification for a safe-delete candidate.",
+      "oneOf": [
+        {
+          "description": "Target is safe to delete without further review.",
+          "type": "string",
+          "enum": [
+            "safe"
+          ]
+        },
+        {
+          "description": "Target needs manual review before deletion.",
+          "type": "string",
+          "enum": [
+            "needs-review"
+          ]
+        },
+        {
+          "description": "Target must not be deleted.",
+          "type": "string",
+          "enum": [
+            "blocked"
+          ]
+        }
+      ]
     }
   }
 }

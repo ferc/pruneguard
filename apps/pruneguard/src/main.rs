@@ -212,49 +212,43 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
         cli::Command::CompatibilityReport => {
             let _config = load_config_or_default(&cwd, options.config.as_deref())?;
             let report = pruneguard::compatibility_report(&cwd, profile)?;
-            match options.global.format {
-                cli::OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&report).expect("serialize report")
-                    );
+            if matches!(options.global.format, cli::OutputFormat::Json) {
+                println!("{}", serde_json::to_string_pretty(&report).expect("serialize report"));
+            } else {
+                println!("--- compatibility report ---");
+                println!();
+                if !report.supported_frameworks.is_empty() {
+                    println!("supported frameworks:");
+                    for fw in &report.supported_frameworks {
+                        println!("  {fw}");
+                    }
                 }
-                _ => {
-                    println!("--- compatibility report ---");
-                    println!();
-                    if !report.supported_frameworks.is_empty() {
-                        println!("supported frameworks:");
-                        for fw in &report.supported_frameworks {
-                            println!("  {fw}");
-                        }
+                if !report.heuristic_frameworks.is_empty() {
+                    println!("heuristic frameworks (partial support):");
+                    for fw in &report.heuristic_frameworks {
+                        println!("  {fw}");
                     }
-                    if !report.heuristic_frameworks.is_empty() {
-                        println!("heuristic frameworks (partial support):");
-                        for fw in &report.heuristic_frameworks {
-                            println!("  {fw}");
-                        }
-                    }
-                    if !report.unsupported_signals.is_empty() {
-                        println!();
-                        println!("unsupported signals:");
-                        for sig in &report.unsupported_signals {
-                            print!("  {} (source: {})", sig.signal, sig.source);
-                            if let Some(suggestion) = &sig.suggestion {
-                                print!(" -- {suggestion}");
-                            }
-                            println!();
-                        }
-                    }
-                    if !report.warnings.is_empty() {
-                        println!();
-                        println!("warnings:");
-                        for warning in &report.warnings {
-                            println!("  {warning}");
-                        }
-                    }
-                    println!();
-                    println!("----------------------------");
                 }
+                if !report.unsupported_signals.is_empty() {
+                    println!();
+                    println!("unsupported signals:");
+                    for sig in &report.unsupported_signals {
+                        print!("  {} (source: {})", sig.signal, sig.source);
+                        if let Some(suggestion) = &sig.suggestion {
+                            print!(" -- {suggestion}");
+                        }
+                        println!();
+                    }
+                }
+                if !report.warnings.is_empty() {
+                    println!();
+                    println!("warnings:");
+                    for warning in &report.warnings {
+                        println!("  {warning}");
+                    }
+                }
+                println!();
+                println!("----------------------------");
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -499,6 +493,7 @@ fn print_daemon_report(report: &serde_json::Value, format: cli::OutputFormat) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_debug(
     cmd: cli::DebugCommand,
     config: &pruneguard_config::PruneguardConfig,
@@ -523,67 +518,61 @@ fn run_debug(
         }
         cli::DebugCommand::Frameworks => {
             let report = pruneguard::debug_frameworks(&cwd, profile)?;
-            match format {
-                cli::OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&report).expect("serialize report")
-                    );
+            if matches!(format, cli::OutputFormat::Json) {
+                println!("{}", serde_json::to_string_pretty(&report).expect("serialize report"));
+            } else {
+                println!("--- framework debug report ---");
+                println!();
+                if report.detected_packs.is_empty() {
+                    println!("no framework packs detected.");
+                } else {
+                    println!("detected framework packs:");
+                    for pack in &report.detected_packs {
+                        println!(
+                            "  {} (confidence: {}, signals: {})",
+                            pack.name,
+                            pack.confidence,
+                            pack.signals.join(", ")
+                        );
+                        for reason in &pack.reasons {
+                            println!("    reason: {reason}");
+                        }
+                    }
                 }
-                _ => {
-                    println!("--- framework debug report ---");
+                if !report.all_entrypoints.is_empty() {
                     println!();
-                    if !report.detected_packs.is_empty() {
-                        println!("detected framework packs:");
-                        for pack in &report.detected_packs {
-                            println!(
-                                "  {} (confidence: {}, signals: {})",
-                                pack.name,
-                                pack.confidence,
-                                pack.signals.join(", ")
-                            );
-                            for reason in &pack.reasons {
-                                println!("    reason: {reason}");
-                            }
-                        }
-                    } else {
-                        println!("no framework packs detected.");
+                    println!("contributed entrypoints:");
+                    for ep in &report.all_entrypoints {
+                        println!(
+                            "  {} (framework: {}, kind: {}, heuristic: {})",
+                            ep.path, ep.framework, ep.kind, ep.heuristic
+                        );
+                        println!("    reason: {}", ep.reason);
                     }
-                    if !report.all_entrypoints.is_empty() {
-                        println!();
-                        println!("contributed entrypoints:");
-                        for ep in &report.all_entrypoints {
-                            println!(
-                                "  {} (framework: {}, kind: {}, heuristic: {})",
-                                ep.path, ep.framework, ep.kind, ep.heuristic
-                            );
-                            println!("    reason: {}", ep.reason);
-                        }
-                    }
-                    if !report.all_ignore_patterns.is_empty() {
-                        println!();
-                        println!("ignore patterns:");
-                        for pattern in &report.all_ignore_patterns {
-                            println!("  {pattern}");
-                        }
-                    }
-                    if !report.all_classification_rules.is_empty() {
-                        println!();
-                        println!("classification rules:");
-                        for rule in &report.all_classification_rules {
-                            println!("  {} -> {}", rule.pattern, rule.classification);
-                        }
-                    }
-                    if !report.heuristic_detections.is_empty() {
-                        println!();
-                        println!("heuristic detections:");
-                        for detection in &report.heuristic_detections {
-                            println!("  {detection}");
-                        }
-                    }
-                    println!();
-                    println!("------------------------------");
                 }
+                if !report.all_ignore_patterns.is_empty() {
+                    println!();
+                    println!("ignore patterns:");
+                    for pattern in &report.all_ignore_patterns {
+                        println!("  {pattern}");
+                    }
+                }
+                if !report.all_classification_rules.is_empty() {
+                    println!();
+                    println!("classification rules:");
+                    for rule in &report.all_classification_rules {
+                        println!("  {} -> {}", rule.pattern, rule.classification);
+                    }
+                }
+                if !report.heuristic_detections.is_empty() {
+                    println!();
+                    println!("heuristic detections:");
+                    for detection in &report.heuristic_detections {
+                        println!("  {detection}");
+                    }
+                }
+                println!();
+                println!("------------------------------");
             }
             Ok(ExitCode::SUCCESS)
         }

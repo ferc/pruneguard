@@ -1,3 +1,5 @@
+#![allow(clippy::print_stderr)]
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -48,7 +50,7 @@ fn run_corpus_json(corpus: &Corpus, extra_args: &[&str]) -> Value {
     serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
 }
 
-/// Run a framework corpus command from the resolved local_path.
+/// Run a framework corpus command from the resolved `local_path`.
 fn run_framework_corpus_command(
     working_dir: &std::path::Path,
     extra_args: &[&str],
@@ -481,6 +483,7 @@ fn corpora_suggest_rules_without_panics() {
 
 #[test]
 #[ignore = "framework corpora smoke is opt-in"]
+#[allow(clippy::too_many_lines)]
 fn framework_corpora_scan_without_panics() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let corpora = load_framework_corpora();
@@ -493,16 +496,13 @@ fn framework_corpora_scan_without_panics() {
 
         // Resolve local_path relative to the pruneguard workspace root.
         let corpus_dir = manifest_dir.join("../../").join(&fc.local_path);
-        let corpus_dir = match corpus_dir.canonicalize() {
-            Ok(p) => p,
-            Err(_) => {
-                eprintln!(
-                    "[corpus issue] skipping `{}`: resolved path {} does not exist",
-                    fc.name,
-                    corpus_dir.display()
-                );
-                continue;
-            }
+        let Ok(corpus_dir) = corpus_dir.canonicalize() else {
+            eprintln!(
+                "[corpus issue] skipping `{}`: resolved path {} does not exist",
+                fc.name,
+                corpus_dir.display()
+            );
+            continue;
         };
 
         // Run scan.
@@ -510,12 +510,13 @@ fn framework_corpora_scan_without_panics() {
 
         // Distinguish product panics from expected failures.
         let stderr_text = String::from_utf8_lossy(&output.stderr);
-        if stderr_text.contains("panicked") || stderr_text.contains("SIGSEGV") {
-            panic!(
-                "[product issue] corpus `{}` (framework: {}) panicked during scan\nstderr:\n{}",
-                fc.name, fc.framework, stderr_text
-            );
-        }
+        assert!(
+            !(stderr_text.contains("panicked") || stderr_text.contains("SIGSEGV")),
+            "[product issue] corpus `{}` (framework: {}) panicked during scan\nstderr:\n{}",
+            fc.name,
+            fc.framework,
+            stderr_text
+        );
 
         assert!(
             output.status.success() || output.status.code() == Some(1),
@@ -658,11 +659,13 @@ fn resolve_representative_target(corpus: &Corpus) -> Option<String> {
     let fallback = files.and_then(|file_list| {
         file_list.iter().find_map(|entry| {
             let path = entry["path"].as_str()?;
-            if path.ends_with(".ts")
-                || path.ends_with(".tsx")
-                || path.ends_with(".mjs")
-                || path.ends_with(".js")
-            {
+            let p = std::path::Path::new(path);
+            if p.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("ts")
+                    || ext.eq_ignore_ascii_case("tsx")
+                    || ext.eq_ignore_ascii_case("mjs")
+                    || ext.eq_ignore_ascii_case("js")
+            }) {
                 Some(path.to_string())
             } else {
                 None

@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use pruneguard_manifest::PackageManifest;
+use serde::Serialize;
 
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
 
 /// How a framework classifies a file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum FileClassification {
     Test,
     Story,
@@ -16,7 +17,7 @@ pub enum FileClassification {
 }
 
 /// Confidence level for a framework detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DetectionConfidence {
     /// Config file + dependency confirmed.
     Exact,
@@ -25,7 +26,7 @@ pub enum DetectionConfidence {
 }
 
 /// Rich detection result from a framework pack.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FrameworkDetection {
     pub name: &'static str,
     pub confidence: DetectionConfidence,
@@ -34,7 +35,7 @@ pub struct FrameworkDetection {
 }
 
 /// A seed entrypoint contributed by a framework pack.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FrameworkEntrypointSeed {
     pub path: PathBuf,
     pub profile: Option<&'static str>,
@@ -44,21 +45,21 @@ pub struct FrameworkEntrypointSeed {
 }
 
 /// A glob pattern that maps files to a classification.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FrameworkClassificationRule {
     pub pattern: String,
     pub classification: FileClassification,
 }
 
 /// A trust note warning the user about heuristic or incomplete detection.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FrameworkTrustNote {
     pub message: String,
     pub affects: TrustNoteScope,
 }
 
 /// Scope of a trust note.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TrustNoteScope {
     AllFindings,
     EntrypointsOnly,
@@ -265,7 +266,7 @@ fn collect_spec_files_recursive(dir: &Path, entries: &mut Vec<PathBuf>) {
     }
 }
 
-/// Recursively collect SvelteKit route files (+page.*, +layout.*, etc.).
+/// Recursively collect `SvelteKit` route files (`+page.*`, `+layout.*`, etc.).
 fn collect_sveltekit_route_files(dir: &Path, entries: &mut Vec<PathBuf>) {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return;
@@ -274,14 +275,13 @@ fn collect_sveltekit_route_files(dir: &Path, entries: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_sveltekit_route_files(&path, entries);
-        } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("+page.")
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && (name.starts_with("+page.")
                 || name.starts_with("+layout.")
                 || name.starts_with("+server.")
-                || name.starts_with("+error.")
-            {
-                entries.push(path);
-            }
+                || name.starts_with("+error."))
+        {
+            entries.push(path);
         }
     }
 }
@@ -335,7 +335,7 @@ fn build_detection_signals(
     (has_dep, has_config, signals)
 }
 
-fn detection_confidence(has_dep: bool, has_config: bool) -> DetectionConfidence {
+const fn detection_confidence(has_dep: bool, has_config: bool) -> DetectionConfidence {
     if has_dep && has_config { DetectionConfidence::Exact } else { DetectionConfidence::Heuristic }
 }
 
@@ -1686,13 +1686,13 @@ impl FrameworkPack for CypressPack {
 
         // cypress/support/*
         let support_dir = workspace_root.join("cypress/support");
-        if support_dir.exists() {
-            if let Ok(read_dir) = std::fs::read_dir(&support_dir) {
-                for entry in read_dir.flatten() {
-                    let path = entry.path();
-                    if path.is_file() && pruneguard_fs::has_js_ts_extension(&path) {
-                        entries.push(path);
-                    }
+        if support_dir.exists()
+            && let Ok(read_dir) = std::fs::read_dir(&support_dir)
+        {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if path.is_file() && pruneguard_fs::has_js_ts_extension(&path) {
+                    entries.push(path);
                 }
             }
         }

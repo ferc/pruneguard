@@ -264,6 +264,7 @@ fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFa
 }
 
 fn refine_namespace_imports(source: &str, facts: &mut FileFacts) {
+    let stripped = strip_comments(source);
     for import in &mut facts.imports {
         let Some(namespace_alias) = import
             .names
@@ -274,7 +275,7 @@ fn refine_namespace_imports(source: &str, facts: &mut FileFacts) {
             continue;
         };
 
-        let usage = collect_namespace_usage(source, &namespace_alias);
+        let usage = collect_namespace_usage(&stripped, &namespace_alias);
         if usage.dynamic || usage.members.is_empty() {
             continue;
         }
@@ -290,6 +291,77 @@ fn refine_namespace_imports(source: &str, facts: &mut FileFacts) {
             })
             .collect();
     }
+}
+
+/// Strip single-line (`//`) and block (`/* */`) comments from source text,
+/// preserving line structure so that `is_in_import_context` still works.
+fn strip_comments(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut in_string: Option<u8> = None;
+    let mut escaped = false;
+
+    while i < bytes.len() {
+        if escaped {
+            result.push(bytes[i]);
+            escaped = false;
+            i += 1;
+            continue;
+        }
+
+        if let Some(quote) = in_string {
+            if bytes[i] == b'\\' {
+                escaped = true;
+            } else if bytes[i] == quote {
+                in_string = None;
+            }
+            result.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'"' || bytes[i] == b'\'' || bytes[i] == b'`' {
+            in_string = Some(bytes[i]);
+            result.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            // Single-line comment: skip until end of line, preserve newline
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                result.push(b' ');
+                i += 1;
+            }
+            continue;
+        }
+
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Block comment: skip until */, preserve newlines
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                if bytes[i] == b'\n' {
+                    result.push(b'\n');
+                } else {
+                    result.push(b' ');
+                }
+                i += 1;
+            }
+            if i + 1 < bytes.len() {
+                result.push(b' ');
+                result.push(b' ');
+                i += 2; // skip */
+            }
+            continue;
+        }
+
+        result.push(bytes[i]);
+        i += 1;
+    }
+
+    String::from_utf8(result).unwrap_or_else(|_| source.to_string())
 }
 
 fn refine_runtime_specifier_calls(source: &str, facts: &mut FileFacts) {

@@ -258,7 +258,7 @@ fn boundaries_workspace_filters_report_violations() {
     assert!(
         findings.iter().any(|finding| {
             finding["ruleName"] == "workspace-boundary"
-                && finding["message"].as_str().is_some_and(|message| message.contains("@fixture/b"))
+                && finding["message"].as_str().is_some_and(|message| message.contains("packages/b"))
         }),
         "expected workspace boundary violation"
     );
@@ -271,8 +271,7 @@ fn boundaries_package_filters_report_violations() {
     let findings = report["findings"].as_array().expect("findings array");
     assert!(
         findings.iter().any(|finding| {
-            finding["ruleName"] == "package-boundary"
-                && finding["message"].as_str().is_some_and(|message| message.contains("@fixture/b"))
+            finding["ruleName"] == "package-boundary" && finding["code"] == "boundary-violation"
         }),
         "expected package boundary violation"
     );

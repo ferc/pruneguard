@@ -1,139 +1,90 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ReviewReport",
-  "description": "Branch review report for CI/agent branch gating.",
+  "title": "FixPlanReport",
+  "description": "Fix plan report for agent-driven remediation workflows.",
   "type": "object",
   "required": [
-    "advisoryFindings",
-    "blockingFindings",
-    "changedFiles",
-    "newFindings",
-    "trust"
+    "actions",
+    "confidence",
+    "highConfidenceActions",
+    "matchedFindings",
+    "query",
+    "riskLevel",
+    "totalActions"
   ],
   "properties": {
-    "advisoryFindings": {
-      "description": "Findings that are advisory (medium/low confidence, or info severity).",
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Finding"
-      }
-    },
-    "baseRef": {
-      "description": "Base ref used for comparison.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "blockingFindings": {
-      "description": "Findings that should block merge (high confidence errors/warnings).",
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Finding"
-      }
-    },
-    "changedFiles": {
-      "description": "Files changed on this branch.",
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "compatibilityWarnings": {
-      "description": "Compatibility warnings from framework detection.",
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "executionMode": {
-      "description": "Execution mode used for this review.",
-      "anyOf": [
-        {
-          "$ref": "#/definitions/ExecutionMode"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "latencyMs": {
-      "description": "Wall-clock latency in milliseconds.",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "newFindings": {
-      "description": "All new findings introduced on this branch.",
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Finding"
-      }
-    },
-    "proposedActions": {
-      "description": "Proposed remediation actions for blocking findings.",
+    "actions": {
+      "description": "Ordered remediation actions (ranked: high confidence first, low blast radius first, dead-code before architecture churn).",
       "type": "array",
       "items": {
         "$ref": "#/definitions/RemediationAction"
       }
     },
-    "recommendations": {
-      "description": "Concise recommendations for the branch author.",
+    "blockedBy": {
+      "description": "Reasons why some findings could not produce actions.",
       "type": "array",
       "items": {
         "type": "string"
       }
     },
-    "recommendedActions": {
-      "description": "Machine-readable recommended next actions for agents.",
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/RecommendedAction"
-      }
-    },
-    "strictTrustApplied": {
-      "description": "Whether strict trust mode was applied.",
-      "default": false,
-      "type": "boolean"
-    },
-    "trust": {
-      "description": "Trust summary for this review.",
+    "confidence": {
+      "description": "Overall confidence (the minimum across all matched findings).",
       "allOf": [
         {
-          "$ref": "#/definitions/ReviewTrust"
+          "$ref": "#/definitions/FindingConfidence"
         }
       ]
+    },
+    "highConfidenceActions": {
+      "description": "Number of actions that are high confidence.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "matchedFindings": {
+      "description": "Findings matched by the query.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Finding"
+      }
+    },
+    "phaseSummary": {
+      "description": "Summary of actions by phase.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/FixPlanPhase"
+      }
+    },
+    "query": {
+      "description": "The query targets that were searched for.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "riskLevel": {
+      "description": "Overall risk level (the maximum across all actions).",
+      "allOf": [
+        {
+          "$ref": "#/definitions/RiskLevel"
+        }
+      ]
+    },
+    "totalActions": {
+      "description": "Total number of actions in the plan.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "verificationSteps": {
+      "description": "Top-level verification steps to run after the entire plan is applied.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "definitions": {
-    "ConfidenceCounts": {
-      "type": "object",
-      "required": [
-        "high",
-        "low",
-        "medium"
-      ],
-      "properties": {
-        "high": {
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "low": {
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "medium": {
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        }
-      }
-    },
     "Evidence": {
       "description": "Evidence supporting a finding.",
       "type": "object",
@@ -167,14 +118,6 @@
           "minimum": 0.0
         }
       }
-    },
-    "ExecutionMode": {
-      "description": "Execution mode for daemon/oneshot distinction.",
-      "type": "string",
-      "enum": [
-        "oneshot",
-        "daemon"
-      ]
     },
     "Finding": {
       "description": "A single finding from analysis.",
@@ -333,102 +276,37 @@
         "info"
       ]
     },
-    "RecommendedAction": {
-      "description": "A machine-readable recommended next action for an AI agent or CI system.",
+    "FixPlanPhase": {
+      "description": "A phase in a fix plan, grouping related actions.",
       "type": "object",
       "required": [
+        "actionCount",
         "description",
-        "kind",
-        "priority"
+        "name",
+        "order"
       ],
       "properties": {
-        "command": {
-          "description": "The pruneguard command to run, if applicable.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "description": {
-          "description": "Human-readable description of what to do.",
-          "type": "string"
-        },
-        "kind": {
-          "description": "Machine-readable action kind.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/RecommendedActionKind"
-            }
-          ]
-        },
-        "priority": {
-          "description": "Priority rank (1 = most important).",
+        "actionCount": {
+          "description": "Number of actions in this phase.",
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
         },
-        "targets": {
-          "description": "Targets this action applies to.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "description": {
+          "description": "Description of what this phase addresses.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Phase name.",
+          "type": "string"
+        },
+        "order": {
+          "description": "Phase ordering number (lower = earlier).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
         }
       }
-    },
-    "RecommendedActionKind": {
-      "description": "Kind of recommended next action.",
-      "oneOf": [
-        {
-          "description": "Run safe-delete on identified targets.",
-          "type": "string",
-          "enum": [
-            "run-safe-delete"
-          ]
-        },
-        {
-          "description": "Run fix-plan for specific findings.",
-          "type": "string",
-          "enum": [
-            "run-fix-plan"
-          ]
-        },
-        {
-          "description": "Resolve blocking findings before merge.",
-          "type": "string",
-          "enum": [
-            "resolve-blocking"
-          ]
-        },
-        {
-          "description": "Investigate unresolved specifier pressure.",
-          "type": "string",
-          "enum": [
-            "fix-resolver-config"
-          ]
-        },
-        {
-          "description": "Review advisory findings.",
-          "type": "string",
-          "enum": [
-            "review-advisory"
-          ]
-        },
-        {
-          "description": "Run a full-scope scan for higher confidence.",
-          "type": "string",
-          "enum": [
-            "run-full-scope"
-          ]
-        },
-        {
-          "description": "Branch is clean; no action required.",
-          "type": "string",
-          "enum": [
-            "none"
-          ]
-        }
-      ]
     },
     "RemediationAction": {
       "description": "A remediation action describing how to fix one or more findings.",
@@ -564,50 +442,6 @@
             "string",
             "null"
           ]
-        }
-      }
-    },
-    "ReviewTrust": {
-      "description": "Trust summary within a review report.",
-      "type": "object",
-      "required": [
-        "baselineApplied",
-        "confidenceCounts",
-        "fullScope",
-        "unresolvedPressure"
-      ],
-      "properties": {
-        "baselineApplied": {
-          "description": "Whether a baseline was applied.",
-          "type": "boolean"
-        },
-        "confidenceCounts": {
-          "description": "Confidence counts for new findings.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ConfidenceCounts"
-            }
-          ]
-        },
-        "executionMode": {
-          "description": "Execution mode used for this analysis.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ExecutionMode"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "fullScope": {
-          "description": "Whether full-scope analysis was performed.",
-          "type": "boolean"
-        },
-        "unresolvedPressure": {
-          "description": "Unresolved specifier pressure ratio.",
-          "type": "number",
-          "format": "double"
         }
       }
     },
