@@ -1,0 +1,6 @@
+{
+  "family": "semantic-sensitive",
+  "name": "type-only-export",
+  "reference_tool": "knip",
+  "description": "Type-only exports are correctly classified and type-only usage is noted"
+}

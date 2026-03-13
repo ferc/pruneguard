@@ -54,6 +54,8 @@ pruneguard_git = { path = "crates/pruneguard_git" }
 pruneguard_daemon = { path = "crates/pruneguard_daemon" }
 pruneguard_compat = { path = "crates/pruneguard_compat" }
 pruneguard_config_readers = { path = "crates/pruneguard_config_readers" }
+pruneguard_semantic_protocol = { path = "crates/pruneguard_semantic_protocol" }
+pruneguard_semantic_client = { path = "crates/pruneguard_semantic_client" }
 
 # Oxc crates
 oxc_parser = "0.117.0"

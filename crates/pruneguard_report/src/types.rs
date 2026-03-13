@@ -96,6 +96,12 @@ pub struct Finding {
     /// Framework context relevant to this finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub framework_context: Option<Vec<String>>,
+    /// Source of precision for this finding's evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision_source: Option<PrecisionSource>,
+    /// Human-readable reason for the confidence level assigned to this finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -130,6 +136,21 @@ pub enum FindingConfidence {
     High,
     Medium,
     Low,
+}
+
+/// Source of the precision for a finding's evidence.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrecisionSource {
+    /// Rust static analysis only.
+    #[default]
+    RustStatic,
+    /// Derived from framework-generated source maps or .d.ts files.
+    GeneratedMap,
+    /// Derived from framework config file extraction.
+    ConfigDerived,
+    /// Refined by the semantic helper binary.
+    SemanticHelper,
 }
 
 /// Risk level for a remediation action or fix plan.
@@ -506,6 +527,33 @@ pub struct Stats {
     /// External parity score summary, if available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_parity: Option<ExternalParitySummary>,
+    /// Semantic helper mode used for this analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_mode: Option<String>,
+    /// Whether the semantic helper was actually invoked.
+    #[serde(default)]
+    pub semantic_used: bool,
+    /// Wall-clock milliseconds spent in the semantic helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_wall_ms: Option<u64>,
+    /// Number of TypeScript projects loaded by the semantic helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_projects: Option<usize>,
+    /// Number of files sent to the semantic helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_files: Option<usize>,
+    /// Number of queries sent to the semantic helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_queries: Option<usize>,
+    /// Reason the semantic helper was skipped, if applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_skipped_reason: Option<String>,
+    /// Weighted replacement score (0-100) against the external parity corpus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_score: Option<f64>,
+    /// Per-family replacement scores.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replacement_family_scores: Vec<ReplacementFamilyScore>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -987,6 +1035,22 @@ pub struct ExternalParitySummary {
     pub total_checks: usize,
     /// Individual checks that passed.
     pub passed_checks: usize,
+}
+
+/// Per-family replacement score for the weighted replacement metric.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacementFamilyScore {
+    /// Family name (e.g. "vite", "next", "jest").
+    pub family: String,
+    /// Replacement score for this family (0-100).
+    pub score: f64,
+    /// Tier of this family (1 or 2).
+    pub tier: u8,
+    /// Total test cases in this family.
+    pub total_cases: usize,
+    /// Passing test cases in this family.
+    pub passed_cases: usize,
 }
 
 /// Daemon status report for querying daemon health from JS or CLI.

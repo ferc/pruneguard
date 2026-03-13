@@ -225,6 +225,8 @@ impl CompiledRules {
                         action_kinds: vec![RemediationActionKind::UpdateBoundaryRule],
                         trust_notes: None,
                         framework_context: None,
+                        precision_source: None,
+                        confidence_reason: None,
                     });
                 }
             }

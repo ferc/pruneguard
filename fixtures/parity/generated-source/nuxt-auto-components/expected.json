@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./components/MyButton.vue"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./components/MyButton.vue"]
+}

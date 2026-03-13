@@ -363,8 +363,94 @@ impl SourceAdapter for VueAdapter {
             });
         }
 
+        let has_setup = blocks.iter().any(|b| b.is_setup);
+        let has_regular_script = blocks.iter().any(|b| !b.is_setup);
+
+        if has_setup {
+            diagnostics.push(AdapterDiagnostic {
+                level: DiagnosticLevel::Info,
+                message: "detected <script setup> block (Composition API)".into(),
+                line: None,
+            });
+        }
+
         let facts = extract_from_script_blocks(path, &blocks);
-        let synthetic_imports = detect_template_component_refs(source, &facts, "vue");
+
+        // Start with the existing template component ref detection (for
+        // unresolved references not matched to script imports).
+        let mut synthetic_imports = detect_template_component_refs(source, &facts, "vue");
+
+        // Extract template content for enhanced Vue-specific analysis.
+        let template_content = extract_vue_template(source);
+
+        if let Some(ref template) = template_content {
+            // --- <script setup> component resolution ---
+            // In <script setup>, all imports are automatically available in the
+            // template. Connect template component tags to their imports.
+            if has_setup {
+                let setup_refs = detect_vue_setup_component_refs(template, &facts, &blocks);
+                if !setup_refs.is_empty() {
+                    diagnostics.push(AdapterDiagnostic {
+                        level: DiagnosticLevel::Info,
+                        message: format!(
+                            "resolved {} template component(s) to <script setup> imports",
+                            setup_refs.len()
+                        ),
+                        line: None,
+                    });
+                }
+                synthetic_imports.extend(setup_refs);
+            }
+
+            // --- Dynamic component detection ---
+            // Detect `<component :is="...">` and `v-bind:is` patterns.
+            let dynamic_refs = detect_vue_dynamic_components(template);
+            for (ref_name, line) in &dynamic_refs {
+                // Skip Vue built-ins.
+                if is_vue_builtin(ref_name) {
+                    continue;
+                }
+                synthetic_imports.push(SyntheticImport {
+                    specifier: ref_name.clone(),
+                    names: vec![CompactString::new(ref_name)],
+                    line: *line,
+                    reason: format!("dynamic component :is=\"{ref_name}\""),
+                });
+            }
+
+            // --- Options API `components: {{ }}` detection ---
+            // For regular (non-setup) script blocks, detect locally registered
+            // components and generate synthetic imports so the dependency graph
+            // knows these imports are used.
+            if has_regular_script && !has_setup {
+                for block in &blocks {
+                    if block.is_setup {
+                        continue;
+                    }
+                    let registered = detect_options_api_components(&block.content);
+                    for comp_name in &registered {
+                        synthetic_imports.push(SyntheticImport {
+                            specifier: comp_name.clone(),
+                            names: vec![CompactString::new(comp_name)],
+                            line: 0,
+                            reason: format!(
+                                "Options API components registration: '{comp_name}'"
+                            ),
+                        });
+                    }
+                    if !registered.is_empty() {
+                        diagnostics.push(AdapterDiagnostic {
+                            level: DiagnosticLevel::Info,
+                            message: format!(
+                                "detected {} locally registered component(s) in Options API",
+                                registered.len()
+                            ),
+                            line: None,
+                        });
+                    }
+                }
+            }
+        }
 
         // Detect <style module> or <style scoped> blocks (informational).
         if detect_vue_style_blocks(source) {
@@ -384,6 +470,10 @@ impl SourceAdapter for VueAdapter {
                 synthetic_aliases.push((si.specifier.clone(), pascal));
             }
         }
+
+        // Deduplicate synthetic imports by specifier.
+        let mut seen_specifiers: FxHashSet<String> = FxHashSet::default();
+        synthetic_imports.retain(|si| seen_specifiers.insert(si.specifier.clone()));
 
         Ok(AdapterOutput {
             facts,
@@ -445,6 +535,32 @@ impl SourceAdapter for SvelteAdapter {
             });
         }
 
+        // Detect {#snippet ...} blocks and <slot> usage in the markup.
+        // Imports used inside snippets should still be considered used, and
+        // components that expose slots/snippets may have exports consumed by
+        // parent components.
+        if let Some(ref template) = extract_svelte_template(source) {
+            let has_snippets = detect_svelte_snippets(template);
+            let has_slots = template.contains("<slot") || template.contains("<Slot");
+            if has_snippets {
+                diagnostics.push(AdapterDiagnostic {
+                    level: DiagnosticLevel::Info,
+                    message: "detected {#snippet} blocks; exports may be consumed as snippet props"
+                        .into(),
+                    line: None,
+                });
+            }
+            if has_slots {
+                diagnostics.push(AdapterDiagnostic {
+                    level: DiagnosticLevel::Info,
+                    message:
+                        "detected <slot> usage; component may expose content insertion points"
+                            .into(),
+                    line: None,
+                });
+            }
+        }
+
         Ok(AdapterOutput {
             facts,
             synthetic_imports,
@@ -494,7 +610,38 @@ impl SourceAdapter for AstroAdapter {
         let mut facts = frontmatter_facts;
         merge_facts(&mut facts, inline_script_facts);
 
-        let synthetic_imports = detect_template_component_refs(source, &facts, "astro");
+        let mut synthetic_imports = detect_template_component_refs(source, &facts, "astro");
+
+        // Detect client:* hydration directives on components in the template.
+        // Components with client:load, client:idle, client:visible, etc. are
+        // hydration boundaries and are definitely used at runtime.
+        if let Some(ref tmpl) = template_content {
+            let hydrated = detect_astro_client_directives(tmpl);
+            for (component_name, directive, line) in &hydrated {
+                diagnostics.push(AdapterDiagnostic {
+                    level: DiagnosticLevel::Info,
+                    message: format!(
+                        "component <{component_name}> uses {directive} hydration directive"
+                    ),
+                    line: Some(*line),
+                });
+                // If the hydrated component isn't already in the synthetic imports
+                // (from detect_template_component_refs), add it.
+                let already_present = synthetic_imports
+                    .iter()
+                    .any(|si| si.names.iter().any(|n| n.as_str() == component_name.as_str()));
+                if !already_present {
+                    synthetic_imports.push(SyntheticImport {
+                        specifier: component_name.clone(),
+                        names: vec![CompactString::new(component_name)],
+                        line: *line,
+                        reason: format!(
+                            "Astro hydrated component <{component_name}> ({directive})"
+                        ),
+                    });
+                }
+            }
+        }
 
         Ok(AdapterOutput {
             facts,
@@ -1480,6 +1627,8 @@ fn extract_mdx_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractErro
 struct ScriptBlock {
     content: String,
     lang: Option<&'static str>,
+    /// Whether this is a `<script setup>` block (Vue 3 Composition API).
+    is_setup: bool,
 }
 
 /// Extract `<script>` and `<script setup>` blocks from a Vue SFC.
@@ -1489,7 +1638,7 @@ fn extract_vue_script_blocks(source: &str) -> Vec<ScriptBlock> {
 
 /// Generic HTML-like `<script ...>...</script>` block extractor.
 ///
-/// Handles `lang="ts"` / `lang="tsx"` attributes.
+/// Handles `lang="ts"` / `lang="tsx"` attributes and detects `setup` attribute.
 fn extract_html_script_blocks(source: &str, open_tags: &[&str]) -> Vec<ScriptBlock> {
     let mut blocks = Vec::new();
     let lower = source.to_ascii_lowercase();
@@ -1504,6 +1653,7 @@ fn extract_html_script_blocks(source: &str, open_tags: &[&str]) -> Vec<ScriptBlo
             };
             let tag_attrs = &source[tag_start..=open_end];
             let lang = detect_lang_attr(tag_attrs);
+            let is_setup = detect_setup_attr(tag_attrs);
             let content_start = open_end + 1;
 
             // Find the matching `</script>`.
@@ -1514,6 +1664,7 @@ fn extract_html_script_blocks(source: &str, open_tags: &[&str]) -> Vec<ScriptBlo
             blocks.push(ScriptBlock {
                 content: source[content_start..close_start].to_string(),
                 lang,
+                is_setup,
             });
 
             search_start = close_start + b"</script>".len();
@@ -1521,6 +1672,14 @@ fn extract_html_script_blocks(source: &str, open_tags: &[&str]) -> Vec<ScriptBlo
     }
 
     blocks
+}
+
+/// Detect whether a `<script>` opening tag contains the `setup` attribute.
+fn detect_setup_attr(tag: &str) -> bool {
+    let lower = tag.to_ascii_lowercase();
+    // Match `setup` as a standalone attribute (not part of another word).
+    // Valid forms: `<script setup>`, `<script setup lang="ts">`, etc.
+    lower.contains(" setup") || lower.contains("\tsetup") || lower.contains("\nsetup")
 }
 
 /// Extract Astro frontmatter delimited by `---`.
@@ -1822,6 +1981,32 @@ const SVG_ELEMENTS: &[&str] = &[
     "set",
 ];
 
+/// Vue built-in components that should not generate synthetic imports.
+const VUE_BUILTINS: &[&str] = &[
+    "Component",
+    "component",
+    "Transition",
+    "transition",
+    "TransitionGroup",
+    "transition-group",
+    "KeepAlive",
+    "keep-alive",
+    "Teleport",
+    "teleport",
+    "Suspense",
+    "suspense",
+    "RouterView",
+    "router-view",
+    "RouterLink",
+    "router-link",
+    "Slot",
+];
+
+/// Check whether a tag name is a Vue built-in component.
+fn is_vue_builtin(name: &str) -> bool {
+    VUE_BUILTINS.contains(&name)
+}
+
 /// Detect component references in the template portion of an SFC.
 ///
 /// Scans for PascalCase (e.g. `<MyComponent>`) and kebab-case component tags
@@ -1851,6 +2036,10 @@ fn detect_template_component_refs(
     let mut synthetic = Vec::new();
 
     for (tag_name, line_offset) in component_tags {
+        // Skip Vue built-in components (Transition, KeepAlive, etc.).
+        if format == "vue" && is_vue_builtin(&tag_name) {
+            continue;
+        }
         // Skip if already imported.
         if imported_names.contains(tag_name.as_str()) {
             continue;
@@ -2053,6 +2242,387 @@ fn kebab_to_pascal(kebab: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Convert PascalCase to kebab-case (e.g. `MyComponent` -> `my-component`).
+fn pascal_to_kebab(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_ascii_uppercase() {
+            if i > 0 {
+                result.push('-');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Vue `<script setup>` and Options API component detection
+// ---------------------------------------------------------------------------
+
+/// For Vue `<script setup>` blocks, all top-level imports are automatically
+/// exposed to the template. This function connects template component references
+/// to their corresponding `<script setup>` imports.
+///
+/// In Vue 3's `<script setup>`:
+///   - All top-level imports are available in the template
+///   - PascalCase imports can be used as components directly (`<MyComponent>`)
+///   - They can also be used in kebab-case form (`<my-component>`)
+///   - Non-component imports (functions, constants) are also available
+///
+/// This function matches template component tags against script imports to produce
+/// synthetic import entries that the dependency graph can follow.
+fn detect_vue_setup_component_refs(
+    template: &str,
+    facts: &FileFacts,
+    blocks: &[ScriptBlock],
+) -> Vec<SyntheticImport> {
+    // Only proceed if there is at least one `<script setup>` block.
+    let has_setup = blocks.iter().any(|b| b.is_setup);
+    if !has_setup {
+        return Vec::new();
+    }
+
+    let component_tags = scan_component_tags(template);
+    if component_tags.is_empty() {
+        return Vec::new();
+    }
+
+    // Build a lookup of all imported names -> their import specifiers.
+    let mut import_lookup: FxHashSet<String> = FxHashSet::default();
+    for imp in &facts.imports {
+        for name in &imp.names {
+            import_lookup.insert(name.local.to_string());
+        }
+    }
+
+    let mut synthetic = Vec::new();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+
+    for (tag_name, line_offset) in &component_tags {
+        // Skip Vue built-in components.
+        if is_vue_builtin(tag_name) {
+            continue;
+        }
+
+        // Determine the PascalCase form of the tag.
+        let pascal = if tag_name.contains('-') {
+            kebab_to_pascal(tag_name)
+        } else {
+            tag_name.clone()
+        };
+
+        if seen.contains(&pascal) {
+            continue;
+        }
+
+        // Check if this component name (or its kebab form) matches a script import.
+        let kebab = pascal_to_kebab(&pascal);
+        let matches_import = import_lookup.contains(&pascal) || import_lookup.contains(&kebab);
+
+        if matches_import {
+            // This template component reference is backed by a <script setup> import.
+            // Generate a synthetic import to mark it as "used by template".
+            synthetic.push(SyntheticImport {
+                specifier: pascal.clone(),
+                names: vec![CompactString::new(&pascal)],
+                line: *line_offset,
+                reason: format!(
+                    "<script setup> component: <{tag_name}> resolved to import '{pascal}'"
+                ),
+            });
+            seen.insert(pascal);
+        }
+    }
+
+    synthetic
+}
+
+/// Detect dynamic component patterns in Vue templates.
+///
+/// Handles:
+///   - `<component :is="SomeName">` / `<component v-bind:is="SomeName">`
+///   - `<component :is="someVariable">` (camelCase identifiers)
+///
+/// Returns identifier names found in dynamic `:is` bindings.
+fn detect_vue_dynamic_components(template: &str) -> Vec<(String, u32)> {
+    let bytes = template.as_bytes();
+    let mut refs = Vec::new();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Look for `:is="..."` or `v-bind:is="..."`
+        let is_attr = if i + 5 < bytes.len() && &bytes[i..i + 5] == b":is=\"" {
+            Some(i + 5)
+        } else if i + 12 < bytes.len() && &bytes[i..i + 12] == b"v-bind:is=\"" {
+            Some(i + 12)
+        } else if i + 5 < bytes.len() && &bytes[i..i + 5] == b":is='" {
+            Some(i + 5)
+        } else if i + 12 < bytes.len() && &bytes[i..i + 12] == b"v-bind:is='" {
+            Some(i + 12)
+        } else {
+            None
+        };
+
+        if let Some(value_start) = is_attr {
+            // Find the closing quote.
+            let quote = bytes[value_start - 1]; // the opening quote character
+            let mut value_end = value_start;
+            while value_end < bytes.len() && bytes[value_end] != quote {
+                value_end += 1;
+            }
+            if value_end > value_start {
+                let value = template[value_start..value_end].trim();
+                // Only consider simple identifiers (no expressions with dots, parens, etc.).
+                if !value.is_empty()
+                    && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && value.as_bytes()[0].is_ascii_alphabetic()
+                    && !seen.contains(value)
+                {
+                    let line = 1 + count_newlines(&bytes[..i]);
+                    refs.push((
+                        value.to_string(),
+                        u32::try_from(line).unwrap_or(u32::MAX),
+                    ));
+                    seen.insert(value.to_string());
+                }
+            }
+            i = value_end + 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    refs
+}
+
+/// Detect Options API `components: { Foo, Bar }` registrations in a Vue `<script>` block.
+///
+/// In the Options API, components are registered like:
+/// ```js
+/// export default {
+///   components: { Foo, Bar, BazComponent: Baz },
+///   // ...
+/// }
+/// ```
+///
+/// This scans the script content for the `components:` property and extracts
+/// the identifiers listed within its object literal.
+fn detect_options_api_components(script_content: &str) -> Vec<String> {
+    let bytes = script_content.as_bytes();
+
+    // Find `components:` or `components :` followed by `{`.
+    let pattern = "components";
+    let mut components = Vec::new();
+    let mut search_start = 0;
+
+    while search_start < bytes.len() {
+        let Some(pos) = script_content[search_start..].find(pattern) else {
+            break;
+        };
+        let abs_pos = search_start + pos;
+        let after_kw = abs_pos + pattern.len();
+
+        // Skip whitespace/colon to find the opening brace.
+        let mut j = after_kw;
+        while j < bytes.len()
+            && (bytes[j] == b' '
+                || bytes[j] == b'\t'
+                || bytes[j] == b'\n'
+                || bytes[j] == b'\r')
+        {
+            j += 1;
+        }
+        // Expect a colon after `components`.
+        if j < bytes.len() && bytes[j] == b':' {
+            j += 1;
+            // Skip whitespace after the colon.
+            while j < bytes.len()
+                && (bytes[j] == b' '
+                    || bytes[j] == b'\t'
+                    || bytes[j] == b'\n'
+                    || bytes[j] == b'\r')
+            {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'{' {
+                j += 1; // skip opening brace
+                // Find the matching closing brace, respecting nesting.
+                let mut depth = 1;
+                let obj_start = j;
+                while j < bytes.len() && depth > 0 {
+                    if bytes[j] == b'{' {
+                        depth += 1;
+                    } else if bytes[j] == b'}' {
+                        depth -= 1;
+                    }
+                    if depth > 0 {
+                        j += 1;
+                    }
+                }
+                let obj_content = &script_content[obj_start..j];
+                // Extract identifiers from the object. Handle both:
+                //   - shorthand: `Foo, Bar`
+                //   - aliased: `FooAlias: Foo, BarAlias: Bar`
+                components.extend(extract_component_identifiers(obj_content));
+            }
+        }
+
+        search_start = abs_pos + pattern.len();
+    }
+
+    components
+}
+
+/// Extract component identifiers from a `components: { ... }` object literal body.
+///
+/// Handles shorthand (`Foo, Bar`) and aliased (`AliasName: ImportedName`) forms.
+/// Returns the value-side identifiers (the actual imports).
+fn extract_component_identifiers(obj_body: &str) -> Vec<String> {
+    let mut identifiers = Vec::new();
+
+    for entry in obj_body.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+
+        if let Some(colon_pos) = entry.find(':') {
+            // Aliased form: `AliasName: ImportedName`
+            let value = entry[colon_pos + 1..].trim();
+            // Only take simple identifiers.
+            if !value.is_empty()
+                && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && value.as_bytes()[0].is_ascii_alphabetic()
+            {
+                identifiers.push(value.to_string());
+            }
+        } else {
+            // Shorthand: `Foo`
+            let name = entry.trim();
+            if !name.is_empty()
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && name.as_bytes()[0].is_ascii_alphabetic()
+            {
+                identifiers.push(name.to_string());
+            }
+        }
+    }
+
+    identifiers
+}
+
+// ---------------------------------------------------------------------------
+// Svelte snippet / slot detection
+// ---------------------------------------------------------------------------
+
+/// Detect `{#snippet ...}` blocks in Svelte markup.
+///
+/// Returns `true` if any `{#snippet` block is found. Snippets are Svelte 5's
+/// replacement for slots that allow passing renderable content as props. Imports
+/// used inside snippet blocks are genuinely used and should not be pruned.
+fn detect_svelte_snippets(template: &str) -> bool {
+    template.contains("{#snippet")
+}
+
+// ---------------------------------------------------------------------------
+// Astro client:* directive detection
+// ---------------------------------------------------------------------------
+
+/// Detect Astro `client:*` hydration directives on component tags.
+///
+/// Scans for PascalCase component tags that have a `client:` attribute
+/// (e.g. `client:load`, `client:idle`, `client:visible`, `client:media`,
+/// `client:only`). Returns a vec of `(component_name, directive, line)`.
+fn detect_astro_client_directives(template: &str) -> Vec<(String, String, u32)> {
+    let bytes = template.as_bytes();
+    let mut results = Vec::new();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // Look for `<` followed by an uppercase letter (component tag).
+        if bytes[i] == b'<'
+            && i + 1 < bytes.len()
+            && bytes[i + 1].is_ascii_uppercase()
+        {
+            let tag_open = i;
+            let name_start = i + 1;
+            let mut name_end = name_start;
+            while name_end < bytes.len()
+                && (bytes[name_end].is_ascii_alphanumeric()
+                    || bytes[name_end] == b'_'
+                    || bytes[name_end] == b'-')
+            {
+                name_end += 1;
+            }
+            if name_end > name_start {
+                let tag_name = &template[name_start..name_end];
+                // Scan the rest of the opening tag for client: directives.
+                // Find the closing `>` or `/>` of the opening tag.
+                let mut j = name_end;
+                let mut tag_end = None;
+                while j < bytes.len() {
+                    if bytes[j] == b'>' {
+                        tag_end = Some(j);
+                        break;
+                    }
+                    j += 1;
+                }
+                if let Some(te) = tag_end {
+                    let tag_content = &template[name_end..te];
+                    // Look for client: directives.
+                    if let Some(directive) = extract_client_directive(tag_content) {
+                        let key = format!("{tag_name}:{directive}");
+                        if !seen.contains(&key) {
+                            let line =
+                                1 + count_newlines(&bytes[..tag_open]);
+                            results.push((
+                                tag_name.to_string(),
+                                directive,
+                                u32::try_from(line).unwrap_or(u32::MAX),
+                            ));
+                            seen.insert(key);
+                        }
+                    }
+                    i = te + 1;
+                } else {
+                    i = name_end;
+                }
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    results
+}
+
+/// Extract a `client:*` directive value from a tag's attribute string.
+///
+/// Returns the full directive (e.g. `"client:load"`, `"client:idle"`).
+fn extract_client_directive(attrs: &str) -> Option<String> {
+    // Look for `client:` followed by a directive name.
+    let idx = attrs.find("client:")?;
+    let after = &attrs[idx..];
+    let mut end = 7; // len("client:")
+    while end < after.len()
+        && (after.as_bytes()[end].is_ascii_alphanumeric() || after.as_bytes()[end] == b'-')
+    {
+        end += 1;
+    }
+    if end > 7 {
+        Some(after[..end].to_string())
+    } else {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

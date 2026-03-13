@@ -5,6 +5,7 @@ pub mod external_parity;
 pub mod impact;
 pub mod ownership;
 pub mod parity;
+pub mod semantic_scheduler;
 pub mod suggest_rules;
 pub mod unused_dependencies;
 pub mod unused_exports;
@@ -150,6 +151,8 @@ pub(crate) fn make_finding(
         action_kinds,
         trust_notes: None,
         framework_context: None,
+        precision_source: None,
+        confidence_reason: None,
     }
 }
 

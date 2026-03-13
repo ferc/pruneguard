@@ -1,0 +1,6 @@
+{
+  "family": "framework-config",
+  "name": "playwright-test-dir",
+  "reference_tool": "knip",
+  "description": "Playwright testDir config adds test files as entrypoints"
+}

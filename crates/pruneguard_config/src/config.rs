@@ -38,6 +38,10 @@ pub struct PruneguardConfig {
     #[serde(default)]
     pub analysis: AnalysisConfig,
 
+    /// Semantic precision layer configuration.
+    #[serde(default)]
+    pub semantic: SemanticConfig,
+
     /// Custom rules.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<RulesConfig>,
@@ -308,6 +312,65 @@ impl Default for AnalysisConfig {
             ignore_members: Vec::new(),
             public_tag_names: Vec::new(),
             member_write_only_is_unused: true,
+        }
+    }
+}
+
+/// Mode for the optional semantic precision helper.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SemanticMode {
+    Off,
+    #[default]
+    Auto,
+    Required,
+}
+
+/// Configuration for the optional semantic precision layer.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticConfig {
+    /// Whether to use the semantic helper: off, auto (default), or required.
+    #[serde(default)]
+    pub mode: SemanticMode,
+
+    /// Maximum percentage of cold-scan overhead the helper is allowed to add (0-100).
+    #[serde(default = "default_max_cold_overhead_pct")]
+    pub max_cold_overhead_pct: u8,
+
+    /// Maximum files to include in a single query batch to the helper.
+    #[serde(default = "default_max_files_per_query_batch")]
+    pub max_files_per_query_batch: usize,
+
+    /// Maximum number of TypeScript project references to traverse.
+    #[serde(default = "default_max_project_refs")]
+    pub max_project_refs: usize,
+
+    /// Maximum wall-clock milliseconds the helper is allowed to run.
+    #[serde(default = "default_max_helper_wall_ms")]
+    pub max_helper_wall_ms: u64,
+
+    /// Minimum uncertainty score (0-100) a candidate must have before being
+    /// sent to the semantic helper. Lower values mean more candidates are refined.
+    #[serde(default = "default_min_uncertainty_score")]
+    pub min_uncertainty_score: u8,
+}
+
+const fn default_max_cold_overhead_pct() -> u8 { 20 }
+const fn default_max_files_per_query_batch() -> usize { 128 }
+const fn default_max_project_refs() -> usize { 8 }
+const fn default_max_helper_wall_ms() -> u64 { 1200 }
+const fn default_min_uncertainty_score() -> u8 { 60 }
+
+impl Default for SemanticConfig {
+    fn default() -> Self {
+        Self {
+            mode: SemanticMode::default(),
+            max_cold_overhead_pct: default_max_cold_overhead_pct(),
+            max_files_per_query_batch: default_max_files_per_query_batch(),
+            max_project_refs: default_max_project_refs(),
+            max_helper_wall_ms: default_max_helper_wall_ms(),
+            min_uncertainty_score: default_min_uncertainty_score(),
         }
     }
 }

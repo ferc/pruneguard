@@ -1,0 +1,21 @@
+[package]
+name = "pruneguard-tsgo"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Optional semantic helper binary for pruneguard dead-code precision refinement"
+publish = false
+
+[[bin]]
+name = "pruneguard-tsgo"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_semantic_protocol = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

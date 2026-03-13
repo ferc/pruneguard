@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/types.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-export:UnusedType"],
+  "expected_no_findings": ["unused-export:Foo"]
+}

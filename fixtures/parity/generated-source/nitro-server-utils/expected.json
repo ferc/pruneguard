@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./server/utils/db.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./server/utils/db.ts", "unused-export:getDb"]
+}

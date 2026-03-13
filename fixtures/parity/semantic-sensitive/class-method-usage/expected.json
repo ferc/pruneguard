@@ -1,0 +1,12 @@
+{
+  "reachable_files": ["./src/service.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-member:UserService.archive",
+    "unused-member:UserService.export"
+  ],
+  "expected_no_findings": [
+    "unused-member:UserService.getById",
+    "unused-member:UserService.list"
+  ]
+}

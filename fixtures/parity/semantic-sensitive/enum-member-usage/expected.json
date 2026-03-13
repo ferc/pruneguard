@@ -1,0 +1,13 @@
+{
+  "reachable_files": ["./src/status.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-member:Status.Suspended",
+    "unused-member:Status.Banned",
+    "unused-member:Status.Deleted"
+  ],
+  "expected_no_findings": [
+    "unused-member:Status.Active",
+    "unused-member:Status.Inactive"
+  ]
+}

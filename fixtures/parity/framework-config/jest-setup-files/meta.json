@@ -1,0 +1,6 @@
+{
+  "family": "framework-config",
+  "name": "jest-setup-files",
+  "reference_tool": "knip",
+  "description": "Jest setupFiles and setupFilesAfterFramework entries are treated as entrypoints"
+}

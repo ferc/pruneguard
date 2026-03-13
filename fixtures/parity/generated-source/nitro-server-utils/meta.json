@@ -1,0 +1,6 @@
+{
+  "family": "generated-source",
+  "name": "nitro-server-utils",
+  "reference_tool": "knip",
+  "description": "Nitro server utilities declared in generated .nitro/types are treated as live"
+}

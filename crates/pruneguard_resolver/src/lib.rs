@@ -9,14 +9,15 @@ use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
 /// default extensions, condition names) so that the analysis cache is invalidated.
-pub const RESOLVER_LOGIC_VERSION: u32 = 6;
+pub const RESOLVER_LOGIC_VERSION: u32 = 7;
 
 /// Origin of a resolved alias, used for attribution in findings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AliasOrigin {
     Manifest,
-    Tsconfig,
+    #[serde(alias = "tsconfig")]
+    TsconfigPaths,
     Webpack,
     Babel,
     Vite,
@@ -24,6 +25,26 @@ pub enum AliasOrigin {
     FrameworkGenerated,
     SubpathImports,
     BrowserField,
+}
+
+impl AliasOrigin {
+    /// Resolution priority — lower value means higher precedence.
+    ///
+    /// When multiple config-derived aliases match the same specifier, the
+    /// alias with the highest precedence (lowest priority number) wins.
+    /// Order: manifest exports > tsconfig paths > vite > webpack > babel > framework-generated.
+    const fn priority(self) -> u8 {
+        match self {
+            Self::Manifest => 0,
+            Self::SubpathImports => 1,
+            Self::BrowserField => 2,
+            Self::TsconfigPaths => 3,
+            Self::Vite => 4,
+            Self::Webpack => 5,
+            Self::Babel => 6,
+            Self::FrameworkGenerated => 7,
+        }
+    }
 }
 
 /// Result of resolving a module specifier.
@@ -277,6 +298,10 @@ impl ModuleResolver {
                 (pattern, abs, origin)
             })
             .collect();
+
+        // Sort by origin priority so higher-precedence aliases are tried first.
+        // Uses a stable sort to preserve insertion order among same-origin aliases.
+        self.config_aliases.sort_by_key(|(_, _, origin)| origin.priority());
     }
 
     /// Register external packages from framework config adapters.

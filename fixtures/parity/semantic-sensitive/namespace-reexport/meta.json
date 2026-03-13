@@ -1,0 +1,6 @@
+{
+  "family": "semantic-sensitive",
+  "name": "namespace-reexport",
+  "reference_tool": "knip",
+  "description": "Namespace re-export chains are tracked so members accessed via re-exported namespaces are reachable"
+}

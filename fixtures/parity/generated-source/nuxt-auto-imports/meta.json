@@ -1,0 +1,6 @@
+{
+  "family": "generated-source",
+  "name": "nuxt-auto-imports",
+  "reference_tool": "knip",
+  "description": "Nuxt auto-imported composables from .nuxt/imports.d.ts are treated as live"
+}

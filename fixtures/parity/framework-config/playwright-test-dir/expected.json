@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./e2e/login.spec.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./e2e/login.spec.ts"]
+}

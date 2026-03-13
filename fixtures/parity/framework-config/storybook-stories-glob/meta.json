@@ -1,0 +1,6 @@
+{
+  "family": "framework-config",
+  "name": "storybook-stories-glob",
+  "reference_tool": "knip",
+  "description": "Storybook stories globs in .storybook/main.js add matching files as entrypoints"
+}

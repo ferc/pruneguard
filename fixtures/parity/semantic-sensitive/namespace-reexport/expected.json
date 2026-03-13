@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/core.ts", "./src/index.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-export:unusedHelper"],
+  "expected_no_findings": ["unused-export:add", "unused-export:multiply"]
+}

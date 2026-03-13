@@ -1,0 +1,6 @@
+{
+  "family": "generated-source",
+  "name": "nuxt-auto-components",
+  "reference_tool": "knip",
+  "description": "Nuxt auto-registered components from .nuxt/components.d.ts are treated as live"
+}

@@ -1595,6 +1595,55 @@ fn run_bench(cmd: cli::BenchCommand, format: cli::OutputFormat) -> miette::Resul
             }
             Ok(ExitCode::SUCCESS)
         }
+        cli::BenchCommand::Performance { corpus, iterations } => {
+            let corpus_root = corpus.unwrap_or_else(|| {
+                let manifest_dir = env!("CARGO_MANIFEST_DIR");
+                std::path::PathBuf::from(manifest_dir)
+                    .join("..")
+                    .join("..")
+                    .join("fixtures")
+                    .join("corpora")
+            });
+
+            if !corpus_root.exists() {
+                miette::bail!("benchmark corpus not found at {}", corpus_root.display());
+            }
+
+            let iterations = iterations.unwrap_or(3);
+            eprintln!(
+                "Running performance benchmarks at {} ({} iterations)...",
+                corpus_root.display(),
+                iterations
+            );
+
+            // TODO: Implement cold-scan performance benchmarking.
+            // This will iterate over corpus repos, run pruneguard in cold mode
+            // (--no-cache --no-baseline --daemon off), measure wall time and RSS.
+            eprintln!("Performance benchmarking not yet implemented.");
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::BenchCommand::Compare { tool, corpus } => {
+            let corpus_root = corpus.unwrap_or_else(|| {
+                let manifest_dir = env!("CARGO_MANIFEST_DIR");
+                std::path::PathBuf::from(manifest_dir)
+                    .join("..")
+                    .join("..")
+                    .join("fixtures")
+                    .join("corpora")
+            });
+
+            if !corpus_root.exists() {
+                miette::bail!("benchmark corpus not found at {}", corpus_root.display());
+            }
+
+            eprintln!("Comparing pruneguard against '{tool}' on {}...", corpus_root.display());
+
+            // TODO: Implement tool comparison.
+            // This will run both pruneguard and the specified tool on each corpus
+            // repo, capture output, and diff findings for parity analysis.
+            eprintln!("Tool comparison not yet implemented.");
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

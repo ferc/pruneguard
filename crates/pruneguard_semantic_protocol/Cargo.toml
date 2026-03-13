@@ -1,0 +1,15 @@
+[package]
+name = "pruneguard_semantic_protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Wire protocol types for the pruneguard semantic helper binary"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

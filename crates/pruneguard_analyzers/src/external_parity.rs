@@ -76,6 +76,200 @@ pub struct ToolParityScore {
     pub pct: f64,
 }
 
+// ---------------------------------------------------------------------------
+// Weighted replacement score
+// ---------------------------------------------------------------------------
+
+/// Weights for the replacement score components.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplacementWeights {
+    /// Weight for the parity corpus pass rate (default 0.50).
+    pub parity_corpus: f64,
+    /// Weight for canary repo pass rate (default 0.30).
+    pub canary_repos: f64,
+    /// Weight for false-positive budget remaining (default 0.10).
+    pub false_positive: f64,
+    /// Weight for performance budget score (default 0.10).
+    pub performance: f64,
+}
+
+impl Default for ReplacementWeights {
+    fn default() -> Self {
+        Self {
+            parity_corpus: 0.50,
+            canary_repos: 0.30,
+            false_positive: 0.10,
+            performance: 0.10,
+        }
+    }
+}
+
+/// Inputs for computing the weighted replacement score.
+#[derive(Debug, Clone)]
+pub struct ReplacementInputs {
+    /// Parity corpus pass rate (0.0 - 1.0).
+    pub parity_score: f64,
+    /// Canary repo pass rate (0.0 - 1.0).
+    pub canary_score: f64,
+    /// False-positive budget remaining (1.0 = no FPs, 0.0 = all FPs).
+    pub false_positive_score: f64,
+    /// Performance budget score (1.0 = within budget, 0.0 = 5x over budget).
+    pub performance_score: f64,
+}
+
+/// Compute the weighted replacement score (0-100).
+///
+/// The formula is:
+///   score = (parity * 0.50 + canary * 0.30 + fp * 0.10 + perf * 0.10) * 100
+///
+/// Each input is expected to be in the range `[0.0, 1.0]`. The final score is
+/// clamped to `[0.0, 100.0]`.
+pub fn compute_replacement_score(
+    inputs: &ReplacementInputs,
+    weights: &ReplacementWeights,
+) -> f64 {
+    let raw = inputs.parity_score * weights.parity_corpus
+        + inputs.canary_score * weights.canary_repos
+        + inputs.false_positive_score * weights.false_positive
+        + inputs.performance_score * weights.performance;
+    (raw * 100.0).min(100.0).max(0.0)
+}
+
+// ---------------------------------------------------------------------------
+// Per-family tier classification and release gates
+// ---------------------------------------------------------------------------
+
+/// Tier classification for a parity family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FamilyTier {
+    /// Must reach >= 97% for release.
+    Tier1,
+    /// Required for 99% overall replacement score.
+    Tier2,
+}
+
+/// Map a family name to its tier.
+///
+/// Tier-1 families are the most popular bundlers, test runners, and meta-
+/// frameworks whose parity is required for a credible replacement claim.
+pub fn family_tier(family: &str) -> FamilyTier {
+    match family {
+        "vite" | "vitest" | "webpack" | "jest" | "storybook" | "next" | "nuxt"
+        | "astro" | "sveltekit" | "remix" | "angular" | "nx" | "playwright" => FamilyTier::Tier1,
+        _ => FamilyTier::Tier2,
+    }
+}
+
+/// Result of checking release gates.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReleaseGateResult {
+    /// Whether all gates passed.
+    pub passed: bool,
+    /// The computed replacement score (0-100).
+    pub replacement_score: f64,
+    /// Tier-1 families that scored below the 97% threshold.
+    pub tier1_below_threshold: Vec<String>,
+    /// False-positive delta percentage.
+    pub false_positive_delta: f64,
+    /// Cold-scan slowdown percentage.
+    pub cold_scan_slowdown_pct: f64,
+    /// Speed ratio vs knip (e.g. 5.0 means 5x faster).
+    pub speed_ratio_vs_knip: f64,
+    /// Human-readable descriptions of each failed gate.
+    pub failures: Vec<String>,
+}
+
+/// Check release gates against the replacement score and associated metrics.
+///
+/// Gates:
+/// - Replacement score must be >= 99%.
+/// - Every Tier-1 family must score >= 97%.
+/// - False-positive delta must be <= 2%.
+/// - Cold-scan slowdown must be <= 20%.
+/// - Speed ratio vs knip must be >= 3x.
+pub fn check_release_gates(
+    replacement_score: f64,
+    family_scores: &[(String, f64, FamilyTier)],
+    false_positive_delta: f64,
+    cold_scan_slowdown_pct: f64,
+    speed_ratio_vs_knip: f64,
+) -> ReleaseGateResult {
+    let mut failures = Vec::new();
+    let mut tier1_below = Vec::new();
+
+    if replacement_score < 99.0 {
+        failures.push(format!(
+            "replacement score {replacement_score:.1}% < 99% threshold"
+        ));
+    }
+
+    for (family, score, tier) in family_scores {
+        if *tier == FamilyTier::Tier1 && *score < 97.0 {
+            tier1_below.push(family.clone());
+            failures.push(format!(
+                "Tier-1 family '{family}' at {score:.1}% < 97% threshold"
+            ));
+        }
+    }
+
+    if false_positive_delta > 2.0 {
+        failures.push(format!(
+            "false-positive delta {false_positive_delta:.1}% > 2% threshold"
+        ));
+    }
+
+    if cold_scan_slowdown_pct > 20.0 {
+        failures.push(format!(
+            "cold-scan slowdown {cold_scan_slowdown_pct:.1}% > 20% threshold"
+        ));
+    }
+
+    if speed_ratio_vs_knip < 3.0 {
+        failures.push(format!(
+            "speed ratio vs knip {speed_ratio_vs_knip:.1}x < 3x threshold"
+        ));
+    }
+
+    ReleaseGateResult {
+        passed: failures.is_empty(),
+        replacement_score,
+        tier1_below_threshold: tier1_below,
+        false_positive_delta,
+        cold_scan_slowdown_pct,
+        speed_ratio_vs_knip,
+        failures,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Family discovery
+// ---------------------------------------------------------------------------
+
+/// Discover all family names present under the corpus root directory.
+///
+/// This is filesystem-driven: every subdirectory of `corpus_root` is treated
+/// as a family. The returned list is sorted alphabetically. Families that
+/// exist on disk but have no valid cases inside are still returned, so that
+/// CI can detect empty/broken family directories.
+pub fn discover_family_names(corpus_root: &Path) -> Vec<String> {
+    let mut families = Vec::new();
+    let Ok(entries) = std::fs::read_dir(corpus_root) else {
+        return families;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if let Some(name) = entry.file_name().to_str() {
+                // Skip hidden directories (e.g. .git, .DS_Store).
+                if !name.starts_with('.') {
+                    families.push(name.to_string());
+                }
+            }
+        }
+    }
+    families.sort();
+    families
+}
+
 /// Discover all parity cases under the given corpus root.
 ///
 /// The corpus root is expected to contain family subdirectories, each
@@ -208,10 +402,15 @@ pub fn format_external_parity_report(score: &ExternalParityScore) -> String {
 
     let _ = writeln!(out, "By family:");
     for f in &score.by_family {
+        let tier = family_tier(&f.family);
+        let tier_label = match tier {
+            FamilyTier::Tier1 => "[T1]",
+            FamilyTier::Tier2 => "[T2]",
+        };
         let _ = writeln!(
             out,
-            "  {:<30} {}/{} ({:.1}%)",
-            f.family, f.passed_cases, f.total_cases, f.pct
+            "  {:<30} {}/{} ({:.1}%) {}",
+            f.family, f.passed_cases, f.total_cases, f.pct, tier_label
         );
     }
     let _ = writeln!(out);
@@ -235,6 +434,32 @@ pub fn format_external_parity_report(score: &ExternalParityScore) -> String {
             for failure in &r.failures {
                 let _ = writeln!(out, "    - {failure}");
             }
+        }
+    }
+
+    out
+}
+
+/// Format a release gate result as a human-readable report.
+pub fn format_release_gate_report(gate: &ReleaseGateResult) -> String {
+    let mut out = String::new();
+
+    let status = if gate.passed { "PASSED" } else { "FAILED" };
+    let _ = writeln!(out, "Release Gate: {status}");
+    let _ = writeln!(out, "  Replacement score:   {:.1}%", gate.replacement_score);
+    let _ = writeln!(out, "  FP delta:            {:.1}%", gate.false_positive_delta);
+    let _ = writeln!(out, "  Cold-scan slowdown:  {:.1}%", gate.cold_scan_slowdown_pct);
+    let _ = writeln!(out, "  Speed vs knip:       {:.1}x", gate.speed_ratio_vs_knip);
+
+    if !gate.tier1_below_threshold.is_empty() {
+        let _ = writeln!(out, "  Tier-1 below 97%:    {}", gate.tier1_below_threshold.join(", "));
+    }
+
+    if !gate.failures.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "Gate failures:");
+        for f in &gate.failures {
+            let _ = writeln!(out, "  - {f}");
         }
     }
 

@@ -1,0 +1,6 @@
+{
+  "family": "framework-config",
+  "name": "webpack-entry-points",
+  "reference_tool": "knip",
+  "description": "Webpack entry config object entries are treated as entrypoints"
+}

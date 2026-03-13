@@ -409,6 +409,8 @@ mod tests {
             action_kinds: Vec::new(),
             trust_notes: None,
             framework_context: None,
+            precision_source: None,
+            confidence_reason: None,
         }
     }
 

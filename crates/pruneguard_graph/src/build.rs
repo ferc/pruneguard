@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Instant;
 use std::{collections::hash_map::DefaultHasher, hash::Hasher};
 
@@ -147,14 +146,35 @@ pub fn build_graph_with_options(
         config_inputs.merge(route_inputs);
     }
 
-    // Feed config-derived aliases to the resolver.
-    if !config_inputs.aliases.is_empty() {
-        let aliases = config_inputs
-            .aliases
-            .iter()
-            .map(|a| (a.pattern.clone(), a.target.clone(), a.origin))
-            .collect();
-        resolver.set_config_aliases(aliases, &discovery.project_root);
+    // Collect all aliases: config-derived + synthetic import map entries.
+    let mut all_aliases: Vec<(String, String, pruneguard_resolver::AliasOrigin)> = config_inputs
+        .aliases
+        .iter()
+        .map(|a| (a.pattern.clone(), a.target.clone(), a.origin))
+        .collect();
+
+    // Wire synthetic import maps as resolver aliases so auto-imported
+    // symbols from Nuxt/Nitro generated .d.ts files create real edges.
+    for sim in &config_inputs.synthetic_import_maps {
+        let source_dir = sim.source_file.parent().unwrap_or(Path::new(""));
+        for mapping in &sim.mappings {
+            if let Some(ref resolved) = mapping.resolved_path {
+                let target = if resolved.starts_with('.') {
+                    source_dir.join(resolved).to_string_lossy().to_string()
+                } else {
+                    resolved.clone()
+                };
+                all_aliases.push((
+                    mapping.import_name.clone(),
+                    target,
+                    pruneguard_resolver::AliasOrigin::FrameworkGenerated,
+                ));
+            }
+        }
+    }
+
+    if !all_aliases.is_empty() {
+        resolver.set_config_aliases(all_aliases, &discovery.project_root);
     }
 
     // Feed config-derived externals to the resolver.
@@ -166,6 +186,11 @@ pub fn build_graph_with_options(
     // Also include virtual module prefixes.
     let mut ignore_patterns = config_inputs.ignore_unresolved.clone();
     ignore_patterns.extend(config_inputs.virtual_module_prefixes.clone());
+    // Also register virtual module root prefixes so their specifiers
+    // are not counted as unresolved.
+    for vmr in &config_inputs.virtual_module_roots {
+        ignore_patterns.push(vmr.prefix.clone());
+    }
     ignore_patterns.sort();
     ignore_patterns.dedup();
     if !ignore_patterns.is_empty() {
@@ -203,7 +228,7 @@ pub fn build_graph_with_options(
         }
     }
 
-    // Phase 1: Record path index entries (sequential, cache writes)
+    // Phase 1: Record path index entries (sequential)
     if let Some(cache) = options.cache {
         for extracted_file in &extracted_files {
             let manifest_hash = extracted_file
@@ -223,11 +248,22 @@ pub fn build_graph_with_options(
         }
     }
 
-    // Phase 2: Extract and resolve file facts (parallel)
-    let cache_counters_mutex = Mutex::new(CacheCounters::default());
-    let errors: Vec<miette::Report> = extracted_files
-        .par_iter_mut()
-        .filter_map(|extracted_file| {
+    // Phase 2a: Sequential cache hydration — read cached facts for files whose
+    // hash hasn't changed. Track which files need fresh extraction.
+    let mut cache_counters = CacheCounters::default();
+    let mut per_file_hash: Vec<u64> = vec![0; extracted_files.len()];
+    let mut needs_extract = vec![true; extracted_files.len()];
+    if let Some(cache) = options.cache {
+        for (i, extracted_file) in extracted_files.iter_mut().enumerate() {
+            if !is_tracked_source(&extracted_file.file.path) {
+                needs_extract[i] = false;
+                continue;
+            }
+            let Ok(source_bytes) = std::fs::read(&extracted_file.file.path) else {
+                continue;
+            };
+            let file_hash = hash_bytes(&source_bytes);
+            per_file_hash[i] = file_hash;
             let hashes = CacheHashes {
                 manifest: extracted_file
                     .file
@@ -238,14 +274,21 @@ pub fn build_graph_with_options(
                     .unwrap_or(0),
                 ..base_hashes
             };
-            match populate_extracted_file(
-                extracted_file,
-                &resolver,
-                &repo_files,
-                options.cache,
-                &cache_counters_mutex,
-                hashes,
-            ) {
+            if hydrate_from_cache(extracted_file, cache, &mut cache_counters, file_hash, hashes)
+                .unwrap_or(false)
+            {
+                needs_extract[i] = false;
+            }
+        }
+    }
+
+    // Phase 2b: Parallel extraction for cache misses (no cache I/O)
+    let errors: Vec<miette::Report> = extracted_files
+        .par_iter_mut()
+        .enumerate()
+        .filter(|(i, _)| needs_extract[*i])
+        .filter_map(|(_, extracted_file)| {
+            match extract_file(extracted_file, &resolver, &repo_files) {
                 Ok(()) => None,
                 Err(e) => Some(e),
             }
@@ -255,7 +298,32 @@ pub fn build_graph_with_options(
     if let Some(first_error) = errors.into_iter().next() {
         return Err(first_error);
     }
-    let cache_counters = cache_counters_mutex.into_inner().unwrap();
+
+    // Phase 2c: Sequential cache persist for newly extracted files
+    if let Some(cache) = options.cache {
+        for (i, extracted_file) in extracted_files.iter().enumerate() {
+            if !needs_extract[i] || !is_tracked_source(&extracted_file.file.path) {
+                continue;
+            }
+            let hashes = CacheHashes {
+                manifest: extracted_file
+                    .file
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| manifest_hashes.get(workspace))
+                    .copied()
+                    .unwrap_or(0),
+                ..base_hashes
+            };
+            let _ = persist_to_cache(
+                extracted_file,
+                cache,
+                &mut cache_counters,
+                per_file_hash[i],
+                hashes,
+            );
+        }
+    }
 
     let packs = built_in_packs();
     let all_file_paths: Vec<PathBuf> =
@@ -271,6 +339,17 @@ pub fn build_graph_with_options(
     );
     // --- Phase 1: Inject config-derived entrypoints ---
     inject_config_entrypoints(&mut entrypoint_seeds, &config_inputs, &discovery, &all_file_paths);
+
+    // Route low-confidence reasons from framework config adapters into
+    // report parity warnings so the output explains partial static coverage.
+    for reason in &config_inputs.low_confidence_reasons {
+        // These will be surfaced in stats.parity_warnings later.
+        tracing::debug!(
+            scope = %reason.scope,
+            reason = %reason.reason,
+            "low confidence: framework config adapter flagged partial coverage"
+        );
+    }
 
     // --- Phase 4: Seed from wildcard exports in manifests ---
     let wildcard_file_inventory: Vec<PathBuf> =
@@ -452,7 +531,11 @@ pub fn build_graph_with_options(
         partial_scope,
         partial_scope_reason,
         confidence_counts: pruneguard_report::ConfidenceCounts::default(),
-        parity_warnings: Vec::new(),
+        parity_warnings: config_inputs
+            .low_confidence_reasons
+            .iter()
+            .map(|r| format!("[{}] {}", r.scope, r.reason))
+            .collect(),
         cache_hits: cache_counters.hits,
         cache_misses: cache_counters.misses,
         cache_entries_read: cache_counters.entries_read,
@@ -473,6 +556,15 @@ pub fn build_graph_with_options(
         unsupported_frameworks: Vec::new(),
         external_parity_pct: None,
         external_parity: None,
+        semantic_mode: None,
+        semantic_used: false,
+        semantic_wall_ms: None,
+        semantic_projects: None,
+        semantic_files: None,
+        semantic_queries: None,
+        semantic_skipped_reason: None,
+        replacement_score: None,
+        replacement_family_scores: Vec::new(),
     };
 
     // Build fast path-to-file index for O(1) lookups.
@@ -506,26 +598,16 @@ pub fn build_graph_with_options(
     })
 }
 
-fn populate_extracted_file(
+fn extract_file(
     extracted_file: &mut ExtractedFile,
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
-    cache: Option<&AnalysisCache>,
-    cache_counters: &Mutex<CacheCounters>,
-    hashes: CacheHashes,
 ) -> Result<()> {
     if !is_tracked_source(&extracted_file.file.path) {
         return Ok(());
     }
 
     let source_bytes = std::fs::read(&extracted_file.file.path).into_diagnostic()?;
-    let file_hash = hash_bytes(&source_bytes);
-    if let Some(cache) = cache
-        && hydrate_from_cache(extracted_file, cache, cache_counters, file_hash, hashes)?
-    {
-        return Ok(());
-    }
-
     let source = String::from_utf8(source_bytes).into_diagnostic()?;
     match extract_file_facts(&extracted_file.file.path, &source) {
         Ok(AdapterOutput {
@@ -788,10 +870,6 @@ fn populate_extracted_file(
         }
     }
 
-    if let Some(cache) = cache {
-        persist_to_cache(extracted_file, cache, cache_counters, file_hash, hashes)?;
-    }
-
     Ok(())
 }
 
@@ -861,22 +939,22 @@ fn resolve_edge(
 fn hydrate_from_cache(
     extracted_file: &mut ExtractedFile,
     cache: &AnalysisCache,
-    counters: &Mutex<CacheCounters>,
+    counters: &mut CacheCounters,
     file_hash: u64,
     hashes: CacheHashes,
 ) -> Result<bool> {
-    counters.lock().unwrap().entries_read += 1;
+    counters.entries_read += 1;
     let Some(cached_file) =
         cache.get_file_facts(&extracted_file.file.path).map_err(|err| miette::miette!("{err}"))?
     else {
-        counters.lock().unwrap().misses += 1;
+        counters.misses += 1;
         return Ok(false);
     };
-    counters.lock().unwrap().entries_read += 1;
+    counters.entries_read += 1;
     let Some(cached_resolutions) =
         cache.get_resolutions(&extracted_file.file.path).map_err(|err| miette::miette!("{err}"))?
     else {
-        counters.lock().unwrap().misses += 1;
+        counters.misses += 1;
         return Ok(false);
     };
 
@@ -886,7 +964,7 @@ fn hydrate_from_cache(
         || cached_file.manifest_hash != hashes.manifest
         || cached_file.tsconfig_hash != hashes.tsconfig
     {
-        counters.lock().unwrap().misses += 1;
+        counters.misses += 1;
         return Ok(false);
     }
 
@@ -900,14 +978,14 @@ fn hydrate_from_cache(
     extracted_file.resolved_reexports =
         serde_json::from_slice(&cached_resolutions.resolved_reexports_json)
             .map_err(|err| miette::miette!("{err}"))?;
-    counters.lock().unwrap().hits += 1;
+    counters.hits += 1;
     Ok(true)
 }
 
 fn persist_to_cache(
     extracted_file: &ExtractedFile,
     cache: &AnalysisCache,
-    counters: &Mutex<CacheCounters>,
+    counters: &mut CacheCounters,
     file_hash: u64,
     hashes: CacheHashes,
 ) -> Result<()> {
@@ -926,7 +1004,7 @@ fn persist_to_cache(
             external_dependencies: extracted_file.external_dependencies.clone(),
         })
         .map_err(|err| miette::miette!("{err}"))?;
-    counters.lock().unwrap().entries_written += 1;
+    counters.entries_written += 1;
     cache
         .put_resolutions(&CachedResolutions {
             path: extracted_file.file.path.to_string_lossy().to_string(),
@@ -936,11 +1014,8 @@ fn persist_to_cache(
                 .map_err(|err| miette::miette!("{err}"))?,
         })
         .map_err(|err| miette::miette!("{err}"))?;
-    {
-        let mut c = counters.lock().unwrap();
-        c.entries_written += 1;
-        c.misses += 1;
-    }
+    counters.entries_written += 1;
+    counters.misses += 1;
     Ok(())
 }
 

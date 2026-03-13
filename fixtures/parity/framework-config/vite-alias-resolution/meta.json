@@ -1,0 +1,6 @@
+{
+  "family": "framework-config",
+  "name": "vite-alias-resolution",
+  "reference_tool": "knip",
+  "description": "Vite resolve.alias entries are used for module resolution so aliased imports create graph edges"
+}

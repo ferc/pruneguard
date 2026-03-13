@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/state.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-member:AppState.lastError"],
+  "expected_no_findings": ["unused-member:AppState.count"]
+}

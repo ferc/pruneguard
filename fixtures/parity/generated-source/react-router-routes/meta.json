@@ -1,0 +1,6 @@
+{
+  "family": "generated-source",
+  "name": "react-router-routes",
+  "reference_tool": "knip",
+  "description": "React Router convention route files are treated as entrypoints"
+}

@@ -1,0 +1,17 @@
+[package]
+name = "pruneguard_semantic_client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Client for the pruneguard semantic helper binary"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_semantic_protocol = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./composables/useAuth.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./composables/useAuth.ts", "unused-export:useAuth"]
+}

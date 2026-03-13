@@ -1,0 +1,6 @@
+{
+  "family": "semantic-sensitive",
+  "name": "class-method-usage",
+  "reference_tool": "knip",
+  "description": "Class method-level dead code detection reports unused methods when only some are called"
+}

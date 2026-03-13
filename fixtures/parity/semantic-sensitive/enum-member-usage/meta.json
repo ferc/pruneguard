@@ -1,0 +1,6 @@
+{
+  "family": "semantic-sensitive",
+  "name": "enum-member-usage",
+  "reference_tool": "knip",
+  "description": "Enum member-level dead code detection reports unused variants when only some are consumed"
+}

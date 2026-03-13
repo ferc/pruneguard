@@ -1,0 +1,6 @@
+{
+  "family": "generated-source",
+  "name": "tanstack-route-tree",
+  "reference_tool": "knip",
+  "description": "TanStack Router route files referenced in routeTree.gen.ts are treated as entrypoints"
+}

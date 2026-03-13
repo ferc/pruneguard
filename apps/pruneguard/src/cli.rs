@@ -16,10 +16,21 @@ pub struct GlobalFlags {
     pub require_full_scope: bool,
     pub max_findings: Option<usize>,
     pub daemon: DaemonMode,
+    pub semantic: SemanticCliMode,
+    pub semantic_max_overhead_pct: Option<u8>,
+    pub semantic_max_wall_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum DaemonMode {
+    #[default]
+    Auto,
+    Off,
+    Required,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SemanticCliMode {
     #[default]
     Auto,
     Off,
@@ -95,6 +106,14 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub enum BenchCommand {
     Replacement { corpus: Option<PathBuf> },
+    Performance {
+        corpus: Option<PathBuf>,
+        iterations: Option<usize>,
+    },
+    Compare {
+        tool: String,
+        corpus: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +175,15 @@ fn parse_daemon_mode(s: &str) -> Result<DaemonMode, String> {
     }
 }
 
+fn parse_semantic_mode(s: &str) -> Result<SemanticCliMode, String> {
+    match s {
+        "auto" => Ok(SemanticCliMode::Auto),
+        "off" => Ok(SemanticCliMode::Off),
+        "required" => Ok(SemanticCliMode::Required),
+        other => Err(format!("unknown semantic mode: {other}")),
+    }
+}
+
 fn global_flags() -> impl Parser<GlobalFlags> {
     let format = long("format")
         .help("Output format: text|json|sarif|dot")
@@ -194,6 +222,19 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         .argument::<String>("MODE")
         .parse(|s| parse_daemon_mode(&s))
         .fallback(DaemonMode::Auto);
+    let semantic = long("semantic")
+        .help("Semantic helper mode: off|auto|required")
+        .argument::<String>("MODE")
+        .parse(|s| parse_semantic_mode(&s))
+        .fallback(SemanticCliMode::Auto);
+    let semantic_max_overhead_pct = long("semantic-max-overhead-pct")
+        .help("Maximum cold-scan overhead percentage for semantic helper (0-100)")
+        .argument::<u8>("N")
+        .optional();
+    let semantic_max_wall_ms = long("semantic-max-wall-ms")
+        .help("Maximum wall-clock milliseconds for semantic helper")
+        .argument::<u64>("MS")
+        .optional();
 
     construct!(GlobalFlags {
         format,
@@ -206,6 +247,9 @@ fn global_flags() -> impl Parser<GlobalFlags> {
         require_full_scope,
         max_findings,
         daemon,
+        semantic,
+        semantic_max_overhead_pct,
+        semantic_max_wall_ms,
     })
 }
 
@@ -331,13 +375,41 @@ fn bench_replacement_subcommand() -> impl Parser<BenchCommand> {
     construct!(BenchCommand::Replacement { corpus })
 }
 
+fn bench_performance_subcommand() -> impl Parser<BenchCommand> {
+    let corpus =
+        positional::<PathBuf>("CORPUS").help("Path to benchmark corpus directory").optional();
+    let iterations = long("iterations")
+        .help("Number of iterations for statistical accuracy")
+        .argument::<usize>("N")
+        .optional();
+    construct!(BenchCommand::Performance { corpus, iterations })
+}
+
+fn bench_compare_subcommand() -> impl Parser<BenchCommand> {
+    let tool = long("tool")
+        .help("Tool to compare against (e.g. knip)")
+        .argument::<String>("TOOL");
+    let corpus =
+        positional::<PathBuf>("CORPUS").help("Path to benchmark corpus directory").optional();
+    // Named flags must come before positionals in construct! for bpaf
+    construct!(BenchCommand::Compare { tool, corpus })
+}
+
 fn bench_command() -> impl Parser<Command> {
     let replacement = bench_replacement_subcommand()
         .to_options()
         .descr("Compute weighted replacement score against parity corpus")
         .command("replacement");
+    let performance = bench_performance_subcommand()
+        .to_options()
+        .descr("Run cold-scan performance benchmarks against corpus repos")
+        .command("performance");
+    let compare = bench_compare_subcommand()
+        .to_options()
+        .descr("Compare pruneguard results against another tool")
+        .command("compare");
 
-    construct!([replacement]).map(Command::Bench)
+    construct!([replacement, performance, compare]).map(Command::Bench)
 }
 
 fn daemon_start_subcommand() -> impl Parser<DaemonCommand> {
@@ -433,7 +505,7 @@ fn command_parser() -> impl Parser<Command> {
         daemon_command().to_options().descr("Manage the background daemon").command("daemon");
     let bench = bench_command()
         .to_options()
-        .descr("Run replacement benchmarks against parity corpus")
+        .descr("Run benchmarks: replacement scoring, performance, and tool comparison")
         .command("bench");
 
     // Catch bare positional paths and give a helpful error message.

@@ -1382,6 +1382,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pruneguard-tsgo"
+version = "0.1.0"
+dependencies = [
+ "pruneguard_semantic_protocol",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pruneguard_analyzers"
 version = "0.5.0"
 dependencies = [
@@ -1646,6 +1656,24 @@ dependencies = [
  "rustc-hash",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "pruneguard_semantic_client"
+version = "0.1.0"
+dependencies = [
+ "pruneguard_semantic_protocol",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "pruneguard_semantic_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

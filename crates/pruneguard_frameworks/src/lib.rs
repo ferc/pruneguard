@@ -153,6 +153,11 @@ pub fn built_in_packs() -> Vec<Box<dyn FrameworkPack>> {
         Box::new(NxPack),
         Box::new(TurboPack),
         Box::new(AngularPack),
+        // Tier 2 — Bundlers & Build Tools
+        Box::new(RspackPack),
+        Box::new(RsbuildPack),
+        Box::new(RollupPack),
+        Box::new(GatsbyPack),
         // Tier 3 — Dev / Runtime Tooling
         Box::new(PlaywrightPack),
         Box::new(CypressPack),
@@ -2944,6 +2949,438 @@ impl FrameworkPack for TriggerDevPack {
                 "production",
                 "task",
                 "Trigger.dev task file",
+                false,
+            );
+        }
+
+        seeds
+    }
+}
+
+// ===========================================================================
+// Tier 2 — Bundlers & Build Tools (additional)
+// ===========================================================================
+
+struct RspackPack;
+
+impl FrameworkPack for RspackPack {
+    fn name(&self) -> &'static str {
+        "rspack"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        manifest_has_any_dep(manifest, &["@rspack/core"])
+            || find_config_file(workspace_root, "rspack.config").is_some()
+    }
+
+    fn detect_detailed(
+        &self,
+        workspace_root: &Path,
+        manifest: &PackageManifest,
+    ) -> Option<FrameworkDetection> {
+        let (has_dep, has_config, signals) = build_detection_signals(
+            workspace_root,
+            manifest,
+            &["@rspack/core"],
+            &["rspack.config"],
+        );
+
+        if !has_dep && !has_config {
+            return None;
+        }
+
+        Some(FrameworkDetection {
+            name: self.name(),
+            confidence: detection_confidence(has_dep, has_config),
+            signals,
+            reasons: vec!["Rspack bundler detected".into()],
+        })
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // rspack.config.*
+        collect_config_variants(workspace_root, "rspack.config", &mut entries);
+
+        // Default entry: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        Vec::new()
+    }
+
+    fn generated_output_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // rspack.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("rspack.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Rspack configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Default entry: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "entry",
+                    reason: "Rspack default entry point".to_string(),
+                    heuristic: true,
+                });
+            }
+        }
+
+        seeds
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+struct RsbuildPack;
+
+impl FrameworkPack for RsbuildPack {
+    fn name(&self) -> &'static str {
+        "rsbuild"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        manifest_has_any_dep(manifest, &["@rsbuild/core"])
+            || find_config_file(workspace_root, "rsbuild.config").is_some()
+    }
+
+    fn detect_detailed(
+        &self,
+        workspace_root: &Path,
+        manifest: &PackageManifest,
+    ) -> Option<FrameworkDetection> {
+        let (has_dep, has_config, signals) = build_detection_signals(
+            workspace_root,
+            manifest,
+            &["@rsbuild/core"],
+            &["rsbuild.config"],
+        );
+
+        if !has_dep && !has_config {
+            return None;
+        }
+
+        Some(FrameworkDetection {
+            name: self.name(),
+            confidence: detection_confidence(has_dep, has_config),
+            signals,
+            reasons: vec!["Rsbuild build tool detected".into()],
+        })
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // rsbuild.config.*
+        collect_config_variants(workspace_root, "rsbuild.config", &mut entries);
+
+        // Default source.entry: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        Vec::new()
+    }
+
+    fn generated_output_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // rsbuild.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("rsbuild.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Rsbuild configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Default source.entry: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "entry",
+                    reason: "Rsbuild default source.entry".to_string(),
+                    heuristic: true,
+                });
+            }
+        }
+
+        seeds
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+struct RollupPack;
+
+impl FrameworkPack for RollupPack {
+    fn name(&self) -> &'static str {
+        "rollup"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        manifest_has_dev_dep(manifest, "rollup")
+            || find_config_file(workspace_root, "rollup.config").is_some()
+    }
+
+    fn detect_detailed(
+        &self,
+        workspace_root: &Path,
+        manifest: &PackageManifest,
+    ) -> Option<FrameworkDetection> {
+        let (has_dep, has_config, signals) = build_detection_signals(
+            workspace_root,
+            manifest,
+            &["rollup"],
+            &["rollup.config"],
+        );
+
+        if !has_dep && !has_config {
+            return None;
+        }
+
+        Some(FrameworkDetection {
+            name: self.name(),
+            confidence: detection_confidence(has_dep, has_config),
+            signals,
+            reasons: vec!["Rollup bundler detected".into()],
+        })
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // rollup.config.*
+        collect_config_variants(workspace_root, "rollup.config", &mut entries);
+
+        // Default input: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                entries.push(path);
+            }
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        Vec::new()
+    }
+
+    fn generated_output_patterns(&self) -> Vec<String> {
+        vec!["dist/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // rollup.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("rollup.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Rollup configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Default input: src/index.{ts,tsx,js,jsx}
+        for ext in &["ts", "tsx", "js", "jsx"] {
+            let path = workspace_root.join(format!("src/index.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "entry",
+                    reason: "Rollup default input entry".to_string(),
+                    heuristic: true,
+                });
+            }
+        }
+
+        seeds
+    }
+}
+
+// ===========================================================================
+// Tier 2 — Static Site / App Frameworks (additional)
+// ===========================================================================
+
+struct GatsbyPack;
+
+impl FrameworkPack for GatsbyPack {
+    fn name(&self) -> &'static str {
+        "gatsby"
+    }
+
+    fn detect(&self, workspace_root: &Path, manifest: &PackageManifest) -> bool {
+        manifest_has_dep(manifest, "gatsby")
+            || find_config_file(workspace_root, "gatsby-config").is_some()
+    }
+
+    fn detect_detailed(
+        &self,
+        workspace_root: &Path,
+        manifest: &PackageManifest,
+    ) -> Option<FrameworkDetection> {
+        let (has_dep, has_config, signals) = build_detection_signals(
+            workspace_root,
+            manifest,
+            &["gatsby"],
+            &["gatsby-config"],
+        );
+
+        if !has_dep && !has_config {
+            return None;
+        }
+
+        Some(FrameworkDetection {
+            name: self.name(),
+            confidence: detection_confidence(has_dep, has_config),
+            signals,
+            reasons: vec!["Gatsby framework detected".into()],
+        })
+    }
+
+    fn entrypoints(&self, workspace_root: &Path) -> Vec<PathBuf> {
+        let mut entries = Vec::new();
+
+        // Gatsby lifecycle config files
+        for base in &["gatsby-config", "gatsby-node", "gatsby-browser", "gatsby-ssr"] {
+            collect_config_variants(workspace_root, base, &mut entries);
+        }
+
+        // File-based routing: src/pages/**
+        let pages_dir = workspace_root.join("src/pages");
+        if pages_dir.exists() {
+            collect_files_recursive(&pages_dir, &mut entries);
+        }
+
+        // Templates: src/templates/**
+        let templates_dir = workspace_root.join("src/templates");
+        if templates_dir.exists() {
+            collect_files_recursive(&templates_dir, &mut entries);
+        }
+
+        entries
+    }
+
+    fn ignore_patterns(&self) -> Vec<String> {
+        vec![".cache/**".to_string(), "public/**".to_string()]
+    }
+
+    fn file_kinds(&self) -> Vec<(String, FileClassification)> {
+        Vec::new()
+    }
+
+    fn generated_output_patterns(&self) -> Vec<String> {
+        vec![".cache/**".to_string(), "public/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // Gatsby lifecycle config files
+        for base in &["gatsby-config", "gatsby-node", "gatsby-browser", "gatsby-ssr"] {
+            for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+                let path = workspace_root.join(format!("{base}.{ext}"));
+                if path.exists() {
+                    seeds.push(FrameworkEntrypointSeed {
+                        path,
+                        profile: Some("production"),
+                        kind: "config",
+                        reason: format!("Gatsby {base} lifecycle file"),
+                        heuristic: false,
+                    });
+                }
+            }
+        }
+
+        // File-based routing: src/pages/**
+        let pages_dir = workspace_root.join("src/pages");
+        if pages_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &pages_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Gatsby file-based routing (src/pages)",
+                false,
+            );
+        }
+
+        // Templates: src/templates/**
+        let templates_dir = workspace_root.join("src/templates");
+        if templates_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &templates_dir,
+                &mut seeds,
+                "production",
+                "template",
+                "Gatsby template file (src/templates)",
                 false,
             );
         }

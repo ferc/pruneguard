@@ -1,0 +1,6 @@
+{
+  "family": "semantic-sensitive",
+  "name": "write-only-property",
+  "reference_tool": "knip",
+  "description": "Write-only member detection reports properties that are set but never read"
+}
