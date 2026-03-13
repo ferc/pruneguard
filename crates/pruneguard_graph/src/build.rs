@@ -1742,30 +1742,6 @@ fn inject_config_entrypoints(
     }
 }
 
-/// Recursively collect file paths under `dir`, up to `max_depth` levels deep.
-fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>, max_depth: u32) {
-    if max_depth == 0 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            // Skip hidden directories and node_modules
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with('.') || name == "node_modules" {
-                    continue;
-                }
-            }
-            collect_files_recursive(&path, out, max_depth - 1);
-        } else {
-            out.push(path);
-        }
-    }
-}
-
 fn normalize_scan_roots(cwd: &Path, scan_paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut paths = scan_paths
         .iter()
