@@ -23,20 +23,23 @@ ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
 # Install (auto-selects the correct native binary for your platform)
 npm install pruneguard
 
-# Run your first scan
-npx pruneguard scan
+# Review your branch (the main command for daily use)
+npx pruneguard review
 
-# Generate a config file with editor autocomplete
-npx pruneguard init
-
-# Review a branch before merging
+# Review with change detection
 npx pruneguard --changed-since origin/main review
+
+# Full repository scan
+npx pruneguard scan
 
 # Check if files are safe to delete
 npx pruneguard safe-delete src/legacy/old-widget.ts
 
 # Get a remediation plan
 npx pruneguard fix-plan src/legacy/old-widget.ts
+
+# Generate a config file with editor autocomplete
+npx pruneguard init
 ```
 
 No Rust toolchain, no compilation, no native addons -- just `npm install`
@@ -45,6 +48,14 @@ and go. Requires Node.js >= 18. Supported: macOS (ARM64, x64), Linux
 
 See [docs/getting-started.md](docs/getting-started.md) for a full
 install-to-first-result walkthrough.
+
+## Daily workflow
+
+`pruneguard review` is the one command most developers and CI systems should use:
+- Full-scope analysis with trust summary
+- Blocking vs advisory finding split
+- Machine-readable proposed actions for AI agents
+- Exit 0 (no blockers) or exit 1 (blockers present)
 
 ## How it works
 

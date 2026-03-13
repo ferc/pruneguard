@@ -23,12 +23,9 @@ pub fn analyze(
     // specifiers we lower confidence uniformly.
     let global_unresolved = count_global_unresolved(build);
     let global_resolved = count_global_resolved(build);
-    #[allow(clippy::cast_precision_loss)]
-    let global_pressure_pct = if global_resolved + global_unresolved > 0 {
-        (global_unresolved as f64 / (global_resolved + global_unresolved) as f64) * 100.0
-    } else {
-        0.0
-    };
+    let total_specifiers = global_resolved + global_unresolved;
+    let global_pressure_pct =
+        if total_specifiers > 0 { global_unresolved * 100 / total_specifiers } else { 0 };
 
     let mut findings = Vec::new();
 
@@ -67,13 +64,13 @@ pub fn analyze(
         let neighbor_pressure = neighbor_unresolved_pressure(build, extracted_file);
 
         let confidence =
-            if effective_unresolved >= 5 || global_pressure_pct > 15.0 || neighbor_pressure >= 8 {
+            if effective_unresolved >= 5 || global_pressure_pct > 15 || neighbor_pressure >= 8 {
                 // Many unresolved specifiers locally, globally, or in neighbors.
                 FindingConfidence::Low
             } else if has_zero_incoming_edges(build, file_id) && effective_unresolved == 0 {
                 // Zero incoming edges AND zero unresolved -- truly unreachable.
                 // Demote to Medium if global pressure or neighbor pressure is notable.
-                if global_pressure_pct > 5.0 || neighbor_pressure >= 3 {
+                if global_pressure_pct > 5 || neighbor_pressure >= 3 {
                     FindingConfidence::Medium
                 } else {
                     FindingConfidence::High

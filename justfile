@@ -46,7 +46,7 @@ schemas:
 # Verify generated schemas are committed
 schemas-check:
     cargo run -p pruneguard --bin generate_schemas
-    git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
+    git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json npm/pruneguard/review_report_schema.json npm/pruneguard/safe_delete_report_schema.json npm/pruneguard/fix_plan_report_schema.json npm/pruneguard/suggest_rules_report_schema.json npm/pruneguard/daemon_status_report_schema.json
 
 # Build the JS wrapper only
 build-js:

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 /// Classification for a tracked repository file.
@@ -138,11 +138,10 @@ pub fn has_js_ts_extension(path: &Path) -> bool {
 }
 
 /// Collect all JS/TS files under a directory.
-#[allow(clippy::implicit_hasher)]
 pub fn collect_source_files(
     root: &Path,
     ignore_patterns: &[String],
-    extensions: &FxHashSet<String>,
+    extensions: &[String],
 ) -> Vec<PathBuf> {
     walk_files(root, ignore_patterns)
         .into_iter()
@@ -151,7 +150,7 @@ pub fn collect_source_files(
                 if extensions.is_empty() {
                     has_js_ts_extension(path)
                 } else {
-                    extensions.contains(ext) || extensions.contains(&format!(".{ext}"))
+                    extensions.iter().any(|e| e == ext || e == &format!(".{ext}"))
                 }
             })
         })

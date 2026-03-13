@@ -79,15 +79,12 @@ pub fn analyze(
         }
     }
 
-    // Compute global unresolved pressure for confidence demotion.
-    #[allow(clippy::cast_precision_loss)]
-    let global_pressure_pct = if build.stats.files_resolved + build.stats.unresolved_specifiers > 0
-    {
-        (build.stats.unresolved_specifiers as f64
-            / (build.stats.files_resolved + build.stats.unresolved_specifiers) as f64)
-            * 100.0
+    // Compute global unresolved pressure for confidence demotion (integer percentage).
+    let total_specifiers = build.stats.files_resolved + build.stats.unresolved_specifiers;
+    let global_pressure_pct = if total_specifiers > 0 {
+        build.stats.unresolved_specifiers * 100 / total_specifiers
     } else {
-        0.0
+        0
     };
 
     let mut findings = Vec::new();
@@ -131,14 +128,14 @@ pub fn analyze(
         let neighbor_pressure = neighbor_unresolved_pressure(build, export.file);
 
         let confidence =
-            if effective_unresolved >= 5 || global_pressure_pct > 15.0 || neighbor_pressure >= 8 {
+            if effective_unresolved >= 5 || global_pressure_pct > 15 || neighbor_pressure >= 8 {
                 FindingConfidence::Low
             } else if effective_unresolved == 0
                 && !live.has_any_demand(export.file)
                 && neighbor_pressure == 0
             {
                 // Truly isolated: no unresolved, no demand, no neighbor pressure.
-                if global_pressure_pct > 5.0 {
+                if global_pressure_pct > 5 {
                     FindingConfidence::Medium
                 } else {
                     FindingConfidence::High

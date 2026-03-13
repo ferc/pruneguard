@@ -29,6 +29,8 @@
     "report_schema.json",
     "review_report_schema.json",
     "safe_delete_report_schema.json",
+    "suggest_rules_report_schema.json",
+    "daemon_status_report_schema.json",
     "dist",
     "README.md",
     "bin/pruneguard"

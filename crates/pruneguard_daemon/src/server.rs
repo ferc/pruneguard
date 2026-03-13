@@ -208,6 +208,7 @@ async fn handle_connection(
 }
 
 /// Dispatch a single request to the appropriate handler.
+#[allow(clippy::too_many_lines)]
 async fn dispatch_request(
     request: DaemonRequest,
     index: &Arc<Mutex<HotIndex>>,
@@ -299,6 +300,12 @@ async fn dispatch_request(
                 watcher_lag_ms: idx.watcher_lag_ms(),
                 pending_invalidations: idx.pending_invalidations(),
                 uptime_secs,
+                binary_path: std::env::current_exe().ok().map(|p| p.display().to_string()),
+                initial_build_ms: idx.initial_build_ms(),
+                last_rebuild_ms: idx.last_rebuild_ms(),
+                incremental_rebuilds: idx.incremental_rebuilds(),
+                total_invalidations: idx.total_invalidations(),
+                config_change_pending: idx.config_change_pending(),
             };
             DaemonResponse::Status { info }
         }

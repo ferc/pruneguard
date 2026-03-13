@@ -113,8 +113,7 @@ pub struct ExtractedFile {
 
 impl ExtractedFile {
     /// Create an empty extracted record for a tracked file.
-    #[allow(clippy::missing_const_for_fn)]
-    pub fn new(file: FileRecord) -> Self {
+    pub const fn new(file: FileRecord) -> Self {
         Self {
             file,
             facts: None,

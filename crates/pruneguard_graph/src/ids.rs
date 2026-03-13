@@ -54,12 +54,11 @@ pub struct Interner {
 }
 
 impl Interner {
-    #[allow(clippy::cast_possible_truncation)]
     pub fn intern(&mut self, s: &str) -> u32 {
         if let Some(&id) = self.map.get(s) {
             return id;
         }
-        let id = self.strings.len() as u32;
+        let id = u32::try_from(self.strings.len()).expect("interner exceeded u32::MAX entries");
         let cs = CompactString::new(s);
         self.map.insert(cs.clone(), id);
         self.strings.push(cs);

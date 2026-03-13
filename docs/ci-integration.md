@@ -75,7 +75,7 @@ Exit code 0 means no blocking findings. Exit code 1 means blocking findings
 exist. The JSON output contains `blockingFindings` and `advisoryFindings`
 arrays.
 
-### Using the GitHub Action
+### Using the GitHub Action for branch review
 
 ```yaml
 name: pruneguard review
@@ -150,6 +150,50 @@ jobs:
           npx pruneguard --format json safe-delete $DELETED
 ```
 
+### Using the GitHub Action for safe-delete
+
+```yaml
+name: safe-delete check (action)
+on:
+  pull_request:
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Find deleted files
+        id: deleted
+        run: |
+          DELETED=$(git diff --name-only --diff-filter=D origin/${{ github.base_ref }}...HEAD \
+            | grep -E '\.(ts|tsx|js|jsx|mts|mjs)$' || true)
+          echo "files=$DELETED" >> "$GITHUB_OUTPUT"
+          echo "has_deleted=$( [ -n "$DELETED" ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
+
+      - uses: your-org/pruneguard/.github/actions/pruneguard@main
+        if: steps.deleted.outputs.has_deleted == 'true'
+        id: safe-delete
+        with:
+          command: safe-delete
+          args: "${{ steps.deleted.outputs.files }}"
+        continue-on-error: true
+
+      - name: Check results
+        if: steps.deleted.outputs.has_deleted == 'true' && steps.safe-delete.outputs.exit-code != '0'
+        run: |
+          echo "::error::Some deleted files are not safe to remove"
+          cat "${{ steps.safe-delete.outputs.report-path }}"
+          exit 1
+```
+
 ---
 
 ## Fix-plan in CI
@@ -204,6 +248,52 @@ jobs:
         with:
           header: pruneguard-fix-plan
           message: ${{ steps.plan.outputs.body }}
+```
+
+### Using the GitHub Action for fix-plan
+
+```yaml
+name: fix-plan (action)
+on: pull_request
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: your-org/pruneguard/.github/actions/pruneguard@main
+        id: plan
+        with:
+          command: fix-plan
+          args: "--changed-since origin/${{ github.base_ref }}"
+        continue-on-error: true
+
+      - name: Format and post comment
+        if: steps.plan.outputs.exit-code == '0'
+        run: |
+          ACTIONS=$(jq '.actions | length' < "${{ steps.plan.outputs.report-path }}")
+          if [ "$ACTIONS" != "0" ]; then
+            {
+              echo "body<<EOF"
+              echo "## pruneguard fix plan"
+              echo ""
+              jq -r '.actions[] | "- **\(.kind)** \(.targets | join(", ")) (\(.risk) risk)\n  \(.why)"' < "${{ steps.plan.outputs.report-path }}"
+              echo ""
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post PR comment
+        if: env.body
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pruneguard-fix-plan
+          message: ${{ env.body }}
 ```
 
 ---

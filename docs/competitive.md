@@ -221,3 +221,25 @@ fields: `corpus`, `tool`, `version`, `commit`, `cold_ms`, `warm_ms`,
 
 Results are not committed to the main branch -- they are generated locally
 and referenced in release notes when relevant.
+
+## Known Noisy Repo Patterns
+
+Certain repository structures produce more findings or lower trust scores
+across all tools. pruneguard's confidence scoring surfaces this explicitly
+rather than silently over- or under-reporting. The patterns below commonly
+cause noise and are worth understanding before acting on findings.
+
+| Pattern | Effect | Mitigation |
+|---------|--------|------------|
+| Heavy dynamic `require()` / `import()` | Unresolvable specifiers increase `unresolvedPressure`, lowering overall trust | Add the dynamic targets to `entrypoints.custom` or `ignore` in config |
+| `module.exports = require(...)` re-export barrels | pruneguard may not trace through CommonJS re-export patterns as deeply as ESM | Use `compatibilityReport` to check for unsupported signals; add barrel files to `entrypoints.custom` |
+| Webpack/Vite aliases without tsconfig paths | Specifiers resolve at build time but not at static analysis time | Mirror aliases in `tsconfig.json` `paths` or add them to `resolve.aliases` in pruneguard config |
+| Codegen / template-generated files | Generated files may appear unused because the generation step is not traced | Add generated output directories to `ignore` or classify them as `role: "generated"` |
+| Monorepos with 100+ workspaces | Graph size can push warm-daemon latency above 100ms and cold scans into multi-second range | Use `--focus` to narrow reporting scope; use partial-scope scans for targeted analysis |
+| Heavy decorator-based frameworks (NestJS, Angular) | Decorators create implicit usage that static analysis cannot always trace | Check `compatibilityReport` warnings; add framework entrypoints manually if needed |
+| Mixed CJS/ESM packages | Dual-format packages may have specifiers that resolve differently per consumer | Use `debugResolve` to trace specific specifiers; ensure `type` field in package.json is correct |
+| Plugin architectures with string-based loading | Plugins loaded by string name (e.g., Babel, ESLint) create invisible edges | Add plugin files to `entrypoints.custom` in config |
+
+When encountering high `unresolvedPressure` (above 5%) or many low-confidence
+findings, run `compatibilityReport` to identify specific framework or
+toolchain gaps, then consult the table above for targeted mitigations.

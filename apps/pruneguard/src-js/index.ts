@@ -114,6 +114,9 @@ export type AnalysisReport = {
     profile: string;
     workspace?: string;
     source: string;
+    framework?: string;
+    reason?: string;
+    heuristic?: boolean;
   }>;
   stats: {
     durationMs: number;
@@ -128,6 +131,7 @@ export type AnalysisReport = {
       tsconfigPathMiss: number;
       exportsConditionMiss: number;
       externalized: number;
+      workspaceExportsMiss: number;
     };
     resolvedViaExports: number;
     entrypointsDetected: number;
@@ -158,6 +162,12 @@ export type AnalysisReport = {
     cacheEntriesRead: number;
     cacheEntriesWritten: number;
     affectedScopeIncomplete: boolean;
+    frameworksDetected: string[];
+    heuristicFrameworks: string[];
+    heuristicEntrypoints: number;
+    compatibilityWarnings: string[];
+    strictTrustApplied: boolean;
+    frameworkConfidenceCounts: { exact: number; heuristic: number; unsupported: number };
     executionMode?: "oneshot" | "daemon";
     indexWarm?: boolean;
     indexAgeMs?: number;
@@ -214,6 +224,7 @@ export type ReviewReport = {
     baselineApplied: boolean;
     unresolvedPressure: number;
     confidenceCounts: { high: number; medium: number; low: number };
+    executionMode?: "oneshot" | "daemon";
   };
   recommendations: string[];
   proposedActions?: Array<{
@@ -244,10 +255,10 @@ export type SafeDeleteOptions = {
 
 export type SafeDeleteReport = {
   targets: string[];
-  safe: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
-  needsReview: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
-  blocked: Array<{ target: string; confidence?: "high" | "medium" | "low"; reasons: string[] }>;
-  deletionOrder: string[];
+  safe: Array<{ target: string; classification: "safe" | "needs-review" | "blocked"; confidence?: "high" | "medium" | "low"; reasons: string[]; evidence: Array<{kind: string; file?: string; line?: number; description: string}> }>;
+  needsReview: Array<{ target: string; classification: "safe" | "needs-review" | "blocked"; confidence?: "high" | "medium" | "low"; reasons: string[]; evidence: Array<{kind: string; file?: string; line?: number; description: string}> }>;
+  blocked: Array<{ target: string; classification: "safe" | "needs-review" | "blocked"; confidence?: "high" | "medium" | "low"; reasons: string[]; evidence: Array<{kind: string; file?: string; line?: number; description: string}> }>;
+  deletionOrder: Array<{target: string; step: number; reason?: string}>;
   evidence: Array<{ kind: string; file?: string; line?: number; description: string }>;
 };
 
@@ -274,22 +285,29 @@ export type SuggestRulesReport = {
     configFragment: Record<string, unknown>;
     confidence: "high" | "medium" | "low";
     evidence?: string[];
+    rationale?: string;
   }>;
-  tags?: Array<{ name: string; glob: string; rationale: string }>;
+  tags?: Array<{ name: string; glob: string; rationale: string; source?: string }>;
   ownershipHints?: Array<{
     pathGlob: string;
     suggestedOwner: string;
     crossTeamEdges: number;
     rationale: string;
+    touchedPackages?: string[];
   }>;
   hotspots?: Array<{
     file: string;
+    workspace?: string;
+    package?: string;
     crossPackageImports: number;
     crossOwnerImports: number;
     incomingEdges: number;
     outgoingEdges: number;
+    rank: number;
+    teamsInvolved?: string[];
     suggestion: string;
   }>;
+  governanceActions?: Array<{priority: number; kind: string; description: string; effort: "low" | "medium" | "high"; impact: "low" | "medium" | "high"; configFragment?: Record<string, unknown>}>;
   rationale?: string[];
 };
 
@@ -306,11 +324,17 @@ export type FixPlanReport = {
     verification: string[];
     risk: "low" | "medium" | "high";
     confidence: "high" | "medium" | "low";
+    rank?: number;
+    phase?: string;
+    findingIds: string[];
   }>;
   blockedBy: string[];
   verificationSteps: string[];
   riskLevel: "low" | "medium" | "high";
   confidence: "high" | "medium" | "low";
+  totalActions: number;
+  highConfidenceActions: number;
+  phaseSummary: Array<{name: string; order: number; actionCount: number; description: string}>;
 };
 
 export type DaemonStatusReport = {
@@ -324,10 +348,17 @@ export type DaemonStatusReport = {
   lastUpdateMs?: number;
   graphNodes?: number;
   graphEdges?: number;
+  watchedFiles?: number;
   watcherLagMs?: number;
   pendingInvalidations?: number;
   generation?: number;
   uptimeSecs?: number;
+  binaryPath?: string;
+  initialBuildMs?: number;
+  lastRebuildMs?: number;
+  incrementalRebuilds?: number;
+  totalInvalidations?: number;
+  configChangePending?: boolean;
 };
 
 export type CompatibilityReportOptions = {

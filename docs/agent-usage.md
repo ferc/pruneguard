@@ -1,8 +1,12 @@
 # Agent Usage
 
 This document describes how to consume pruneguard from an AI coding agent or
-automated pipeline. Every command produces structured JSON output when invoked
-with `--format json`. All JS API functions return typed objects.
+automated pipeline. The primary command is **`review`** -- it classifies
+findings as blocking vs advisory and provides a trust summary that an agent
+can use to decide whether to block a branch, flag for human review, or proceed.
+
+Every command produces structured JSON output when invoked with `--format json`.
+All JS API functions return typed objects.
 
 ## Install
 
@@ -24,10 +28,15 @@ import {
   impact,
   explain,
   suggestRules,
+  compatibilityReport,
+  debugFrameworks,
   run,
   binaryPath,
   loadConfig,
   schemaPath,
+  scanDot,
+  migrateKnip,
+  migrateDepcruise,
 } from "pruneguard";
 ```
 
@@ -174,9 +183,55 @@ const rules = await suggestRules();
 // rules.hotspots: Array<{ file, crossPackageImports, suggestion }>
 ```
 
+### compatibility-report
+
+Check framework and toolchain compatibility. Surfaces unsupported signals
+and trust downgrades that affect finding accuracy.
+
+```sh
+pruneguard --format json compatibility-report
+```
+
+```js
+const compat = await compatibilityReport();
+
+// compat.supportedFrameworks: string[]
+// compat.heuristicFrameworks: string[]
+// compat.unsupportedSignals: Array<{ signal, source, suggestion? }>
+// compat.warnings: Array<{ code, message, affectedScope?, severity }>
+// compat.trustDowngrades: Array<{ reason, scope, severity }>
+```
+
+Run this before acting on low-confidence findings. If `trustDowngrades` is
+non-empty, some findings may be less reliable.
+
+### debug frameworks
+
+Show detailed framework detection diagnostics: which frameworks were
+detected, what entrypoints and ignore patterns they contributed, and
+which detections were heuristic.
+
+```sh
+pruneguard --format json debug frameworks
+```
+
+```js
+const fwDebug = await debugFrameworks();
+
+// fwDebug.detectedPacks: Array<{ name, confidence, signals, reasons }>
+// fwDebug.allEntrypoints: Array<{ path, framework, kind, heuristic, reason }>
+// fwDebug.allIgnorePatterns: string[]
+// fwDebug.allClassificationRules: Array<{ pattern, classification }>
+// fwDebug.heuristicDetections: string[]
+```
+
 ### run (escape hatch)
 
 Run arbitrary CLI args when you need flags not covered by the typed API.
+
+```sh
+pruneguard --format json --daemon off scan
+```
 
 ```js
 const result = await run(["--format", "json", "--daemon", "off", "scan"]);
@@ -192,7 +247,14 @@ const result = await run(["--format", "json", "--daemon", "off", "scan"]);
 
 Resolve the native binary path for custom integrations.
 
+```sh
+# CLI: print the binary location
+node -e "const { binaryPath } = require('pruneguard'); console.log(binaryPath())"
+```
+
 ```js
+import { binaryPath } from "pruneguard";
+
 console.log(binaryPath());
 // => /path/to/node_modules/@pruneguard/cli-darwin-arm64/bin/pruneguard
 ```
@@ -235,3 +297,173 @@ console.log(binaryPath());
    `baseline.json` on the main branch.
 2. On feature branches, compare current scan against baseline.
 3. Only surface new findings that are not in the baseline.
+
+---
+
+## Agent Decision Logic: review output
+
+An AI agent should consume `review` output to decide whether to block a
+branch, flag for human review, or proceed silently. Here is the recommended
+decision tree.
+
+```js
+import { review } from "pruneguard";
+
+const result = await review({ baseRef: "origin/main", noCache: true });
+
+// Step 1: Check trust. If trust is degraded, findings may be unreliable.
+if (result.trust.unresolvedPressure > 0.05) {
+  // More than 5% of specifiers are unresolved. Findings are less trustworthy.
+  // Flag for human review rather than auto-blocking.
+  console.warn("High unresolved pressure -- findings may include false positives.");
+}
+
+if (!result.trust.fullScope) {
+  // Partial-scope scan. Dead-code findings are advisory only.
+  console.warn("Partial-scope scan -- dead-code findings are advisory.");
+}
+
+// Step 2: Check for blocking findings.
+if (result.blockingFindings.length === 0) {
+  // Branch is clean. Safe to merge.
+  console.log("PASS: No blocking findings.");
+  process.exit(0);
+}
+
+// Step 3: Report blocking findings.
+for (const f of result.blockingFindings) {
+  console.error(`BLOCK [${f.confidence}] ${f.code}: ${f.message}`);
+  console.error(`  Subject: ${f.subject}`);
+  if (f.suggestion) console.error(`  Fix: ${f.suggestion}`);
+}
+
+// Step 4: Optionally surface advisory findings as non-blocking annotations.
+for (const f of result.advisoryFindings) {
+  console.log(`ADVISORY [${f.confidence}] ${f.code}: ${f.message}`);
+}
+
+// Step 5: Use proposed actions to suggest fixes.
+if (result.proposedActions) {
+  for (const action of result.proposedActions) {
+    console.log(`Suggested: ${action.kind} on ${action.targets.join(", ")}`);
+  }
+}
+
+process.exit(1);
+```
+
+**Key decision points:**
+
+| Condition | Agent action |
+|-----------|-------------|
+| `blockingFindings.length === 0` | Allow merge |
+| `blockingFindings.length > 0` and `trust.fullScope` | Block merge, report findings |
+| `blockingFindings.length > 0` and `!trust.fullScope` | Flag for human review (partial scope means less certainty) |
+| `trust.unresolvedPressure > 0.05` | Add caveat that findings may be noisy |
+| `trust.confidenceCounts.low > trust.confidenceCounts.high` | Suggest running `compatibilityReport` to diagnose trust issues |
+
+---
+
+## Agent Decision Logic: safe-delete output
+
+When an agent needs to remove files (e.g., during a cleanup task or after
+identifying unused code), use `safeDelete` to validate each target before
+deletion.
+
+```js
+import { safeDelete } from "pruneguard";
+
+const result = await safeDelete({
+  targets: ["src/legacy/old-widget.ts", "src/utils/deprecated.ts"],
+});
+
+// Safe targets: delete immediately
+for (const entry of result.safe) {
+  console.log(`DELETE ${entry.target} (confidence: ${entry.confidence})`);
+  // fs.unlinkSync(entry.target);
+}
+
+// Needs-review targets: flag for human
+for (const entry of result.needsReview) {
+  console.warn(`REVIEW ${entry.target}: ${entry.reasons.join("; ")}`);
+}
+
+// Blocked targets: do not delete
+for (const entry of result.blocked) {
+  console.error(`BLOCKED ${entry.target}: ${entry.reasons.join("; ")}`);
+}
+
+// Follow the recommended deletion order to avoid breaking intermediate states
+console.log("Deletion order:", result.deletionOrder.map(d => d.target));
+```
+
+**Key decision points:**
+
+| Classification | Agent action |
+|---------------|-------------|
+| `safe` with `confidence: "high"` | Delete without human confirmation |
+| `safe` with `confidence: "medium"` or `"low"` | Delete but note reduced certainty |
+| `needsReview` | Do not delete automatically; flag for human review |
+| `blocked` | Never delete; report the blocking reasons |
+
+Always follow `deletionOrder` when deleting multiple files to avoid
+breaking import chains in intermediate states.
+
+---
+
+## Agent Decision Logic: fix-plan output
+
+When an agent needs to remediate findings, use `fixPlan` to get a structured
+action plan. Each action includes steps that can be executed programmatically.
+
+```js
+import { fixPlan } from "pruneguard";
+
+const plan = await fixPlan({
+  targets: ["src/legacy/old-widget.ts"],
+});
+
+// Check overall risk before proceeding
+if (plan.riskLevel === "high") {
+  console.warn("High-risk fix plan -- recommend human review before execution.");
+}
+
+// Execute actions in order, respecting phases
+for (const action of plan.actions) {
+  console.log(`[${action.kind}] ${action.targets.join(", ")} (${action.risk} risk, ${action.confidence} confidence)`);
+
+  // Check preconditions
+  for (const pre of action.preconditions) {
+    console.log(`  Precondition: ${pre}`);
+  }
+
+  // Execute steps
+  for (const step of action.steps) {
+    console.log(`  Step: ${step.description}`);
+    if (step.file) console.log(`    File: ${step.file}`);
+    if (step.action) console.log(`    Action: ${step.action}`);
+  }
+
+  // Verify after execution
+  for (const v of action.verification) {
+    console.log(`  Verify: ${v}`);
+  }
+}
+
+// After executing all actions, re-scan to confirm
+// const report = await scan({ noCache: true });
+// assert(report.findings.length < originalFindingsCount);
+```
+
+**Key decision points:**
+
+| Condition | Agent action |
+|-----------|-------------|
+| `plan.riskLevel === "low"` and `plan.confidence === "high"` | Execute automatically |
+| `plan.riskLevel === "medium"` | Execute but verify with re-scan |
+| `plan.riskLevel === "high"` | Present plan to human for approval |
+| `plan.blockedBy.length > 0` | Resolve blockers first before executing the plan |
+| Action `confidence === "low"` | Skip or flag for human review |
+
+Always re-scan with `--no-cache` after executing a fix plan to verify
+that the changes resolved the findings without introducing new ones.

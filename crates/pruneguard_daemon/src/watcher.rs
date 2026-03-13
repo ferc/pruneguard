@@ -5,13 +5,35 @@ use notify_debouncer_mini::{DebouncedEvent, Debouncer, new_debouncer};
 use tokio::sync::mpsc;
 
 /// Extensions relevant to pruneguard analysis.
-const WATCHED_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs"];
+const WATCHED_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
 
 /// Config/metadata files that trigger a rebuild.
-const WATCHED_FILENAMES: &[&str] = &["package.json", "pruneguard.json", "CODEOWNERS"];
+const WATCHED_FILENAMES: &[&str] = &[
+    "package.json",
+    "pruneguard.json",
+    ".pruneguardrc.json",
+    "CODEOWNERS",
+    "turbo.json",
+    "nx.json",
+    "angular.json",
+];
 
 /// Prefixes for config files matched by starts-with.
 const WATCHED_PREFIXES: &[&str] = &["tsconfig"];
+
+/// Prefixes for framework config files (matched as `<prefix>.<ext>`).
+const FRAMEWORK_CONFIG_PREFIXES: &[&str] = &[
+    "next.config",
+    "nuxt.config",
+    "vite.config",
+    "vitest.config",
+    "svelte.config",
+    "remix.config",
+    "astro.config",
+    "playwright.config",
+    "cypress.config",
+    "docusaurus.config",
+];
 
 /// A file-system watcher that debounces events and sends
 /// relevant file paths over a tokio channel.
@@ -108,6 +130,11 @@ fn is_relevant_path(path: &Path) -> bool {
         return true;
     }
 
+    // Check framework config prefixes (e.g. next.config.js, vite.config.ts).
+    if FRAMEWORK_CONFIG_PREFIXES.iter().any(|prefix| file_name.starts_with(prefix)) {
+        return true;
+    }
+
     // Check extension matches.
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         return WATCHED_EXTENSIONS.contains(&ext);
@@ -129,6 +156,8 @@ mod tests {
         assert!(is_relevant_path(Path::new("lib/util.jsx")));
         assert!(is_relevant_path(Path::new("lib/util.mjs")));
         assert!(is_relevant_path(Path::new("lib/util.cjs")));
+        assert!(is_relevant_path(Path::new("lib/util.mts")));
+        assert!(is_relevant_path(Path::new("lib/util.cts")));
     }
 
     #[test]
@@ -138,7 +167,34 @@ mod tests {
         assert!(is_relevant_path(Path::new("tsconfig.json")));
         assert!(is_relevant_path(Path::new("tsconfig.app.json")));
         assert!(is_relevant_path(Path::new("pruneguard.json")));
+        assert!(is_relevant_path(Path::new(".pruneguardrc.json")));
         assert!(is_relevant_path(Path::new("CODEOWNERS")));
+    }
+
+    #[test]
+    fn relevant_framework_config_files() {
+        assert!(is_relevant_path(Path::new("next.config.js")));
+        assert!(is_relevant_path(Path::new("next.config.mjs")));
+        assert!(is_relevant_path(Path::new("next.config.ts")));
+        assert!(is_relevant_path(Path::new("nuxt.config.ts")));
+        assert!(is_relevant_path(Path::new("vite.config.ts")));
+        assert!(is_relevant_path(Path::new("vitest.config.ts")));
+        assert!(is_relevant_path(Path::new("svelte.config.js")));
+        assert!(is_relevant_path(Path::new("remix.config.js")));
+        assert!(is_relevant_path(Path::new("astro.config.mjs")));
+        assert!(is_relevant_path(Path::new("playwright.config.ts")));
+        assert!(is_relevant_path(Path::new("cypress.config.ts")));
+        assert!(is_relevant_path(Path::new("turbo.json")));
+        assert!(is_relevant_path(Path::new("nx.json")));
+        assert!(is_relevant_path(Path::new("angular.json")));
+    }
+
+    #[test]
+    fn pruneguardrc_in_absolute_path() {
+        // .pruneguardrc.json contains "/." in absolute paths but should be
+        // allowed through the hidden-directory filter via the .pruneguard
+        // exception.
+        assert!(is_relevant_path(Path::new("/home/user/project/.pruneguardrc.json")));
     }
 
     #[test]

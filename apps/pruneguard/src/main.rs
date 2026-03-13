@@ -270,7 +270,20 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                     println!();
                     println!("warnings:");
                     for warning in &report.warnings {
-                        println!("  {warning}");
+                        println!(
+                            "  [{}] {} (severity: {})",
+                            warning.code, warning.message, warning.severity
+                        );
+                    }
+                }
+                if !report.trust_downgrades.is_empty() {
+                    println!();
+                    println!("trust downgrades:");
+                    for td in &report.trust_downgrades {
+                        println!(
+                            "  {} (scope: {}, severity: {})",
+                            td.reason, td.scope, td.severity
+                        );
                     }
                 }
                 println!();
@@ -813,6 +826,15 @@ fn run_debug(
                                 "daemon_pending_invalidations: {}",
                                 info.pending_invalidations
                             );
+                            if let Some(ref bp) = info.binary_path {
+                                println!("daemon_binary_path: {bp}");
+                            }
+                            if let Some(ms) = info.initial_build_ms {
+                                println!("daemon_initial_build_ms: {ms}");
+                            }
+                            if let Some(ms) = info.last_rebuild_ms {
+                                println!("daemon_last_rebuild_ms: {ms}");
+                            }
                         }
                         Err(err) => {
                             println!("daemon_status_error: {err}");
@@ -1309,6 +1331,7 @@ fn render_sarif<T: serde::Serialize>(report: &T) -> miette::Result<String> {
     .map_err(|err| miette::miette!("{err}"))
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
     let cwd = std::env::current_dir().expect("failed to get current directory");
     let project_root = find_project_root_dir(&cwd);
@@ -1359,6 +1382,18 @@ fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
                             }
                             println!("pending_invalidations: {}", info.pending_invalidations);
                             println!("uptime_secs: {}", info.uptime_secs);
+                            if let Some(ref bp) = info.binary_path {
+                                println!("binary_path: {bp}");
+                            }
+                            if let Some(ms) = info.initial_build_ms {
+                                println!("initial_build_ms: {ms}");
+                            }
+                            if let Some(ms) = info.last_rebuild_ms {
+                                println!("last_rebuild_ms: {ms}");
+                            }
+                            println!("incremental_rebuilds: {}", info.incremental_rebuilds);
+                            println!("total_invalidations: {}", info.total_invalidations);
+                            println!("config_change_pending: {}", info.config_change_pending);
                         }
                         Err(err) => {
                             eprintln!("failed to query daemon status: {err}");

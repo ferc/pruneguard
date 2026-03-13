@@ -207,6 +207,35 @@ pub fn detect_entrypoints(
                 format!("framework:{}", pack.name()),
             );
         }
+
+        // Auto-loaded patterns: files the framework auto-imports at runtime
+        // (e.g. Nuxt composables/, utils/, plugins/).
+        for pattern in pack.auto_loaded_patterns() {
+            // The Rust `glob` crate's `**` matches directory components but
+            // not leaf files.  Ensure patterns that end with `/**` also have a
+            // trailing wildcard to capture files (e.g. `composables/**` →
+            // `composables/**/*`).
+            let adjusted =
+                if pattern.ends_with("/**") { format!("{pattern}/*") } else { pattern.clone() };
+            let glob_pattern = workspace_root.join(&adjusted).display().to_string();
+            if let Ok(paths) = glob::glob(&glob_pattern) {
+                for path in paths.flatten() {
+                    if has_js_ts_extension(&path)
+                        || path.extension().is_some_and(|e| e == "vue" || e == "svelte")
+                    {
+                        push_entrypoint(
+                            &mut entrypoints,
+                            &mut seen,
+                            path,
+                            EntrypointKind::FrameworkPack,
+                            profile,
+                            workspace_name,
+                            format!("framework-auto-load:{}:{pattern}", pack.name()),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     entrypoints.sort_by(|a, b| a.path.cmp(&b.path).then(a.source.cmp(&b.source)));

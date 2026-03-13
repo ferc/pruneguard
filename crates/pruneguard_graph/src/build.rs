@@ -47,6 +47,15 @@ pub struct BuildOptions<'a> {
     pub cache: Option<&'a AnalysisCache>,
 }
 
+/// Grouped hash values used for cache invalidation.
+#[derive(Clone, Copy)]
+struct CacheHashes {
+    config: u64,
+    resolver: u64,
+    tsconfig: u64,
+    manifest: u64,
+}
+
 impl GraphBuildResult {
     /// Find a tracked file by absolute path, relative path, or suffix.
     pub fn find_file(&self, query: &str) -> Option<&ExtractedFile> {
@@ -61,7 +70,6 @@ impl GraphBuildResult {
 }
 
 /// Build the project graph for a scan/impact/explain run.
-#[allow(clippy::too_many_lines)]
 pub fn build_graph(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -114,14 +122,17 @@ pub fn build_graph_with_options(
         .collect();
     resolver.set_workspace_roots(workspace_roots);
 
-    let config_hash = hash_json(config);
-    let resolver_hash = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hasher::write_u32(&mut h, RESOLVER_LOGIC_VERSION);
-        std::hash::Hasher::write_u64(&mut h, hash_json(&config.resolver));
-        std::hash::Hasher::finish(&h)
+    let base_hashes = CacheHashes {
+        config: hash_json(config),
+        resolver: {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hasher::write_u32(&mut h, RESOLVER_LOGIC_VERSION);
+            std::hash::Hasher::write_u64(&mut h, hash_json(&config.resolver));
+            std::hash::Hasher::finish(&h)
+        },
+        tsconfig: compute_tsconfig_hash(&discovery.project_root, &files),
+        manifest: 0, // per-file override below
     };
-    let tsconfig_hash = compute_tsconfig_hash(&discovery.project_root, &files);
     let manifest_hashes = discovery
         .workspaces
         .iter()
@@ -161,22 +172,23 @@ pub fn build_graph_with_options(
             });
         }
 
-        populate_extracted_file(
-            extracted_file,
-            &resolver,
-            &repo_files,
-            options.cache,
-            &mut cache_counters,
-            config_hash,
-            resolver_hash,
-            tsconfig_hash,
-            extracted_file
+        let hashes = CacheHashes {
+            manifest: extracted_file
                 .file
                 .workspace
                 .as_ref()
                 .and_then(|workspace| manifest_hashes.get(workspace))
                 .copied()
                 .unwrap_or(0),
+            ..base_hashes
+        };
+        populate_extracted_file(
+            extracted_file,
+            &resolver,
+            &repo_files,
+            options.cache,
+            &mut cache_counters,
+            hashes,
         )?;
     }
 
@@ -370,17 +382,13 @@ pub fn build_graph_with_options(
     })
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn populate_extracted_file(
     extracted_file: &mut ExtractedFile,
     resolver: &ModuleResolver,
     repo_files: &FxHashSet<PathBuf>,
     cache: Option<&AnalysisCache>,
     cache_counters: &mut CacheCounters,
-    config_hash: u64,
-    resolver_hash: u64,
-    tsconfig_hash: u64,
-    manifest_hash: u64,
+    hashes: CacheHashes,
 ) -> Result<()> {
     if !has_js_ts_extension(&extracted_file.file.path) {
         return Ok(());
@@ -389,16 +397,7 @@ fn populate_extracted_file(
     let source_bytes = std::fs::read(&extracted_file.file.path).into_diagnostic()?;
     let file_hash = hash_bytes(&source_bytes);
     if let Some(cache) = cache
-        && hydrate_from_cache(
-            extracted_file,
-            cache,
-            cache_counters,
-            file_hash,
-            config_hash,
-            resolver_hash,
-            manifest_hash,
-            tsconfig_hash,
-        )?
+        && hydrate_from_cache(extracted_file, cache, cache_counters, file_hash, hashes)?
     {
         return Ok(());
     }
@@ -485,16 +484,7 @@ fn populate_extracted_file(
     }
 
     if let Some(cache) = cache {
-        persist_to_cache(
-            extracted_file,
-            cache,
-            cache_counters,
-            file_hash,
-            config_hash,
-            resolver_hash,
-            manifest_hash,
-            tsconfig_hash,
-        )?;
+        persist_to_cache(extracted_file, cache, cache_counters, file_hash, hashes)?;
     }
 
     Ok(())
@@ -556,16 +546,12 @@ fn resolve_edge(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn hydrate_from_cache(
     extracted_file: &mut ExtractedFile,
     cache: &AnalysisCache,
     counters: &mut CacheCounters,
     file_hash: u64,
-    config_hash: u64,
-    resolver_hash: u64,
-    manifest_hash: u64,
-    tsconfig_hash: u64,
+    hashes: CacheHashes,
 ) -> Result<bool> {
     counters.entries_read += 1;
     let Some(cached_file) =
@@ -583,10 +569,10 @@ fn hydrate_from_cache(
     };
 
     if cached_file.file_hash != file_hash
-        || cached_file.config_hash != config_hash
-        || cached_file.resolver_hash != resolver_hash
-        || cached_file.manifest_hash != manifest_hash
-        || cached_file.tsconfig_hash != tsconfig_hash
+        || cached_file.config_hash != hashes.config
+        || cached_file.resolver_hash != hashes.resolver
+        || cached_file.manifest_hash != hashes.manifest
+        || cached_file.tsconfig_hash != hashes.tsconfig
     {
         counters.misses += 1;
         return Ok(false);
@@ -606,26 +592,22 @@ fn hydrate_from_cache(
     Ok(true)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn persist_to_cache(
     extracted_file: &ExtractedFile,
     cache: &AnalysisCache,
     counters: &mut CacheCounters,
     file_hash: u64,
-    config_hash: u64,
-    resolver_hash: u64,
-    manifest_hash: u64,
-    tsconfig_hash: u64,
+    hashes: CacheHashes,
 ) -> Result<()> {
     cache
         .put_file_facts(&CachedFileFacts {
             path: extracted_file.file.path.to_string_lossy().to_string(),
             relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
             file_hash,
-            config_hash,
-            resolver_hash,
-            manifest_hash,
-            tsconfig_hash,
+            config_hash: hashes.config,
+            resolver_hash: hashes.resolver,
+            manifest_hash: hashes.manifest,
+            tsconfig_hash: hashes.tsconfig,
             facts_json: serde_json::to_vec(&extracted_file.facts)
                 .map_err(|err| miette::miette!("{err}"))?,
             parse_diagnostics: extracted_file.parse_diagnostics.clone(),

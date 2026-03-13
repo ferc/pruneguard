@@ -23,7 +23,7 @@ expected_commit = "local-reference"
 scan_paths = ["."]
 min_files = 1000
 min_packages = 5
-representative_targets = ["apps/oxlint/src/main.rs"]
+representative_targets = ["napi/parser/src-js/index.js"]
 
 [[corpus]]
 name = "claude-attack"

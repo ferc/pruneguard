@@ -392,7 +392,25 @@ pub struct CompatibilityReportOutput {
     pub supported_frameworks: Vec<String>,
     pub heuristic_frameworks: Vec<String>,
     pub unsupported_signals: Vec<UnsupportedSignalInfo>,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<CompatibilityWarningOutput>,
+    pub trust_downgrades: Vec<TrustDowngradeOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompatibilityWarningOutput {
+    pub code: String,
+    pub message: String,
+    pub affected_scope: Option<String>,
+    pub severity: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustDowngradeOutput {
+    pub reason: String,
+    pub scope: String,
+    pub severity: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -501,9 +519,15 @@ fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> Compatibi
 
     let mut unsupported_signals = Vec::new();
     let mut warnings = Vec::new();
+    let mut trust_downgrades = Vec::new();
 
     for warning in &stats.compatibility_warnings {
-        warnings.push(warning.clone());
+        warnings.push(CompatibilityWarningOutput {
+            code: "upstream-warning".to_string(),
+            message: warning.clone(),
+            affected_scope: None,
+            severity: "medium".to_string(),
+        });
     }
 
     for fw in &heuristic_frameworks {
@@ -514,9 +538,19 @@ fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> Compatibi
                 "Consider adding a framework pack for `{fw}` to improve accuracy."
             )),
         });
-        warnings.push(format!(
-            "Framework `{fw}` was detected heuristically. Entrypoint coverage may be incomplete."
-        ));
+        warnings.push(CompatibilityWarningOutput {
+            code: "heuristic-framework".to_string(),
+            message: format!(
+                "Framework `{fw}` was detected heuristically. Entrypoint coverage may be incomplete."
+            ),
+            affected_scope: None,
+            severity: "medium".to_string(),
+        });
+        trust_downgrades.push(TrustDowngradeOutput {
+            reason: format!("Heuristic framework detection: {fw}"),
+            scope: "global".to_string(),
+            severity: "medium".to_string(),
+        });
     }
 
     if stats.files_resolved > 0 {
@@ -524,10 +558,20 @@ fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> Compatibi
         let pressure = stats.unresolved_specifiers as f64
             / (stats.files_resolved + stats.unresolved_specifiers) as f64;
         if pressure > 0.05 {
-            warnings.push(format!(
-                "Unresolved pressure is {:.1}%. Findings may be less accurate.",
-                pressure * 100.0
-            ));
+            warnings.push(CompatibilityWarningOutput {
+                code: "unresolved-pressure".to_string(),
+                message: format!(
+                    "Unresolved pressure is {:.1}%. Findings may be less accurate.",
+                    pressure * 100.0
+                ),
+                affected_scope: None,
+                severity: "high".to_string(),
+            });
+            trust_downgrades.push(TrustDowngradeOutput {
+                reason: format!("Unresolved pressure is {:.1}%", pressure * 100.0),
+                scope: "global".to_string(),
+                severity: "high".to_string(),
+            });
         }
     }
 
@@ -536,6 +580,7 @@ fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> Compatibi
         heuristic_frameworks,
         unsupported_signals,
         warnings,
+        trust_downgrades,
     }
 }
 

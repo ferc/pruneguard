@@ -18,9 +18,43 @@ The `pruneguard` package automatically installs the correct native binary for
 your platform. Supported: macOS (ARM64, x64), Linux (x64/ARM64, glibc and
 musl), Windows (x64, ARM64).
 
-## First scan
+## Review your branch
 
-Run a full-repo scan from your project root:
+The fastest way to see what pruneguard can do is to run `review` on your
+current branch. This is the primary command for CI and agent workflows:
+
+```sh
+npx pruneguard --changed-since origin/main review
+```
+
+This analyzes only the files changed since `origin/main` and classifies
+findings as **blocking** (high-confidence errors/warnings) or **advisory**.
+Exit code 0 means safe to merge. Exit code 1 means blocking findings exist.
+
+Example output:
+
+```
+BLOCKING:
+  error [high] unused-export packages/core/src/old.ts#deprecatedFn
+    Not imported by any reachable module.
+
+ADVISORY:
+  warn [medium] unused-file packages/legacy/src/widget.ts
+    No incoming imports from any entrypoint.
+
+Trust: fullScope=true, unresolvedPressure=0.01, baseline=applied
+1 blocking, 1 advisory, 342 files, 14ms
+```
+
+For JSON output (recommended for CI and agents):
+
+```sh
+npx pruneguard --changed-since origin/main --format json review
+```
+
+## Full-repo scan
+
+Run a full-repo scan from your project root to see everything:
 
 ```sh
 npx pruneguard scan
@@ -194,5 +228,6 @@ See [migration.md](migration.md) for details.
 - [Configuration reference](config.md) -- all config options
 - [CI integration](ci-integration.md) -- GitHub Actions, baseline workflows
 - [JS API reference](js-api.md) -- programmatic usage
-- [Agent integration](agent-integration.md) -- AI agent workflows
+- [Agent usage](agent-usage.md) -- AI agent workflows and decision logic
+- [Competitive positioning](competitive.md) -- vs knip, vs dependency-cruiser
 - [Recipes](recipes.md) -- copy-paste automation examples

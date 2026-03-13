@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SuggestRulesReport",
+  "description": "Suggested governance rules report.",
+  "type": "object",
+  "required": [
+    "suggestedRules"
+  ],
+  "properties": {
+    "governanceActions": {
+      "description": "Recommended governance actions ordered by priority.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/GovernanceAction"
+      }
+    },
+    "hotspots": {
+      "description": "Hotspot files with high edge traffic.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Hotspot"
+      }
+    },
+    "ownershipHints": {
+      "description": "Ownership hints from cross-boundary analysis.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/OwnershipHint"
+      }
+    },
+    "rationale": {
+      "description": "Rationale explaining the suggestions.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "suggestedRules": {
+      "description": "Suggested rules inferred from graph analysis.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SuggestedRule"
+      }
+    },
+    "tags": {
+      "description": "Suggested tags for directory grouping.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SuggestedTag"
+      }
+    }
+  },
+  "definitions": {
+    "EffortLevel": {
+      "description": "Estimated effort level.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "FindingConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "GovernanceAction": {
+      "description": "A recommended governance action with priority ordering.",
+      "type": "object",
+      "required": [
+        "description",
+        "effort",
+        "impact",
+        "kind",
+        "priority"
+      ],
+      "properties": {
+        "configFragment": {
+          "description": "Concrete configuration fragment or steps."
+        },
+        "description": {
+          "description": "Human-readable description of what to do.",
+          "type": "string"
+        },
+        "effort": {
+          "description": "Estimated effort level.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EffortLevel"
+            }
+          ]
+        },
+        "impact": {
+          "description": "Expected impact on governance coverage.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ImpactLevel"
+            }
+          ]
+        },
+        "kind": {
+          "description": "Kind of governance action.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/GovernanceActionKind"
+            }
+          ]
+        },
+        "priority": {
+          "description": "Priority rank (1 = most impactful).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "GovernanceActionKind": {
+      "description": "Kind of governance action.",
+      "type": "string",
+      "enum": [
+        "add-boundary-rule",
+        "assign-ownership",
+        "introduce-tags",
+        "split-hotspot",
+        "add-reachability-fence",
+        "enforce-layering"
+      ]
+    },
+    "Hotspot": {
+      "description": "A hotspot file with high edge traffic.",
+      "type": "object",
+      "required": [
+        "crossOwnerImports",
+        "crossPackageImports",
+        "file",
+        "incomingEdges",
+        "outgoingEdges",
+        "rank",
+        "suggestion"
+      ],
+      "properties": {
+        "crossOwnerImports": {
+          "description": "Cross-owner import count.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "crossPackageImports": {
+          "description": "Cross-package import count.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "file": {
+          "description": "File path.",
+          "type": "string"
+        },
+        "incomingEdges": {
+          "description": "Incoming edge count.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "outgoingEdges": {
+          "description": "Outgoing edge count.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "package": {
+          "description": "Package containing this file, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rank": {
+          "description": "Hotspot rank (1 = highest traffic).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "suggestion": {
+          "description": "Suggestion for addressing this hotspot.",
+          "type": "string"
+        },
+        "teamsInvolved": {
+          "description": "Distinct teams that touch this file via imports (source or target).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workspace": {
+          "description": "Workspace containing this file, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ImpactLevel": {
+      "description": "Expected impact level.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "OwnershipHint": {
+      "description": "Ownership assignment hint.",
+      "type": "object",
+      "required": [
+        "crossTeamEdges",
+        "pathGlob",
+        "rationale",
+        "suggestedOwner"
+      ],
+      "properties": {
+        "crossTeamEdges": {
+          "description": "Number of cross-team edges.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "pathGlob": {
+          "description": "Path glob to match.",
+          "type": "string"
+        },
+        "rationale": {
+          "description": "Rationale for the suggestion.",
+          "type": "string"
+        },
+        "suggestedOwner": {
+          "description": "Suggested owner identifier.",
+          "type": "string"
+        },
+        "touchedPackages": {
+          "description": "Packages touched by cross-team edges from this area.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SuggestedRule": {
+      "description": "A single suggested rule.",
+      "type": "object",
+      "required": [
+        "confidence",
+        "configFragment",
+        "description",
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "confidence": {
+          "description": "Confidence in the suggestion.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FindingConfidence"
+            }
+          ]
+        },
+        "configFragment": {
+          "description": "Configuration fragment that implements this rule."
+        },
+        "description": {
+          "description": "Human-readable description.",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "Evidence supporting the suggestion.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "description": "Kind of rule suggestion.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SuggestedRuleKind"
+            }
+          ]
+        },
+        "name": {
+          "description": "Rule name.",
+          "type": "string"
+        },
+        "rationale": {
+          "description": "Rationale explaining why this specific rule was suggested.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SuggestedRuleKind": {
+      "description": "Kind of suggested rule.",
+      "type": "string",
+      "enum": [
+        "forbidden",
+        "required",
+        "tag-assignment",
+        "ownership-boundary",
+        "reachability-fence",
+        "layer-enforcement"
+      ]
+    },
+    "SuggestedTag": {
+      "description": "A suggested tag for directory grouping.",
+      "type": "object",
+      "required": [
+        "glob",
+        "name",
+        "rationale"
+      ],
+      "properties": {
+        "glob": {
+          "description": "Glob pattern for the tag.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Tag name.",
+          "type": "string"
+        },
+        "rationale": {
+          "description": "Why this tag is suggested.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Source of the tag inference (e.g. \"directory-cluster\", \"workspace\", \"package\", \"ownership\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

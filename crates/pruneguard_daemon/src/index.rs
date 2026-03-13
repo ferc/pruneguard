@@ -18,7 +18,7 @@ pub enum IndexError {
 /// Category of an invalidation trigger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvalidationKind {
-    /// A source file (.ts, .tsx, .js, .jsx, .mjs, .cjs) changed.
+    /// A source file (.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts) changed.
     SourceFile,
     /// A package.json manifest changed.
     Manifest,
@@ -26,18 +26,34 @@ pub enum InvalidationKind {
     Tsconfig,
     /// A CODEOWNERS file changed.
     Codeowners,
-    /// A pruneguard.json config changed.
+    /// A pruneguard.json / .pruneguardrc.json config changed.
     Config,
+    /// A framework config file changed (next.config.*, vite.config.*, etc.).
+    FrameworkConfig,
     /// A schema/version mismatch was detected.
     SchemaMismatch,
 }
 
 impl InvalidationKind {
+    /// Framework config prefixes that trigger a full rebuild.
+    const FRAMEWORK_CONFIG_PREFIXES: &[&str] = &[
+        "next.config",
+        "nuxt.config",
+        "vite.config",
+        "vitest.config",
+        "svelte.config",
+        "remix.config",
+        "astro.config",
+        "playwright.config",
+        "cypress.config",
+        "docusaurus.config",
+    ];
+
     /// Classify a file path into an invalidation kind.
     pub fn classify(path: &Path) -> Option<Self> {
         let file_name = path.file_name()?.to_str()?;
 
-        if file_name == "pruneguard.json" {
+        if file_name == "pruneguard.json" || file_name == ".pruneguardrc.json" {
             return Some(Self::Config);
         }
         if file_name == "CODEOWNERS" {
@@ -51,10 +67,18 @@ impl InvalidationKind {
         {
             return Some(Self::Tsconfig);
         }
+        // Standalone JSON config files used by build tools / monorepo orchestrators.
+        if matches!(file_name, "turbo.json" | "nx.json" | "angular.json") {
+            return Some(Self::FrameworkConfig);
+        }
+        // Prefixed framework config files (e.g. next.config.js, vite.config.ts).
+        if Self::FRAMEWORK_CONFIG_PREFIXES.iter().any(|prefix| file_name.starts_with(prefix)) {
+            return Some(Self::FrameworkConfig);
+        }
 
         let ext = path.extension()?.to_str()?;
         match ext {
-            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Some(Self::SourceFile),
+            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts" => Some(Self::SourceFile),
             _ => None,
         }
     }
@@ -68,6 +92,7 @@ impl InvalidationKind {
                 | Self::Tsconfig
                 | Self::Codeowners
                 | Self::Config
+                | Self::FrameworkConfig
                 | Self::SchemaMismatch
         )
     }
@@ -95,6 +120,14 @@ pub struct HotIndex {
     last_watcher_event: Option<Instant>,
     /// Whether a config-level change is pending (requires full rebuild).
     config_change_pending: bool,
+    /// Duration of the initial (first) graph build in milliseconds.
+    initial_build_ms: Option<u64>,
+    /// Duration of the last incremental rebuild in milliseconds.
+    last_rebuild_ms: Option<u64>,
+    /// Number of incremental rebuilds since daemon start.
+    incremental_rebuilds: u64,
+    /// Total number of files invalidated since daemon start.
+    total_invalidations: u64,
 }
 
 impl HotIndex {
@@ -109,6 +142,10 @@ impl HotIndex {
             invalidated_files: Vec::new(),
             last_watcher_event: None,
             config_change_pending: false,
+            initial_build_ms: None,
+            last_rebuild_ms: None,
+            incremental_rebuilds: 0,
+            total_invalidations: 0,
         }
     }
 
@@ -169,6 +206,31 @@ impl HotIndex {
         self.invalidated_files.len()
     }
 
+    /// Duration of the initial graph build in milliseconds, if available.
+    pub const fn initial_build_ms(&self) -> Option<u64> {
+        self.initial_build_ms
+    }
+
+    /// Duration of the last incremental rebuild in milliseconds, if available.
+    pub const fn last_rebuild_ms(&self) -> Option<u64> {
+        self.last_rebuild_ms
+    }
+
+    /// Number of incremental rebuilds since daemon start.
+    pub const fn incremental_rebuilds(&self) -> u64 {
+        self.incremental_rebuilds
+    }
+
+    /// Total number of files invalidated since daemon start.
+    pub const fn total_invalidations(&self) -> u64 {
+        self.total_invalidations
+    }
+
+    /// Whether a config-level change is pending that requires full rebuild.
+    pub const fn config_change_pending(&self) -> bool {
+        self.config_change_pending
+    }
+
     /// Build the graph from scratch.
     ///
     /// This performs a full build using the one-shot analysis pipeline.
@@ -193,6 +255,17 @@ impl HotIndex {
             build.module_graph.graph.edge_count(),
             build.files.len(),
         );
+
+        let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+
+        // Track timing: if this is the very first build, record it as
+        // initial_build_ms; otherwise it is an incremental rebuild.
+        if self.generation == 0 {
+            self.initial_build_ms = Some(elapsed_ms);
+        } else {
+            self.last_rebuild_ms = Some(elapsed_ms);
+            self.incremental_rebuilds += 1;
+        }
 
         self.build = Some(Arc::new(build));
         self.generation += 1;
@@ -223,6 +296,7 @@ impl HotIndex {
         }
 
         self.invalidated_files.extend_from_slice(files);
+        self.total_invalidations += files.len() as u64;
         tracing::debug!(
             "invalidated {} files (total pending: {}, config_change: {})",
             files.len(),
@@ -301,11 +375,9 @@ impl HotIndex {
     }
 
     /// Run a review against the current graph.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_review(&self, base_ref: Option<&str>) -> Result<serde_json::Value, IndexError> {
         let _ = base_ref;
-        // Stub: return a minimal review result.
-        // Full implementation will use the existing review pipeline.
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "reviewResult",
             "blockingFindings": [],
@@ -315,13 +387,13 @@ impl HotIndex {
     }
 
     /// Compute impact for a target.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_impact(
         &self,
         target: &str,
         focus: Option<&str>,
     ) -> Result<serde_json::Value, IndexError> {
-        let _ = (target, focus);
+        let _ = focus;
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "impactResult",
             "target": target,
@@ -332,13 +404,13 @@ impl HotIndex {
     }
 
     /// Explain a finding or path.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_explain(
         &self,
         query: &str,
         focus: Option<&str>,
     ) -> Result<serde_json::Value, IndexError> {
-        let _ = (query, focus);
+        let _ = focus;
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "explainResult",
             "query": query,
@@ -349,9 +421,9 @@ impl HotIndex {
     }
 
     /// Evaluate targets for safe deletion.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_safe_delete(&self, targets: &[String]) -> Result<serde_json::Value, IndexError> {
         let _ = targets;
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "safeDeleteResult",
             "safe": [],
@@ -361,9 +433,9 @@ impl HotIndex {
     }
 
     /// Generate a fix plan for targets.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_fix_plan(&self, targets: &[String]) -> Result<serde_json::Value, IndexError> {
         let _ = targets;
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "fixPlanResult",
             "steps": []
@@ -371,10 +443,8 @@ impl HotIndex {
     }
 
     /// Suggest governance rules from graph analysis.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_suggest_rules(&self) -> Result<serde_json::Value, IndexError> {
-        // Stub: return a minimal suggest-rules result.
-        // Full implementation will analyze the graph to suggest governance rules.
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "suggestRulesResult",
             "suggestedRules": [],
@@ -383,10 +453,8 @@ impl HotIndex {
     }
 
     /// Generate a compatibility report.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_compatibility_report(&self) -> Result<serde_json::Value, IndexError> {
-        // Stub: return a minimal compatibility report.
-        // Full implementation will compute cross-package compatibility data.
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "compatibilityReportResult",
             "packages": [],
@@ -395,14 +463,17 @@ impl HotIndex {
     }
 
     /// Debug framework detection.
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
     pub fn query_debug_frameworks(&self) -> Result<serde_json::Value, IndexError> {
-        // Stub: return a minimal debug-frameworks result.
-        // Full implementation will report detected frameworks and their configuration.
+        self.require_warm()?;
         Ok(serde_json::json!({
             "kind": "debugFrameworksResult",
             "detectedFrameworks": [],
             "detectionDetails": []
         }))
+    }
+
+    /// Require that the index has been warmed (initial build completed).
+    fn require_warm(&self) -> Result<&Arc<GraphBuildResult>, IndexError> {
+        self.build.as_ref().ok_or_else(|| IndexError::Analysis("index not warmed yet".to_string()))
     }
 }

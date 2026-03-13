@@ -626,10 +626,21 @@ fn load_framework_corpora() -> Vec<FrameworkCorpus> {
     parse_framework_corpora(&content)
 }
 
+/// Whether a path has a JS/TS source extension that pruneguard can analyse.
+fn is_supported_source_extension(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|ext| {
+        ext.eq_ignore_ascii_case("ts")
+            || ext.eq_ignore_ascii_case("tsx")
+            || ext.eq_ignore_ascii_case("mjs")
+            || ext.eq_ignore_ascii_case("js")
+    })
+}
+
 /// Resolve the representative target for a corpus. If the configured target
-/// exists on disk, return it as-is. If the target is stale (file moved or
-/// deleted), fall back to a deterministic alternative discovered from the
-/// current scan inventory, and print a parity note to stderr.
+/// exists on disk and has a supported JS/TS extension, return it as-is. If the
+/// target is stale (file moved, deleted, or has an unsupported extension like
+/// `.rs`), fall back to a deterministic alternative discovered from the current
+/// scan inventory, and print a parity note to stderr.
 ///
 /// Returns `None` only when no fallback can be found (the test should skip
 /// target-dependent assertions in that case).
@@ -640,15 +651,25 @@ fn resolve_representative_target(corpus: &Corpus) -> Option<String> {
 
     let target = &corpus.representative_targets[0];
 
-    // Fast path: target still exists on disk.
-    if corpus.path.join(target).exists() {
+    // Fast path: target still exists on disk AND has a supported JS/TS extension.
+    // A file that exists but has an unsupported extension (e.g. .rs) is treated
+    // as stale -- pruneguard cannot meaningfully analyse non-JS/TS files.
+    if corpus.path.join(target).exists()
+        && is_supported_source_extension(std::path::Path::new(target))
+    {
         return Some(target.clone());
     }
 
-    // Target is stale. Run a scan to discover the current file inventory
-    // and pick the first .ts/.mjs/.js source file deterministically.
+    // Target is stale (missing or unsupported extension). Run a scan to
+    // discover the current file inventory and pick the first
+    // .ts/.tsx/.mjs/.js source file deterministically.
+    let reason = if !corpus.path.join(target).exists() {
+        "file does not exist"
+    } else {
+        "file has unsupported extension for JS/TS analysis"
+    };
     eprintln!(
-        "[parity] corpus `{}`: representative target `{target}` is stale, \
+        "[parity] corpus `{}`: representative target `{target}` is stale ({reason}), \
          searching scan inventory for fallback",
         corpus.name
     );
@@ -659,13 +680,7 @@ fn resolve_representative_target(corpus: &Corpus) -> Option<String> {
     let fallback = files.and_then(|file_list| {
         file_list.iter().find_map(|entry| {
             let path = entry["path"].as_str()?;
-            let p = std::path::Path::new(path);
-            if p.extension().is_some_and(|ext| {
-                ext.eq_ignore_ascii_case("ts")
-                    || ext.eq_ignore_ascii_case("tsx")
-                    || ext.eq_ignore_ascii_case("mjs")
-                    || ext.eq_ignore_ascii_case("js")
-            }) {
+            if is_supported_source_extension(std::path::Path::new(path)) {
                 Some(path.to_string())
             } else {
                 None

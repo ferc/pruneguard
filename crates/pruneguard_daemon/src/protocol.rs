@@ -158,6 +158,21 @@ pub struct DaemonStatusInfo {
     pub pending_invalidations: usize,
     /// Uptime of the daemon in seconds.
     pub uptime_secs: u64,
+    /// Absolute path to the daemon binary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<String>,
+    /// Milliseconds the initial graph build took.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_build_ms: Option<u64>,
+    /// Milliseconds the last incremental rebuild took.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_rebuild_ms: Option<u64>,
+    /// Number of incremental rebuilds since daemon start.
+    pub incremental_rebuilds: u64,
+    /// Total number of files invalidated since daemon start.
+    pub total_invalidations: u64,
+    /// Whether a config-level change is pending that requires full rebuild.
+    pub config_change_pending: bool,
 }
 
 /// Read a length-prefixed JSON frame from a tokio `AsyncRead`.

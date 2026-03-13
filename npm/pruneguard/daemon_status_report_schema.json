@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DaemonStatusReport",
+  "description": "Daemon status report for querying daemon health from JS or CLI.",
+  "type": "object",
+  "required": [
+    "running"
+  ],
+  "properties": {
+    "binaryPath": {
+      "description": "Absolute path to the daemon binary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "configChangePending": {
+      "description": "Whether a config-level change is pending that requires full rebuild.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "generation": {
+      "description": "Current generation (rebuild counter) of the index.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "graphEdges": {
+      "description": "Number of edges in the module graph.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "graphNodes": {
+      "description": "Number of nodes in the module graph.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "incrementalRebuilds": {
+      "description": "Number of incremental rebuilds since daemon start.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "indexWarm": {
+      "description": "Whether the hot index has been warmed (initial build complete).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "initialBuildMs": {
+      "description": "Milliseconds the initial graph build took.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "lastRebuildMs": {
+      "description": "Milliseconds the last incremental rebuild took.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "lastUpdateMs": {
+      "description": "Milliseconds since the last graph update.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "pendingInvalidations": {
+      "description": "Number of files pending invalidation.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "pid": {
+      "description": "Process ID of the running daemon, if any.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "port": {
+      "description": "TCP port the daemon is listening on, if any.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint16",
+      "minimum": 0.0
+    },
+    "projectRoot": {
+      "description": "Absolute path to the project root the daemon is serving.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "running": {
+      "description": "Whether a daemon process is currently running.",
+      "type": "boolean"
+    },
+    "startedAt": {
+      "description": "ISO-8601 timestamp when the daemon started.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "totalInvalidations": {
+      "description": "Total number of files invalidated since daemon start.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "uptimeSecs": {
+      "description": "Uptime of the daemon in seconds.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "version": {
+      "description": "Version of the running daemon binary.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "watchedFiles": {
+      "description": "Number of files being watched for changes.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 0.0
+    },
+    "watcherLagMs": {
+      "description": "Milliseconds of watcher lag (time since last fs event was processed).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  }
+}

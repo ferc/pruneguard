@@ -8,7 +8,24 @@ npm install pruneguard
 ```
 
 ```js
-import { scan, review, safeDelete, fixPlan } from "pruneguard";
+import {
+  scan,
+  review,
+  safeDelete,
+  fixPlan,
+  impact,
+  explain,
+  suggestRules,
+  compatibilityReport,
+  debugFrameworks,
+  loadConfig,
+  schemaPath,
+  binaryPath,
+  run,
+  scanDot,
+  migrateKnip,
+  migrateDepcruise,
+} from "pruneguard";
 ```
 
 ---
@@ -415,6 +432,132 @@ const result = await suggestRules();
 for (const rule of result.suggestedRules) {
   console.log(`[${rule.confidence}] ${rule.name}: ${rule.description}`);
 }
+```
+
+---
+
+## compatibilityReport
+
+Check framework and toolchain compatibility. Surfaces unsupported signals,
+trust downgrades, and warnings that affect finding accuracy. Run this to
+understand why trust scores may be degraded before acting on findings.
+
+```ts
+function compatibilityReport(options?: CompatibilityReportOptions): Promise<CompatibilityReport>
+```
+
+### CompatibilityReportOptions
+
+| Field     | Type      | Default         | Description |
+|-----------|-----------|-----------------|-------------|
+| `cwd`     | `string`  | `process.cwd()` | Working directory |
+| `config`  | `string`  |                 | Config file path |
+| `profile` | `Profile` |                 | Analysis profile |
+
+### CompatibilityReport
+
+```ts
+{
+  supportedFrameworks: string[];
+  heuristicFrameworks: string[];
+  unsupportedSignals: Array<{
+    signal: string;
+    source: string;
+    suggestion?: string;
+  }>;
+  warnings: Array<{
+    code: string;
+    message: string;
+    affectedScope?: string;
+    severity: "low" | "medium" | "high";
+  }>;
+  trustDowngrades: Array<{
+    reason: string;
+    scope: string;
+    severity: "low" | "medium" | "high";
+  }>;
+}
+```
+
+### Example
+
+```js
+import { compatibilityReport } from "pruneguard";
+
+const compat = await compatibilityReport();
+
+console.log("Supported:", compat.supportedFrameworks);
+console.log("Heuristic:", compat.heuristicFrameworks);
+
+for (const signal of compat.unsupportedSignals) {
+  console.warn(`Unsupported: ${signal.signal} (from ${signal.source})`);
+  if (signal.suggestion) console.warn(`  Suggestion: ${signal.suggestion}`);
+}
+
+for (const downgrade of compat.trustDowngrades) {
+  console.warn(`Trust downgrade [${downgrade.severity}]: ${downgrade.reason} (scope: ${downgrade.scope})`);
+}
+```
+
+---
+
+## debugFrameworks
+
+Show detailed framework detection diagnostics. Lists all detected framework
+packs, the entrypoints and ignore patterns they contributed, and which
+detections were heuristic vs exact.
+
+```ts
+function debugFrameworks(options?: DebugFrameworksOptions): Promise<FrameworkDebugReport>
+```
+
+### DebugFrameworksOptions
+
+| Field     | Type      | Default         | Description |
+|-----------|-----------|-----------------|-------------|
+| `cwd`     | `string`  | `process.cwd()` | Working directory |
+| `config`  | `string`  |                 | Config file path |
+| `profile` | `Profile` |                 | Analysis profile |
+
+### FrameworkDebugReport
+
+```ts
+{
+  detectedPacks: Array<{
+    name: string;
+    confidence: string;
+    signals: string[];
+    reasons: string[];
+  }>;
+  allEntrypoints: Array<{
+    path: string;
+    framework: string;
+    kind: string;
+    heuristic: boolean;
+    reason: string;
+  }>;
+  allIgnorePatterns: string[];
+  allClassificationRules: Array<{
+    pattern: string;
+    classification: string;
+  }>;
+  heuristicDetections: string[];
+}
+```
+
+### Example
+
+```js
+import { debugFrameworks } from "pruneguard";
+
+const fwDebug = await debugFrameworks();
+
+for (const pack of fwDebug.detectedPacks) {
+  console.log(`${pack.name} (${pack.confidence}): ${pack.signals.join(", ")}`);
+}
+
+console.log("Heuristic detections:", fwDebug.heuristicDetections);
+console.log("Framework entrypoints:", fwDebug.allEntrypoints.length);
 ```
 
 ---

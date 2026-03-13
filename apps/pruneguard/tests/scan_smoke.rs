@@ -1346,3 +1346,422 @@ fn debug_frameworks_command_json() {
         "debug frameworks should return detectedPacks array"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Framework detection: Nuxt pages, server routes, composables
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nuxt_pages_and_server_routes_are_entrypoints() {
+    let root = fixture_root("nuxt-pages-and-server-routes");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Nuxt page components must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "pages/index.vue"),
+        "pages/index.vue should not be flagged (Nuxt page entrypoint)"
+    );
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "pages/about.vue"),
+        "pages/about.vue should not be flagged (Nuxt page entrypoint)"
+    );
+
+    // Nuxt server routes must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "server/api/hello.ts"),
+        "server/api/hello.ts should not be flagged (Nuxt server API route)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "server/routes/health.ts"),
+        "server/routes/health.ts should not be flagged (Nuxt server route)"
+    );
+
+    // Nuxt auto-imported composables must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "composables/useAuth.ts"),
+        "composables/useAuth.ts should not be flagged (Nuxt auto-imported composable)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Astro pages, content config, middleware
+// ---------------------------------------------------------------------------
+
+#[test]
+fn astro_pages_and_content_config_are_entrypoints() {
+    let root = fixture_root("astro-pages-and-content-config");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Astro pages must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/pages/index.astro"),
+        "src/pages/index.astro should not be flagged (Astro page entrypoint)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/pages/about.astro"),
+        "src/pages/about.astro should not be flagged (Astro page entrypoint)"
+    );
+
+    // Astro content collection config must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/content/config.ts"),
+        "src/content/config.ts should not be flagged (Astro content collection config)"
+    );
+
+    // Astro middleware must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/middleware.ts"),
+        "src/middleware.ts should not be flagged (Astro middleware entrypoint)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: SvelteKit routes and hooks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sveltekit_routes_and_hooks_are_entrypoints() {
+    let root = fixture_root("sveltekit-routes-and-hooks");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // SvelteKit route files must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/routes/+page.svelte"),
+        "src/routes/+page.svelte should not be flagged (SvelteKit page route)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/routes/+layout.svelte"),
+        "src/routes/+layout.svelte should not be flagged (SvelteKit layout)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/routes/api/+server.ts"),
+        "src/routes/api/+server.ts should not be flagged (SvelteKit API route)"
+    );
+
+    // SvelteKit hooks must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/hooks.server.ts"),
+        "src/hooks.server.ts should not be flagged (SvelteKit server hooks)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/hooks.client.ts"),
+        "src/hooks.client.ts should not be flagged (SvelteKit client hooks)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Remix root, routes, entry files
+// ---------------------------------------------------------------------------
+
+#[test]
+fn remix_routes_and_entry_files_are_entrypoints() {
+    let root = fixture_root("remix-routes-entrypoints");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Remix root component must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "app/root.tsx"),
+        "app/root.tsx should not be flagged (Remix root component)"
+    );
+
+    // Remix routes must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "app/routes/_index.tsx"),
+        "app/routes/_index.tsx should not be flagged (Remix index route)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "app/routes/about.tsx"),
+        "app/routes/about.tsx should not be flagged (Remix route)"
+    );
+
+    // Remix entry files must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "app/entry.client.tsx"),
+        "app/entry.client.tsx should not be flagged (Remix client entry)"
+    );
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "app/entry.server.tsx"),
+        "app/entry.server.tsx should not be flagged (Remix server entry)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "app/unused.ts"),
+        "app/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Angular build targets from angular.json
+// ---------------------------------------------------------------------------
+
+#[test]
+fn angular_build_targets_are_entrypoints() {
+    let root = fixture_root("angular-build-targets");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Angular main and polyfills referenced in angular.json must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/main.ts"),
+        "src/main.ts should not be flagged (Angular build target entrypoint)"
+    );
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/polyfills.ts"),
+        "src/polyfills.ts should not be flagged (Angular build target entrypoint)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Nx project graph roots from project.json
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nx_project_graph_roots_are_entrypoints() {
+    let root = fixture_root("nx-project-graph-roots");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Nx project.json main entry must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/index.ts"),
+        "src/index.ts should not be flagged (Nx project graph root)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Playwright config and test files
+// ---------------------------------------------------------------------------
+
+#[test]
+fn playwright_config_and_tests_are_entrypoints() {
+    let root = fixture_root("playwright-config-and-tests");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Playwright config must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "playwright.config.ts"),
+        "playwright.config.ts should not be flagged (Playwright config entrypoint)"
+    );
+
+    // Playwright test files must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "tests/example.spec.ts"),
+        "tests/example.spec.ts should not be flagged (Playwright test entrypoint)"
+    );
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "e2e/login.spec.ts"),
+        "e2e/login.spec.ts should not be flagged (Playwright e2e test entrypoint)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Cypress config, e2e specs, support files
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cypress_config_and_e2e_are_entrypoints() {
+    let root = fixture_root("cypress-config-and-e2e");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Cypress config must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "cypress.config.ts"),
+        "cypress.config.ts should not be flagged (Cypress config entrypoint)"
+    );
+
+    // Cypress e2e spec must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "cypress/e2e/spec.cy.ts"),
+        "cypress/e2e/spec.cy.ts should not be flagged (Cypress e2e test entrypoint)"
+    );
+
+    // Cypress support file must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "cypress/support/commands.ts"),
+        "cypress/support/commands.ts should not be flagged (Cypress support file)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Docusaurus config, pages, theme components
+// ---------------------------------------------------------------------------
+
+#[test]
+fn docusaurus_site_roots_are_entrypoints() {
+    let root = fixture_root("docusaurus-site-roots");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Docusaurus config must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "docusaurus.config.js"),
+        "docusaurus.config.js should not be flagged (Docusaurus config entrypoint)"
+    );
+
+    // Docusaurus pages must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/pages/index.tsx"),
+        "src/pages/index.tsx should not be flagged (Docusaurus page entrypoint)"
+    );
+
+    // Docusaurus theme overrides must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == "src/theme/Footer.tsx"),
+        "src/theme/Footer.tsx should not be flagged (Docusaurus theme override)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: VitePress config and theme entrypoints
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vitepress_doc_roots_are_entrypoints() {
+    let root = fixture_root("vitepress-doc-roots");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // VitePress config must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == ".vitepress/config.ts"),
+        ".vitepress/config.ts should not be flagged (VitePress config entrypoint)"
+    );
+
+    // VitePress theme entry must NOT be flagged.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f["code"] == "unused-file" && f["subject"] == ".vitepress/theme/index.ts"),
+        ".vitepress/theme/index.ts should not be flagged (VitePress theme entrypoint)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Framework detection: Turborepo task configuration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn turborepo_task_roots_are_entrypoints() {
+    let root = fixture_root("turborepo-task-roots");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Turborepo package main entry must NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/index.ts"),
+        "src/index.ts should not be flagged (Turborepo task root)"
+    );
+
+    // Truly unused file SHOULD be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "src/unused.ts should be flagged as unused"
+    );
+}
