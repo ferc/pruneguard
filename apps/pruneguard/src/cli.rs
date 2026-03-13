@@ -63,12 +63,13 @@ pub enum Command {
     Scan { paths: Vec<PathBuf> },
     Impact { target: String },
     Explain { query: String },
-    Review,
+    Review { strict_trust: bool },
     SafeDelete { targets: Vec<String> },
     FixPlan { targets: Vec<String> },
     SuggestRules,
     Init,
     PrintConfig,
+    CompatibilityReport,
     Debug(DebugCommand),
     Migrate(MigrateCommand),
     Daemon(DaemonCommand),
@@ -78,6 +79,7 @@ pub enum Command {
 pub enum DaemonCommand {
     Start,
     Stop,
+    Restart,
     Status,
 }
 
@@ -86,6 +88,7 @@ pub enum DebugCommand {
     Resolve { from: PathBuf, specifier: String },
     Entrypoints,
     Runtime,
+    Frameworks,
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +203,14 @@ fn explain_command() -> impl Parser<Command> {
 }
 
 fn review_command() -> impl Parser<Command> {
-    pure(Command::Review)
+    let strict_trust = long("strict-trust")
+        .help("Only block on full-scope, high-confidence, low-pressure findings; downgrade others to advisory")
+        .switch();
+    construct!(Command::Review { strict_trust })
+}
+
+fn compatibility_report_command() -> impl Parser<Command> {
+    pure(Command::CompatibilityReport)
 }
 
 fn safe_delete_command() -> impl Parser<Command> {
@@ -244,6 +254,10 @@ fn debug_runtime_subcommand() -> impl Parser<DebugCommand> {
     pure(DebugCommand::Runtime)
 }
 
+fn debug_frameworks_subcommand() -> impl Parser<DebugCommand> {
+    pure(DebugCommand::Frameworks)
+}
+
 fn debug_command() -> impl Parser<Command> {
     let resolve =
         debug_resolve_subcommand().to_options().descr("Debug module resolution").command("resolve");
@@ -255,8 +269,12 @@ fn debug_command() -> impl Parser<Command> {
         .to_options()
         .descr("Print runtime diagnostic info")
         .command("runtime");
+    let frameworks = debug_frameworks_subcommand()
+        .to_options()
+        .descr("Debug framework detection and contributed rules")
+        .command("frameworks");
 
-    construct!([resolve, entrypoints, runtime]).map(Command::Debug)
+    construct!([resolve, entrypoints, runtime, frameworks]).map(Command::Debug)
 }
 
 fn migrate_knip_subcommand() -> impl Parser<MigrateCommand> {
@@ -293,6 +311,10 @@ fn daemon_stop_subcommand() -> impl Parser<DaemonCommand> {
     pure(DaemonCommand::Stop)
 }
 
+fn daemon_restart_subcommand() -> impl Parser<DaemonCommand> {
+    pure(DaemonCommand::Restart)
+}
+
 fn daemon_status_subcommand() -> impl Parser<DaemonCommand> {
     pure(DaemonCommand::Status)
 }
@@ -302,16 +324,16 @@ fn daemon_command() -> impl Parser<Command> {
         .to_options()
         .descr("Start the pruneguard daemon")
         .command("start");
-    let stop = daemon_stop_subcommand()
+    let stop =
+        daemon_stop_subcommand().to_options().descr("Stop the running daemon").command("stop");
+    let restart = daemon_restart_subcommand()
         .to_options()
-        .descr("Stop the running daemon")
-        .command("stop");
-    let status = daemon_status_subcommand()
-        .to_options()
-        .descr("Show daemon status")
-        .command("status");
+        .descr("Restart the daemon (stop then start)")
+        .command("restart");
+    let status =
+        daemon_status_subcommand().to_options().descr("Show daemon status").command("status");
 
-    construct!([start, stop, status]).map(Command::Daemon)
+    construct!([start, stop, restart, status]).map(Command::Daemon)
 }
 
 fn command_parser() -> impl Parser<Command> {
@@ -340,6 +362,10 @@ fn command_parser() -> impl Parser<Command> {
         .to_options()
         .descr("Print resolved configuration")
         .command("print-config");
+    let compatibility_report = compatibility_report_command()
+        .to_options()
+        .descr("Report framework compatibility and unsupported signals")
+        .command("compatibility-report");
     let debug = debug_command()
         .to_options()
         .descr("Debug tools for resolution and entrypoints")
@@ -362,6 +388,7 @@ fn command_parser() -> impl Parser<Command> {
         suggest_rules,
         init,
         print_config,
+        compatibility_report,
         debug,
         migrate,
         daemon,

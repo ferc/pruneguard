@@ -5,21 +5,13 @@ use notify_debouncer_mini::{DebouncedEvent, Debouncer, new_debouncer};
 use tokio::sync::mpsc;
 
 /// Extensions relevant to pruneguard analysis.
-const WATCHED_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "js", "jsx", "mjs", "cjs",
-];
+const WATCHED_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs"];
 
 /// Config/metadata files that trigger a rebuild.
-const WATCHED_FILENAMES: &[&str] = &[
-    "package.json",
-    "pruneguard.json",
-    "CODEOWNERS",
-];
+const WATCHED_FILENAMES: &[&str] = &["package.json", "pruneguard.json", "CODEOWNERS"];
 
 /// Prefixes for config files matched by starts-with.
-const WATCHED_PREFIXES: &[&str] = &[
-    "tsconfig",
-];
+const WATCHED_PREFIXES: &[&str] = &["tsconfig"];
 
 /// A file-system watcher that debounces events and sends
 /// relevant file paths over a tokio channel.
@@ -84,10 +76,7 @@ impl FileWatcher {
 
         tracing::info!("watching {} recursively for file changes", project_root.display());
 
-        Ok(Self {
-            _debouncer: debouncer,
-            changes_rx,
-        })
+        Ok(Self { _debouncer: debouncer, changes_rx })
     }
 }
 

@@ -52,6 +52,8 @@ pruneguard_report = { path = "crates/pruneguard_report" }
 pruneguard_cache = { path = "crates/pruneguard_cache" }
 pruneguard_git = { path = "crates/pruneguard_git" }
 pruneguard_daemon = { path = "crates/pruneguard_daemon" }
+pruneguard_compat = { path = "crates/pruneguard_compat" }
+pruneguard_config_readers = { path = "crates/pruneguard_config_readers" }
 
 # Oxc crates
 oxc_parser = "0.117.0"

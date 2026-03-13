@@ -682,10 +682,8 @@ fn safe_delete_blocks_live_file() {
 #[test]
 fn fix_plan_generates_actions_for_unused_file() {
     let root = fixture_root("fix-plan-basic");
-    let report = run_pruneguard(
-        &root,
-        &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"],
-    );
+    let report =
+        run_pruneguard(&root, &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"]);
 
     // Should match the unused-file finding.
     assert!(
@@ -705,18 +703,14 @@ fn fix_plan_generates_actions_for_unused_file() {
     // Each action must have steps.
     for action in actions {
         assert!(
-            action["steps"]
-                .as_array()
-                .is_some_and(|steps| !steps.is_empty()),
+            action["steps"].as_array().is_some_and(|steps| !steps.is_empty()),
             "every action must have at least one step"
         );
     }
 
     // Verification steps should exist.
     assert!(
-        report["verificationSteps"]
-            .as_array()
-            .is_some_and(|arr| !arr.is_empty()),
+        report["verificationSteps"].as_array().is_some_and(|arr| !arr.is_empty()),
         "fix-plan should include verification steps"
     );
 }
@@ -724,21 +718,15 @@ fn fix_plan_generates_actions_for_unused_file() {
 #[test]
 fn fix_plan_generates_actions_for_unused_export() {
     let root = fixture_root("fix-plan-basic");
-    let report = run_pruneguard(
-        &root,
-        &["--format", "json", "--no-baseline", "fix-plan", "src/used.ts"],
-    );
+    let report =
+        run_pruneguard(&root, &["--format", "json", "--no-baseline", "fix-plan", "src/used.ts"]);
 
     // Should match the unused-export finding for extraExport.
     assert!(
         report["matchedFindings"]
             .as_array()
-            .is_some_and(|arr| arr
-                .iter()
-                .any(|f| f["code"] == "unused-export"
-                    && f["subject"]
-                        .as_str()
-                        .is_some_and(|s| s.contains("extraExport")))),
+            .is_some_and(|arr| arr.iter().any(|f| f["code"] == "unused-export"
+                && f["subject"].as_str().is_some_and(|s| s.contains("extraExport")))),
         "fix-plan should match an unused-export finding for extraExport"
     );
 
@@ -753,10 +741,8 @@ fn fix_plan_generates_actions_for_unused_export() {
 #[test]
 fn fix_plan_includes_risk_and_confidence() {
     let root = fixture_root("fix-plan-basic");
-    let report = run_pruneguard(
-        &root,
-        &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"],
-    );
+    let report =
+        run_pruneguard(&root, &["--format", "json", "--no-baseline", "fix-plan", "src/orphan.ts"]);
 
     // Top-level risk and confidence must be present.
     assert!(
@@ -771,10 +757,7 @@ fn fix_plan_includes_risk_and_confidence() {
     // Per-action risk and confidence.
     let actions = report["actions"].as_array().expect("actions array");
     for action in actions {
-        assert!(
-            action["risk"].as_str().is_some(),
-            "each action must have a risk field"
-        );
+        assert!(action["risk"].as_str().is_some(), "each action must have a risk field");
         assert!(
             action["confidence"].as_str().is_some(),
             "each action must have a confidence field"
@@ -789,10 +772,7 @@ fn fix_plan_includes_risk_and_confidence() {
 #[test]
 fn suggest_rules_produces_valid_json_report() {
     let root = fixture_root("suggest-rules-basic");
-    let report = run_pruneguard(
-        &root,
-        &["--format", "json", "--no-baseline", "suggest-rules"],
-    );
+    let report = run_pruneguard(&root, &["--format", "json", "--no-baseline", "suggest-rules"]);
 
     // suggestedRules must be an array (may or may not have entries depending
     // on whether cross-package thresholds are met).
@@ -802,20 +782,13 @@ fn suggest_rules_produces_valid_json_report() {
     );
 
     // tags should be an array.
-    assert!(
-        report["tags"].as_array().is_some(),
-        "suggest-rules should return a tags array"
-    );
+    assert!(report["tags"].as_array().is_some(), "suggest-rules should return a tags array");
 
     // The fixture has 3+ files in src/components, src/api, src/utils.
     // At least one tag should be suggested for one of those directories.
     let tags = report["tags"].as_array().expect("tags array");
     assert!(
-        tags.iter().any(|tag| {
-            tag["glob"]
-                .as_str()
-                .is_some_and(|glob| glob.contains("src/"))
-        }),
+        tags.iter().any(|tag| { tag["glob"].as_str().is_some_and(|glob| glob.contains("src/")) }),
         "suggest-rules should suggest at least one tag for the source directory structure"
     );
 }
@@ -823,10 +796,7 @@ fn suggest_rules_produces_valid_json_report() {
 #[test]
 fn suggest_rules_reports_rationale() {
     let root = fixture_root("suggest-rules-basic");
-    let report = run_pruneguard(
-        &root,
-        &["--format", "json", "--no-baseline", "suggest-rules"],
-    );
+    let report = run_pruneguard(&root, &["--format", "json", "--no-baseline", "suggest-rules"]);
 
     // rationale should be an array with at least one entry.
     let rationale = report["rationale"].as_array();
@@ -876,9 +846,9 @@ fn safe_delete_needs_review_under_high_unresolved_pressure() {
     // If safe, it means pressure is below threshold -- that is acceptable.
     // The key contract: the command does not panic and returns a valid classification.
     assert!(
-        report["targets"].as_array().is_some_and(|arr| arr
-            .iter()
-            .any(|t| t.as_str() == Some("src/orphan.ts"))),
+        report["targets"]
+            .as_array()
+            .is_some_and(|arr| arr.iter().any(|t| t.as_str() == Some("src/orphan.ts"))),
         "targets should include src/orphan.ts"
     );
 }
@@ -900,10 +870,7 @@ fn trust_summary_fields_present_in_scan_report() {
         stats["unresolvedSpecifiers"].as_u64().is_some(),
         "unresolvedSpecifiers must be present"
     );
-    assert!(
-        stats["confidenceCounts"].is_object(),
-        "confidenceCounts must be an object"
-    );
+    assert!(stats["confidenceCounts"].is_object(), "confidenceCounts must be an object");
     assert!(
         stats["confidenceCounts"]["high"].as_u64().is_some(),
         "confidenceCounts.high must be present"
@@ -958,18 +925,9 @@ fn review_trust_summary_has_all_required_fields() {
 
     let trust = &report["trust"];
     assert!(trust["fullScope"].as_bool().is_some(), "trust.fullScope must be present");
-    assert!(
-        trust["baselineApplied"].as_bool().is_some(),
-        "trust.baselineApplied must be present"
-    );
-    assert!(
-        trust["unresolvedPressure"].is_number(),
-        "trust.unresolvedPressure must be a number"
-    );
-    assert!(
-        trust["confidenceCounts"].is_object(),
-        "trust.confidenceCounts must be an object"
-    );
+    assert!(trust["baselineApplied"].as_bool().is_some(), "trust.baselineApplied must be present");
+    assert!(trust["unresolvedPressure"].is_number(), "trust.unresolvedPressure must be a number");
+    assert!(trust["confidenceCounts"].is_object(), "trust.confidenceCounts must be an object");
     assert!(
         trust["confidenceCounts"]["high"].as_u64().is_some(),
         "trust.confidenceCounts.high must be present"
@@ -1033,10 +991,7 @@ fn impact_single_target_returns_affected_entities() {
         report["affectedPackages"].as_array().is_some(),
         "impact should return affectedPackages"
     );
-    assert!(
-        report["affectedFiles"].as_array().is_some(),
-        "impact should return affectedFiles"
-    );
+    assert!(report["affectedFiles"].as_array().is_some(), "impact should return affectedFiles");
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,4 +1104,189 @@ fn scan_inventories_are_deterministically_ordered() {
             "file at position {idx} should have the same path across runs"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// package-exports-subpaths: files not exposed through any exports subpath
+// ---------------------------------------------------------------------------
+
+#[test]
+fn package_exports_subpaths_flags_internal_file() {
+    let root = fixture_root("package-exports-subpaths");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+    let entrypoints = report["entrypoints"].as_array().expect("entrypoints array");
+
+    // Root "." and "./utils" subpaths should appear as entrypoints.
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("src/index.ts"))
+        }),
+        "root export '.' should be detected as a package-exports entrypoint"
+    );
+    assert!(
+        entrypoints.iter().any(|ep| {
+            ep["kind"] == "package-exports"
+                && ep["source"].as_str().is_some_and(|s| s.contains("src/utils.ts"))
+        }),
+        "'./utils' subpath should be detected as a package-exports entrypoint"
+    );
+
+    // src/internal.ts is not referenced by any exports subpath.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/internal.ts"),
+        "src/internal.ts should be flagged as unused (not in any exports subpath)"
+    );
+
+    // src/index.ts and src/utils.ts should NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/index.ts"),
+        "src/index.ts should not be flagged (root export)"
+    );
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/utils.ts"),
+        "src/utils.ts should not be flagged (subpath export)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ambient-declarations: .d.ts files excluded from dead-code findings
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ambient_declarations_not_flagged_as_dead_code() {
+    let root = fixture_root("ambient-declarations");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // .d.ts files must NOT be flagged as unused-file.
+    assert!(
+        !findings.iter().any(|f| {
+            f["code"] == "unused-file"
+                && f["subject"].as_str().is_some_and(|s| s.ends_with(".d.ts"))
+        }),
+        "ambient .d.ts files must be excluded from dead-code findings"
+    );
+
+    // Regular .ts files with no importers should still be flagged.
+    assert!(
+        findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/unused.ts"),
+        "regular .ts files with no importers should still be flagged"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// script-only-dependency: deps used only in package.json scripts
+// ---------------------------------------------------------------------------
+
+#[test]
+fn script_only_dependency_not_flagged_as_unused() {
+    let root = fixture_root("script-only-dependency");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // typescript is used only via "tsc" in scripts -- should not be unused.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| { f["code"] == "unused-dependency" && f["subject"] == "typescript" }),
+        "typescript used in scripts should not be reported as unused dependency"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// confidence-levels: findings carry correct confidence tiers
+// ---------------------------------------------------------------------------
+
+#[test]
+fn confidence_levels_all_findings_have_confidence_field() {
+    let root = fixture_root("confidence-levels");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // Every finding must have a confidence field.
+    for finding in findings {
+        assert!(
+            finding["confidence"].as_str().is_some(),
+            "finding `{}` must have a confidence field",
+            finding["subject"]
+        );
+    }
+
+    // src/clearly-dead.ts should be flagged as unused.
+    assert!(
+        findings
+            .iter()
+            .any(|f| { f["code"] == "unused-file" && f["subject"] == "src/clearly-dead.ts" }),
+        "src/clearly-dead.ts (zero importers) should be flagged as unused"
+    );
+
+    // src/used.ts should NOT be flagged.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/used.ts"),
+        "src/used.ts (directly imported) should not be flagged"
+    );
+
+    // Confidence counts stats must be present.
+    let stats = &report["stats"];
+    assert!(stats["confidenceCounts"].is_object(), "confidenceCounts must be present");
+}
+
+// ---------------------------------------------------------------------------
+// namespace-imports-members: import * as ns; ns.foo marks foo as used
+// ---------------------------------------------------------------------------
+
+#[test]
+fn namespace_member_demand_marks_accessed_export_as_used() {
+    let root = fixture_root("namespace-imports-members");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // foo is accessed via utils.foo() -- it should NOT be flagged as unused export.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| { f["code"] == "unused-export" && f["subject"] == "src/utils.ts#foo" }),
+        "foo accessed via namespace should not be flagged as unused"
+    );
+
+    // bar is never accessed via the namespace -- it SHOULD be flagged.
+    assert!(
+        findings
+            .iter()
+            .any(|f| { f["code"] == "unused-export" && f["subject"] == "src/utils.ts#bar" }),
+        "bar not accessed via namespace should be flagged as unused export"
+    );
+
+    // The file itself is imported -- it should not be flagged as unused-file.
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file" && f["subject"] == "src/utils.ts"),
+        "utils.ts should not be flagged as unused (imported via namespace)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// aliased-reexports: export { foo as bar } keeps foo live
+// ---------------------------------------------------------------------------
+
+#[test]
+fn aliased_reexports_keep_original_export_live() {
+    let root = fixture_root("reexports-alias");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+    let findings = report["findings"].as_array().expect("findings array");
+
+    // No files should be flagged as unused (all connected through alias chain).
+    assert!(
+        !findings.iter().any(|f| f["code"] == "unused-file"),
+        "all files should be reachable through the aliased re-export chain"
+    );
+
+    // The original export `foo` should NOT be flagged as unused.
+    assert!(
+        !findings
+            .iter()
+            .any(|f| { f["code"] == "unused-export" && f["subject"] == "src/foo.ts#foo" }),
+        "foo should remain live through the bar alias re-export"
+    );
 }

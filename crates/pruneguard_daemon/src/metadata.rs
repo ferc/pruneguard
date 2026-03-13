@@ -93,10 +93,7 @@ impl DaemonMetadata {
 
         let mut hasher = DefaultHasher::new();
         hasher.write_u128(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_nanos(),
         );
         hasher.write_u32(std::process::id());
         let h1 = hasher.finish();

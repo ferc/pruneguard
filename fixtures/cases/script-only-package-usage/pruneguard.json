@@ -1,0 +1,6 @@
+{
+  "analysis": {
+    "unusedDependencies": "warn",
+    "unusedFiles": "warn"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "description": "Package used only through exports field subpaths -- files not referenced by any subpath should be flagged",
+  "expectations": [
+    {
+      "assertion": "entrypoint-exists",
+      "kind": "package-exports",
+      "sourceContains": "src/index.ts",
+      "note": "Root export '.' maps to src/index.ts"
+    },
+    {
+      "assertion": "entrypoint-exists",
+      "kind": "package-exports",
+      "sourceContains": "src/utils.ts",
+      "note": "Subpath './utils' maps to src/utils.ts"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/internal.ts",
+      "note": "Not referenced by any exports subpath -- should be flagged as unused"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/index.ts",
+      "note": "Root export -- reachable via package exports"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/utils.ts",
+      "note": "Subpath export -- reachable via package exports"
+    }
+  ]
+}

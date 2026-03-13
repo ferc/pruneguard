@@ -99,6 +99,9 @@ pub fn analyze(
                 continue;
             }
 
+            let benign_unresolved = workspace_benign_unresolved_specifiers(build, &workspace_name);
+            let effective_unresolved = unresolved_count.saturating_sub(benign_unresolved);
+
             let evidence = vec![Evidence {
                 kind: "dependency".to_string(),
                 file: Some(manifest_path.clone()),
@@ -107,7 +110,11 @@ pub fn analyze(
                     "No reachable file in the active profile resolved to this {dependency_kind}."
                 ),
             }];
-            let confidence = if unresolved_count > 8 || only_script_entrypoints {
+            // unused-dependency defaults to Medium; Low when unresolved-heavy.
+            let confidence = if effective_unresolved > 8
+                || only_script_entrypoints
+                || (effective_unresolved > 3 && dependency_kind == "peer dependency")
+            {
                 FindingConfidence::Low
             } else {
                 FindingConfidence::Medium
@@ -141,6 +148,21 @@ fn workspace_unresolved_specifiers(build: &GraphBuildResult, workspace_name: &st
         .filter(|file| file.file.workspace.as_deref() == Some(workspace_name))
         .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
         .filter(|edge| matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved))
+        .count()
+}
+
+fn workspace_benign_unresolved_specifiers(build: &GraphBuildResult, workspace_name: &str) -> usize {
+    build
+        .files
+        .iter()
+        .filter(|file| file.file.workspace.as_deref() == Some(workspace_name))
+        .flat_map(|file| file.resolved_imports.iter().chain(&file.resolved_reexports))
+        .filter(|edge| {
+            matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved)
+                && edge
+                    .unresolved_reason
+                    .is_some_and(pruneguard_resolver::UnresolvedReason::is_benign)
+        })
         .count()
 }
 
@@ -444,12 +466,7 @@ fn script_references_bin(script: &str, bin_name: &str) -> bool {
                         // Some flags take a value (e.g. `--filter <ws>`).
                         if matches!(
                             token,
-                            "--filter"
-                                | "-F"
-                                | "--workspace"
-                                | "-w"
-                                | "--cwd"
-                                | "--prefix"
+                            "--filter" | "-F" | "--workspace" | "-w" | "--cwd" | "--prefix"
                         ) {
                             let _ = tokens.next(); // consume the flag value
                         }

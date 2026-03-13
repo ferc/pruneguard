@@ -1,0 +1,14 @@
+{
+  "name": "nx-project-graph-roots",
+  "sourceRoot": "src",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "outputPath": "dist",
+        "main": "src/index.ts",
+        "tsConfig": "tsconfig.json"
+      }
+    }
+  }
+}

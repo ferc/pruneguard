@@ -1,0 +1,23 @@
+{
+  "description": "VitePress config and theme entrypoints should be recognized, not flagged as dead code",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": ".vitepress/config.ts",
+      "note": "VitePress config -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": ".vitepress/theme/index.ts",
+      "note": "VitePress theme entry -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by VitePress config -- should be flagged"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "description": "export { foo as bar } tracking -- aliased re-exports keep the original export live",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "note": "All files are connected through the aliased re-export chain -- no unused files"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-export",
+      "subject": "src/foo.ts#foo",
+      "note": "foo is consumed through the bar alias re-export -- it must remain live"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "description": "Compatibility report should show Next.js as supported and Gatsby as unsupported signal",
+  "expectations": [
+    {
+      "assertion": "stat-present",
+      "field": "stats.frameworkCompatibility",
+      "note": "Framework compatibility report should be present listing supported and unsupported frameworks"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.detectedFrameworks",
+      "note": "Detected frameworks should list both next and gatsby signals"
+    }
+  ]
+}

@@ -138,3 +138,86 @@ offer:
 
 8. **No runtime dependency.** The binary runs without Node.js, simplifying CI
    container images and reducing install time.
+
+## Intentional Differences
+
+pruneguard intentionally diverges from both knip and dependency-cruiser in
+several design areas. These are not gaps -- they are deliberate choices.
+
+### vs knip
+
+| Area | knip behavior | pruneguard behavior | Rationale |
+|------|--------------|---------------------|-----------|
+| Finding identity | No stable finding IDs | Deterministic `id` per finding | Machine workflows need stable IDs for baseline diff, caching, and deduplication |
+| Confidence scoring | All findings are equally weighted | Each finding carries `high`, `medium`, or `low` confidence based on unresolved import pressure | Agents and CI should distinguish certain dead code from speculative results |
+| Type vs value liveness | Reports unused exports as a single category | Separates type-only and value liveness in unused-export analysis | TypeScript `import type` should not keep a value export alive |
+| Baseline format | Dedicated `.knip.json` baseline schema | Treats `baseline.json` as a prior `AnalysisReport` | Reusing the report format means any scan output can serve as a baseline without schema translation |
+| Ambient declarations | `.d.ts` files may be flagged | `.d.ts` files are categorically excluded from dead-code findings | Ambient declarations are project infrastructure, not dead code |
+| Script-level dependency usage | May miss script-only usage | Scans `package.json` scripts for direct dependency references before reporting unused deps | `"build": "tsc"` means `typescript` is used |
+| Runtime prefixes | Varies | `node:`, `bun:`, `deno:` prefixed specifiers are classified as externalized, not unresolved | Built-in module prefixes are not installation failures |
+
+### vs dependency-cruiser
+
+| Area | dependency-cruiser behavior | pruneguard behavior | Rationale |
+|------|----------------------------|---------------------|-----------|
+| Analysis scope | Dependency graph rules only | Unified dead-code detection + graph rules in one tool and one graph build | One tool, one graph, one invocation |
+| Rule output | Pass/fail per rule | Each finding carries confidence, evidence chain, and finding ID | Machine consumers need structured, granular output |
+| Config migration | N/A | `pruneguard migrate depcruise` reads `.dependency-cruiser.mjs` and produces pruneguard config | Lowers switching cost |
+| Ownership | Not supported | CODEOWNERS integration with cross-owner violation detection | Architecture governance includes team boundaries |
+
+## Performance Comparison Methodology
+
+pruneguard benchmarks are designed to be reproducible, fair, and auditable.
+
+### Setup
+
+1. **Corpora.** Performance is measured against canonical external repositories
+   defined in `benchmarks/corpora.toml`: knip, dependency-cruiser, oxc, and
+   claude-attack. Each corpus has a known minimum file and package count to
+   detect regressions.
+
+2. **Machine configuration.** Benchmarks are run on a single machine with
+   controlled background load. Results include the machine architecture and
+   OS version for reproducibility.
+
+3. **Warm vs cold.** Both cold (no cache, no daemon) and warm (daemon running,
+   cache populated) timings are collected. Cold timing uses
+   `--no-cache --daemon off`. Warm timing uses the default daemon mode after
+   a priming scan.
+
+### Measurement
+
+1. **Wall-clock time.** Primary metric. Measured via `hyperfine` (minimum 5
+   runs, warmup of 1 run for cold, 3 runs for warm).
+
+2. **Peak RSS.** Measured via `/usr/bin/time -l` (macOS) or
+   `/usr/bin/time -v` (Linux).
+
+3. **Determinism check.** After timing, two consecutive scans are compared
+   for finding-ID and ordering stability. Non-deterministic output would
+   invalidate the benchmark.
+
+### Comparison protocol
+
+When comparing against knip or dependency-cruiser:
+
+1. Both tools analyze the same corpus at the same git commit.
+2. Both tools run with their default configuration (no custom plugins or
+   rules) unless the comparison specifically tests a feature that requires
+   configuration.
+3. knip is run via `npx knip --reporter json`. dependency-cruiser is run
+   via `npx depcruise --output-type json src/`.
+4. pruneguard is run via `pruneguard --format json --no-cache --daemon off scan`.
+5. Timing excludes npm/npx startup overhead for the JS tools (measured
+   separately and noted).
+6. Results report: wall-clock time, peak RSS, number of findings, and
+   whether the tool completed without errors.
+
+### Reporting
+
+Benchmark results are stored in `benchmarks/results/` as JSON files with
+fields: `corpus`, `tool`, `version`, `commit`, `cold_ms`, `warm_ms`,
+`peak_rss_kb`, `findings_count`, `timestamp`, and `machine`.
+
+Results are not committed to the main branch -- they are generated locally
+and referenced in release notes when relevant.

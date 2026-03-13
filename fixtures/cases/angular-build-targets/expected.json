@@ -1,0 +1,23 @@
+{
+  "description": "Angular build targets from angular.json should be recognized as entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/main.ts",
+      "note": "Angular main entry -- referenced in angular.json build target"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/polyfills.ts",
+      "note": "Angular polyfills -- referenced in angular.json build target"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by Angular build config -- should be flagged"
+    }
+  ]
+}

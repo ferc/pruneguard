@@ -117,8 +117,9 @@ impl DaemonClient {
 
     /// Spawn a daemon process in the background.
     fn auto_start(project_root: &Path) -> Result<(), DaemonClientError> {
-        let exe = std::env::current_exe()
-            .map_err(|err| DaemonClientError::AutoStart(format!("cannot find executable: {err}")))?;
+        let exe = std::env::current_exe().map_err(|err| {
+            DaemonClientError::AutoStart(format!("cannot find executable: {err}"))
+        })?;
 
         let mut cmd = std::process::Command::new(exe);
         cmd.arg("daemon")
@@ -135,8 +136,7 @@ impl DaemonClient {
             cmd.process_group(0);
         }
 
-        cmd.spawn()
-            .map_err(|err| DaemonClientError::AutoStart(format!("spawn failed: {err}")))?;
+        cmd.spawn().map_err(|err| DaemonClientError::AutoStart(format!("spawn failed: {err}")))?;
 
         tracing::info!("auto-started daemon for {}", project_root.display());
         Ok(())
@@ -147,13 +147,11 @@ impl DaemonClient {
         &self,
         request: &DaemonRequest,
     ) -> Result<DaemonResponse, DaemonClientError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_io()
-            .build()
-            .map_err(|err| {
-                DaemonClientError::Protocol(std::io::Error::other(
-                    format!("failed to create tokio runtime: {err}"),
-                ))
+        let rt =
+            tokio::runtime::Builder::new_current_thread().enable_io().build().map_err(|err| {
+                DaemonClientError::Protocol(std::io::Error::other(format!(
+                    "failed to create tokio runtime: {err}"
+                )))
             })?;
         rt.block_on(self.send_request_async(request))
     }
@@ -176,22 +174,15 @@ impl DaemonClient {
 
         // Send request.
         let payload = serde_json::to_vec(request).expect("serialize request");
-        write_frame(&mut writer, &payload)
-            .await
-            .map_err(DaemonClientError::Protocol)?;
+        write_frame(&mut writer, &payload).await.map_err(DaemonClientError::Protocol)?;
 
         // Read response.
-        let data = read_frame(&mut reader)
-            .await
-            .map_err(DaemonClientError::Protocol)?
-            .ok_or_else(|| {
-                DaemonClientError::InvalidResponse("connection closed before response".to_string())
-            })?;
+        let data = read_frame(&mut reader).await.map_err(DaemonClientError::Protocol)?.ok_or_else(
+            || DaemonClientError::InvalidResponse("connection closed before response".to_string()),
+        )?;
 
-        let response: DaemonResponse =
-            serde_json::from_slice(&data).map_err(|err| {
-                DaemonClientError::InvalidResponse(format!("invalid JSON: {err}"))
-            })?;
+        let response: DaemonResponse = serde_json::from_slice(&data)
+            .map_err(|err| DaemonClientError::InvalidResponse(format!("invalid JSON: {err}")))?;
 
         Ok(response)
     }

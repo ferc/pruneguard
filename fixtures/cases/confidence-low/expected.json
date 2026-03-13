@@ -1,0 +1,16 @@
+{
+  "description": "Under high unresolved pressure (3+ unresolvable imports), findings should complete without panicking",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/lib.ts",
+      "note": "lib.ts is imported by index.ts -- it is reachable regardless of pressure"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.confidenceCounts",
+      "note": "Confidence counts must be present even under high unresolved pressure"
+    }
+  ]
+}

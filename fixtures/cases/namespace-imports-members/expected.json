@@ -1,0 +1,23 @@
+{
+  "description": "import * as ns; ns.foo marks foo as used -- only unaccessed members are unused",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-export",
+      "subject": "src/utils.ts#foo",
+      "note": "foo is accessed via utils.foo() -- it must be marked as used"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-export",
+      "subject": "src/utils.ts#bar",
+      "note": "bar is never accessed via the namespace -- it should be flagged as unused"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/utils.ts",
+      "note": "The file itself is imported via namespace import -- it is reachable"
+    }
+  ]
+}

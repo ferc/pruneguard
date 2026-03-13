@@ -47,9 +47,7 @@ impl InvalidationKind {
             return Some(Self::Manifest);
         }
         if file_name.starts_with("tsconfig")
-            && Path::new(file_name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+            && Path::new(file_name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
         {
             return Some(Self::Tsconfig);
         }
@@ -66,7 +64,11 @@ impl InvalidationKind {
     pub const fn requires_full_rebuild(self) -> bool {
         matches!(
             self,
-            Self::Manifest | Self::Tsconfig | Self::Codeowners | Self::Config | Self::SchemaMismatch
+            Self::Manifest
+                | Self::Tsconfig
+                | Self::Codeowners
+                | Self::Config
+                | Self::SchemaMismatch
         )
     }
 }
@@ -122,9 +124,8 @@ impl HotIndex {
 
     /// Milliseconds since the last successful build, or `u64::MAX` if never built.
     pub fn last_update_ms(&self) -> u64 {
-        self.last_build.map_or(u64::MAX, |t| {
-            u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
-        })
+        self.last_build
+            .map_or(u64::MAX, |t| u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX))
     }
 
     /// Number of nodes in the module graph, or 0 if not built.
@@ -160,9 +161,7 @@ impl HotIndex {
     /// Milliseconds since the last watcher event was processed, or `None` if
     /// no watcher events have been received.
     pub fn watcher_lag_ms(&self) -> Option<u64> {
-        self.last_watcher_event.map(|t| {
-            u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
-        })
+        self.last_watcher_event.map(|t| u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX))
     }
 
     /// Number of files pending invalidation.
@@ -303,10 +302,7 @@ impl HotIndex {
 
     /// Run a review against the current graph.
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    pub fn query_review(
-        &self,
-        base_ref: Option<&str>,
-    ) -> Result<serde_json::Value, IndexError> {
+    pub fn query_review(&self, base_ref: Option<&str>) -> Result<serde_json::Value, IndexError> {
         let _ = base_ref;
         // Stub: return a minimal review result.
         // Full implementation will use the existing review pipeline.
@@ -354,10 +350,7 @@ impl HotIndex {
 
     /// Evaluate targets for safe deletion.
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    pub fn query_safe_delete(
-        &self,
-        targets: &[String],
-    ) -> Result<serde_json::Value, IndexError> {
+    pub fn query_safe_delete(&self, targets: &[String]) -> Result<serde_json::Value, IndexError> {
         let _ = targets;
         Ok(serde_json::json!({
             "kind": "safeDeleteResult",
@@ -369,10 +362,7 @@ impl HotIndex {
 
     /// Generate a fix plan for targets.
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    pub fn query_fix_plan(
-        &self,
-        targets: &[String],
-    ) -> Result<serde_json::Value, IndexError> {
+    pub fn query_fix_plan(&self, targets: &[String]) -> Result<serde_json::Value, IndexError> {
         let _ = targets;
         Ok(serde_json::json!({
             "kind": "fixPlanResult",

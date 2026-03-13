@@ -1,0 +1,17 @@
+{
+  "description": "Turborepo task configuration should be recognized alongside package entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/index.ts",
+      "note": "Referenced as package main -- should be entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any config or import -- should be flagged"
+    }
+  ]
+}

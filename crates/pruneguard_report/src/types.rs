@@ -87,6 +87,12 @@ pub struct Finding {
     /// All applicable remediation action kinds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub action_kinds: Vec<RemediationActionKind>,
+    /// Trust-related notes for this finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_notes: Option<Vec<String>>,
+    /// Framework context relevant to this finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework_context: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
@@ -160,33 +166,80 @@ pub struct RemediationStep {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RemediationAction {
+    /// Unique identifier for this action.
     pub id: String,
+    /// The kind of remediation to perform.
     pub kind: RemediationActionKind,
+    /// Files or exports this action targets.
     pub targets: Vec<String>,
+    /// Human-readable rationale explaining why this action is needed.
     pub why: String,
+    /// Conditions that must be true before this action can be applied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preconditions: Vec<String>,
+    /// Ordered steps to execute.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<RemediationStep>,
+    /// Verification commands to run after applying the action.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verification: Vec<String>,
+    /// Risk level of this action.
     pub risk: RiskLevel,
+    /// Confidence in this action's correctness.
     pub confidence: FindingConfidence,
+    /// Ranking position within the plan (1-based, lower = do first).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rank: Option<usize>,
+    /// Phase this action belongs to (dead-code, architecture, governance).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// IDs of findings this action addresses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finding_ids: Vec<String>,
 }
 
 /// Fix plan report for agent-driven remediation workflows.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FixPlanReport {
+    /// The query targets that were searched for.
     pub query: Vec<String>,
+    /// Findings matched by the query.
     pub matched_findings: Vec<Finding>,
+    /// Ordered remediation actions (ranked: high confidence first, low blast radius first,
+    /// dead-code before architecture churn).
     pub actions: Vec<RemediationAction>,
+    /// Reasons why some findings could not produce actions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_by: Vec<String>,
+    /// Top-level verification steps to run after the entire plan is applied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verification_steps: Vec<String>,
+    /// Overall risk level (the maximum across all actions).
     pub risk_level: RiskLevel,
+    /// Overall confidence (the minimum across all matched findings).
     pub confidence: FindingConfidence,
+    /// Total number of actions in the plan.
+    pub total_actions: usize,
+    /// Number of actions that are high confidence.
+    pub high_confidence_actions: usize,
+    /// Summary of actions by phase.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phase_summary: Vec<FixPlanPhase>,
+}
+
+/// A phase in a fix plan, grouping related actions.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FixPlanPhase {
+    /// Phase name.
+    pub name: String,
+    /// Phase ordering number (lower = earlier).
+    pub order: usize,
+    /// Number of actions in this phase.
+    pub action_count: usize,
+    /// Description of what this phase addresses.
+    pub description: String,
 }
 
 /// Execution mode for daemon/oneshot distinction.
@@ -351,6 +404,15 @@ pub struct EntrypointInfo {
     pub profile: String,
     pub workspace: Option<String>,
     pub source: String,
+    /// Framework that contributed this entrypoint, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub framework: Option<String>,
+    /// Reason this entrypoint was detected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Whether this entrypoint was detected via heuristics.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heuristic: Option<bool>,
 }
 
 /// Performance statistics.
@@ -410,6 +472,24 @@ pub struct Stats {
     /// Lag of the file-system watcher in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watcher_lag_ms: Option<u64>,
+    /// Frameworks detected during analysis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frameworks_detected: Vec<String>,
+    /// Frameworks detected via heuristics (lower confidence).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub heuristic_frameworks: Vec<String>,
+    /// Number of entrypoints added by heuristic detection.
+    #[serde(default)]
+    pub heuristic_entrypoints: usize,
+    /// Compatibility warnings from framework detection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compatibility_warnings: Vec<String>,
+    /// Whether strict trust mode was applied.
+    #[serde(default)]
+    pub strict_trust_applied: bool,
+    /// Framework confidence breakdown.
+    #[serde(default)]
+    pub framework_confidence_counts: FrameworkConfidenceCounts,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -420,6 +500,15 @@ pub struct ConfidenceCounts {
     pub low: usize,
 }
 
+/// Breakdown of framework detection confidence levels.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameworkConfidenceCounts {
+    pub exact: usize,
+    pub heuristic: usize,
+    pub unsupported: usize,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnresolvedByReasonStats {
@@ -428,6 +517,9 @@ pub struct UnresolvedByReasonStats {
     pub tsconfig_path_miss: usize,
     pub exports_condition_miss: usize,
     pub externalized: usize,
+    /// Subpath not declared in a workspace package's `exports` map.
+    #[serde(default)]
+    pub workspace_exports_miss: usize,
 }
 
 /// Branch review report for CI/agent branch gating.
@@ -450,6 +542,9 @@ pub struct ReviewReport {
     /// Concise recommendations for the branch author.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<String>,
+    /// Machine-readable recommended next actions for agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended_actions: Vec<RecommendedAction>,
     /// Proposed remediation actions for blocking findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proposed_actions: Vec<RemediationAction>,
@@ -459,6 +554,50 @@ pub struct ReviewReport {
     /// Wall-clock latency in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
+    /// Compatibility warnings from framework detection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compatibility_warnings: Vec<String>,
+    /// Whether strict trust mode was applied.
+    #[serde(default)]
+    pub strict_trust_applied: bool,
+}
+
+/// A machine-readable recommended next action for an AI agent or CI system.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendedAction {
+    /// Machine-readable action kind.
+    pub kind: RecommendedActionKind,
+    /// Human-readable description of what to do.
+    pub description: String,
+    /// Priority rank (1 = most important).
+    pub priority: usize,
+    /// The pruneguard command to run, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Targets this action applies to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
+}
+
+/// Kind of recommended next action.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecommendedActionKind {
+    /// Run safe-delete on identified targets.
+    RunSafeDelete,
+    /// Run fix-plan for specific findings.
+    RunFixPlan,
+    /// Resolve blocking findings before merge.
+    ResolveBlocking,
+    /// Investigate unresolved specifier pressure.
+    FixResolverConfig,
+    /// Review advisory findings.
+    ReviewAdvisory,
+    /// Run a full-scope scan for higher confidence.
+    RunFullScope,
+    /// Branch is clean; no action required.
+    None,
 }
 
 /// Trust summary within a review report.
@@ -473,6 +612,9 @@ pub struct ReviewTrust {
     pub unresolved_pressure: f64,
     /// Confidence counts for new findings.
     pub confidence_counts: ConfidenceCounts,
+    /// Execution mode used for this analysis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<ExecutionMode>,
 }
 
 /// Safe-delete report for deletion approval workflows.
@@ -487,12 +629,37 @@ pub struct SafeDeleteReport {
     pub needs_review: Vec<SafeDeleteCandidate>,
     /// Targets that should not be deleted.
     pub blocked: Vec<SafeDeleteCandidate>,
-    /// Recommended deletion order (safe targets only).
+    /// Recommended deletion order (safe targets only, dependency-aware).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deletion_order: Vec<String>,
+    pub deletion_order: Vec<DeletionOrderEntry>,
     /// Supporting evidence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+}
+
+/// An entry in the dependency-aware deletion order.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionOrderEntry {
+    /// The target to delete.
+    pub target: String,
+    /// Position in the deletion sequence (1-based).
+    pub step: usize,
+    /// Why this target is at this position in the order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Explicit classification for a safe-delete candidate.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SafeDeleteClassification {
+    /// Target is safe to delete without further review.
+    Safe,
+    /// Target needs manual review before deletion.
+    NeedsReview,
+    /// Target must not be deleted.
+    Blocked,
 }
 
 /// A candidate in a safe-delete evaluation.
@@ -501,12 +668,17 @@ pub struct SafeDeleteReport {
 pub struct SafeDeleteCandidate {
     /// The target file or export.
     pub target: String,
+    /// Explicit classification for this candidate.
+    pub classification: SafeDeleteClassification,
     /// Confidence in the safety assessment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<FindingConfidence>,
     /// Reasons for the classification.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
+    /// Per-candidate evidence supporting the classification.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
 }
 
 impl AnalysisReport {
@@ -732,6 +904,51 @@ pub struct DaemonStatusReport {
     /// Absolute path to the project root the daemon is serving.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
+    /// Whether the hot index has been warmed (initial build complete).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_warm: Option<bool>,
+    /// Milliseconds since the last graph update.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_update_ms: Option<u64>,
+    /// Number of nodes in the module graph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_nodes: Option<usize>,
+    /// Number of edges in the module graph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_edges: Option<usize>,
+    /// Number of files being watched for changes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watched_files: Option<usize>,
+    /// Current generation (rebuild counter) of the index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    /// Milliseconds of watcher lag (time since last fs event was processed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_lag_ms: Option<u64>,
+    /// Number of files pending invalidation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_invalidations: Option<usize>,
+    /// Uptime of the daemon in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
+    /// Absolute path to the daemon binary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<String>,
+    /// Milliseconds the initial graph build took.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_build_ms: Option<u64>,
+    /// Milliseconds the last incremental rebuild took.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_rebuild_ms: Option<u64>,
+    /// Number of incremental rebuilds since daemon start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incremental_rebuilds: Option<u64>,
+    /// Total number of files invalidated since daemon start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_invalidations: Option<u64>,
+    /// Whether a config-level change is pending that requires full rebuild.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_change_pending: Option<bool>,
 }
 
 impl DaemonStatusReport {

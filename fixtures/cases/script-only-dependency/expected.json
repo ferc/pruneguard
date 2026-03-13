@@ -1,0 +1,11 @@
+{
+  "description": "Dependencies used only in package.json scripts should not be flagged as unused",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-dependency",
+      "subject": "typescript",
+      "note": "typescript is used via 'tsc' in scripts.build and scripts.check -- not unused"
+    }
+  ]
+}

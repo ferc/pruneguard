@@ -1,0 +1,41 @@
+{
+  "description": "Remix root, routes, and entry files should be recognized as entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/root.tsx",
+      "note": "Remix root component -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/routes/_index.tsx",
+      "note": "Remix index route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/routes/about.tsx",
+      "note": "Remix route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/entry.client.tsx",
+      "note": "Remix client entry -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/entry.server.tsx",
+      "note": "Remix server entry -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "app/unused.ts",
+      "note": "File not referenced by any Remix convention -- should be flagged"
+    }
+  ]
+}

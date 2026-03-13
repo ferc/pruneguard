@@ -1,0 +1,29 @@
+{
+  "description": "Playwright config and test files should be classified as test entrypoints, not flagged as dead code",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "playwright.config.ts",
+      "note": "Playwright config -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "tests/example.spec.ts",
+      "note": "Playwright test file -- should be classified as Test entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "e2e/login.spec.ts",
+      "note": "Playwright e2e test file -- should be classified as Test entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any test or config -- should be flagged"
+    }
+  ]
+}

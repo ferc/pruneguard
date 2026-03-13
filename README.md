@@ -6,18 +6,65 @@ Build one accurate repo graph, then answer many high-value questions cheaply:
 unused exports, unused files, unused dependencies, cycles, boundary violations,
 ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
 
-## Install
+## Why pruneguard
+
+| | pruneguard | knip | dependency-cruiser |
+|---|---|---|---|
+| **Engine** | Rust native binary | Node.js | Node.js |
+| Unused exports + files + deps | Yes | Yes | Partial |
+| Cycles + boundary rules | Yes | No / Yes | Yes / Yes |
+| Confidence scoring (high/medium/low) | Yes | No | No |
+| Branch review gate (`review`) | Built-in | Manual scripting | Manual scripting |
+| Safe-delete evaluation | Built-in | No | No |
+| Fix-plan remediation | Built-in | No | No |
+| Blast-radius analysis (`impact`) | Built-in | No | No |
+| Proof chains (`explain`) | Built-in | No | No |
+| SARIF output | Yes | No | No |
+| Deterministic ordering | Yes | No | Partial |
+| Config migration from competitors | Yes | N/A | N/A |
+
+**When to choose pruneguard:** You want a single tool that combines dead-code
+detection with graph-based architectural rules, produces machine-readable output
+with confidence scores, and ships commands (`review`, `safe-delete`, `fix-plan`)
+that CI pipelines and AI agents can consume directly.
+
+**When to choose knip:** You need broad framework plugin coverage (Angular,
+Gatsby, Storybook, etc.) and are primarily focused on unused-code detection
+without architectural boundary enforcement.
+
+**When to choose dependency-cruiser:** You need a mature rule authoring
+ecosystem for dependency validation and do not need unused-code detection.
+
+See [docs/competitive.md](docs/competitive.md) for the full comparison.
+
+## Quick start
 
 ```sh
+# Install (auto-selects the correct native binary for your platform)
 npm install pruneguard
+
+# Run your first scan
+npx pruneguard scan
+
+# Generate a config file with editor autocomplete
+npx pruneguard init
+
+# Review a branch before merging
+npx pruneguard --changed-since origin/main review
+
+# Check if files are safe to delete
+npx pruneguard safe-delete src/legacy/old-widget.ts
+
+# Get a remediation plan
+npx pruneguard fix-plan src/legacy/old-widget.ts
 ```
 
-The `pruneguard` package automatically installs the correct platform-specific
-native binary. No Rust toolchain, no compilation, no native addons -- just
-`npm install` and go.
+No Rust toolchain, no compilation, no native addons -- just `npm install`
+and go. Requires Node.js >= 18. Supported: macOS (ARM64, x64), Linux
+(x64/ARM64, glibc and musl), Windows (x64, ARM64).
 
-Supported platforms: macOS (ARM64, x64), Linux (x64/ARM64, glibc and musl),
-Windows (x64, ARM64). Requires Node.js >= 18.
+See [docs/getting-started.md](docs/getting-started.md) for a full
+install-to-first-result walkthrough.
 
 ## How it works
 
@@ -72,6 +119,9 @@ pruneguard debug runtime                        # Print binary/platform info
 # Daemon
 pruneguard daemon start|stop|status      # Manage the background daemon
 
+# Migration
+pruneguard migrate knip [file]           # Convert knip config
+pruneguard migrate depcruise [file]      # Convert dependency-cruiser config
 ```
 
 ### Global flags
@@ -145,6 +195,7 @@ pruneguard debug runtime
 ## JS API
 
 Every function spawns the native binary and returns parsed, typed results.
+See [docs/js-api.md](docs/js-api.md) for the complete API reference.
 
 ### scan
 
@@ -251,6 +302,8 @@ import {
   loadConfig,
   schemaPath,
   scanDot,
+  migrateKnip,
+  migrateDepcruise,
   resolutionInfo,
   debugResolve,
   debugEntrypoints,
@@ -277,6 +330,14 @@ console.log(schemaPath());
 // Graphviz DOT output
 const dot = await scanDot();
 
+// Migrate from knip
+const knipMigration = await migrateKnip();
+console.log(knipMigration.config, knipMigration.warnings);
+
+// Migrate from dependency-cruiser
+const dcMigration = await migrateDepcruise();
+console.log(dcMigration.config, dcMigration.warnings);
+
 // Binary resolution diagnostics
 const info = resolutionInfo();
 console.log(info.source, info.platform);
@@ -298,6 +359,8 @@ console.log(info.source, info.platform);
 | `binaryPath` | `() => string` | Path to the resolved native binary |
 | `run` | `(args, options?) => Promise<CommandResult>` | Run arbitrary CLI args |
 | `scanDot` | `(options?) => Promise<string>` | Graphviz DOT output |
+| `migrateKnip` | `(options?) => Promise<MigrationOutput>` | Migrate from knip config |
+| `migrateDepcruise` | `(options?) => Promise<MigrationOutput>` | Migrate from dependency-cruiser config |
 
 ### Error handling
 
@@ -324,6 +387,11 @@ try {
 ```
 
 ## GitHub Actions
+
+pruneguard includes a reusable [GitHub Action](.github/actions/pruneguard/)
+for CI integration. See [docs/ci-integration.md](docs/ci-integration.md) for
+complete setup guides including baseline workflows, SARIF, and monorepo
+strategies.
 
 ### Branch review gate
 
@@ -493,6 +561,22 @@ generate a starter config.
 ```
 
 See [docs/config.md](docs/config.md) for the full configuration reference.
+
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install-to-first-result walkthrough |
+| [Configuration](docs/config.md) | Full configuration reference |
+| [CI integration](docs/ci-integration.md) | GitHub Actions, baseline workflows, SARIF |
+| [JS API reference](docs/js-api.md) | Complete typed API documentation |
+| [Agent integration](docs/agent-integration.md) | AI agent workflows with review + safe-delete + fix-plan |
+| [Recipes](docs/recipes.md) | Copy-paste automation examples |
+| [Migration](docs/migration.md) | Migrate from knip or dependency-cruiser |
+| [Architecture](docs/architecture.md) | Internal design and pipeline stages |
+| [Competitive positioning](docs/competitive.md) | Detailed comparison with knip and dependency-cruiser |
+| [Performance](docs/performance.md) | Performance model, cache behavior, benchmarking |
+| [Benchmarks](docs/benchmarks.md) | Target latencies and benchmark methodology |
 
 ## Development
 

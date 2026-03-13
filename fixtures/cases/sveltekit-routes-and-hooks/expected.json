@@ -1,0 +1,41 @@
+{
+  "description": "SvelteKit routes and hooks files should be recognized as entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/routes/+page.svelte",
+      "note": "SvelteKit page route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/routes/+layout.svelte",
+      "note": "SvelteKit layout -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/routes/api/+server.ts",
+      "note": "SvelteKit API route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/hooks.server.ts",
+      "note": "SvelteKit server hooks -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/hooks.client.ts",
+      "note": "SvelteKit client hooks -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any SvelteKit convention -- should be flagged"
+    }
+  ]
+}

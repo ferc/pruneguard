@@ -356,8 +356,7 @@ fn collect_namespace_usage(source: &str, alias: &str) -> NamespaceUsage {
             // The namespace passed as an argument: `fn(alias)` or `fn(alias,`
             // or assigned: `x = alias` — keeps entire module live.
             Some(b')' | b',') => {
-                let after_boundary =
-                    after.is_none_or(|byte| !is_identifier_byte(byte));
+                let after_boundary = after.is_none_or(|byte| !is_identifier_byte(byte));
                 if after_boundary {
                     usage.dynamic = true;
                     index += alias_bytes.len();
@@ -369,10 +368,7 @@ fn collect_namespace_usage(source: &str, alias: &str) -> NamespaceUsage {
                 // `.` or `[`), it might be passed around, so mark as dynamic.
                 let after_boundary =
                     after.is_none_or(|byte| !is_identifier_byte(byte) && byte != b'.');
-                if after_boundary
-                    && after != Some(b':')
-                    && !matches!(before, Some(b'.' | b'='))
-                {
+                if after_boundary && after != Some(b':') && !matches!(before, Some(b'.' | b'=')) {
                     // Check if this is in an import/export context (which we already
                     // handle via the AST) by looking at the surrounding context.
                     // If not, it's a dynamic use.

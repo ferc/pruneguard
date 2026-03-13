@@ -1,0 +1,9 @@
+{
+  "name": "cypress-config-and-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "cypress": "13.0.0"
+  }
+}

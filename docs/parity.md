@@ -29,6 +29,26 @@ Known intentional differences:
 - `pruneguard` checks package.json scripts for direct dependency usage before reporting unused dependencies
 - confidence scoring uses three tiers (high, medium, low) to indicate finding trustworthiness
 
+## Stale representative targets
+
+Each corpus in `benchmarks/corpora.toml` defines `representative_targets` --
+file paths used for target-dependent commands (`impact`, `explain`,
+`safe-delete`, `fix-plan`). Because corpora are external repositories that
+evolve independently, these paths may become stale (renamed or deleted).
+
+The parity harness handles this deterministically:
+
+1. If the configured target exists on disk, it is used as-is.
+2. If the target does not exist, the harness runs a scan to discover the
+   current file inventory and picks the first `.ts`/`.tsx`/`.mjs`/`.js`
+   source file as a deterministic fallback.
+3. A parity note is printed to stderr indicating the fallback.
+4. If no fallback can be found, target-dependent tests for that corpus are
+   skipped rather than failing.
+
+This prevents stale paths from breaking CI while still exercising the
+target-dependent commands on real corpora.
+
 Run the current real-repo harness with:
 
 ```sh

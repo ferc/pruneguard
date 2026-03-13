@@ -1,0 +1,9 @@
+{
+  "name": "confidence-levels",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "unknown-dynamic-loader": "1.0.0"
+  }
+}

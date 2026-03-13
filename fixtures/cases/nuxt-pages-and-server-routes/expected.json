@@ -1,0 +1,41 @@
+{
+  "description": "Nuxt pages, server routes, and auto-imported composables should be recognized as entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "pages/index.vue",
+      "note": "Nuxt page component -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "pages/about.vue",
+      "note": "Nuxt page component -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "server/api/hello.ts",
+      "note": "Nuxt server API route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "server/routes/health.ts",
+      "note": "Nuxt server route -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "composables/useAuth.ts",
+      "note": "Nuxt auto-imported composable -- should not be flagged"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File outside any Nuxt convention directory -- should be flagged"
+    }
+  ]
+}

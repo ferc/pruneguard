@@ -1,0 +1,9 @@
+{
+  "name": "unsupported-config-reader-lowers-confidence",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "next": "14.0.0",
+    "react": "18.0.0"
+  }
+}

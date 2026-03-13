@@ -1,0 +1,9 @@
+{
+  "name": "sveltekit-routes-and-hooks",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "@sveltejs/kit": "2.0.0",
+    "svelte": "4.0.0"
+  }
+}

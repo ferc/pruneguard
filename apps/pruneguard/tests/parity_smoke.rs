@@ -14,6 +14,17 @@ struct Corpus {
     representative_targets: Vec<String>,
 }
 
+#[derive(Debug)]
+struct FrameworkCorpus {
+    name: String,
+    framework: String,
+    source_type: String,
+    local_path: String,
+    expected_trust: String,
+    representative_target: String,
+    known_warnings: Vec<String>,
+}
+
 fn run_corpus_command(corpus: &Corpus, extra_args: &[&str]) -> std::process::Output {
     let mut args = vec!["--format", "json", "--no-cache", "--no-baseline"];
     args.extend_from_slice(extra_args);
@@ -28,13 +39,27 @@ fn run_corpus_json(corpus: &Corpus, extra_args: &[&str]) -> Value {
     let output = run_corpus_command(corpus, extra_args);
     assert!(
         output.status.success() || output.status.code() == Some(1),
-        "corpus `{}` command {:?} failed\nstdout:\n{}\nstderr:\n{}",
+        "[product issue] corpus `{}` command {:?} failed\nstdout:\n{}\nstderr:\n{}",
         corpus.name,
         extra_args,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
     serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
+}
+
+/// Run a framework corpus command from the resolved local_path.
+fn run_framework_corpus_command(
+    working_dir: &std::path::Path,
+    extra_args: &[&str],
+) -> std::process::Output {
+    let mut args = vec!["--format", "json", "--no-cache", "--no-baseline"];
+    args.extend_from_slice(extra_args);
+    Command::new(env!("CARGO_BIN_EXE_pruneguard"))
+        .current_dir(working_dir)
+        .args(&args)
+        .output()
+        .expect("pruneguard should run")
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +71,11 @@ fn run_corpus_json(corpus: &Corpus, extra_args: &[&str]) -> Value {
 fn corpora_scan_without_panics() {
     for corpus in load_corpora() {
         if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
@@ -65,30 +95,28 @@ fn corpora_scan_without_panics() {
 
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` failed\nstdout:\n{}\nstderr:\n{}",
+            "[product issue] corpus `{}` scan failed\nstdout:\n{}\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
 
-        let report: Value =
-            serde_json::from_slice(&output.stdout).expect("scan should emit valid json");
+        let report: Value = serde_json::from_slice(&output.stdout)
+            .expect("[product issue] scan should emit valid json");
         assert!(
             report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= corpus.min_files,
-            "corpus `{}` discovered too few files",
+            "[product issue] corpus `{}` discovered too few files",
             corpus.name
         );
         assert!(
             report["summary"]["totalPackages"].as_u64().unwrap_or(0) >= corpus.min_packages,
-            "corpus `{}` discovered too few packages",
+            "[product issue] corpus `{}` discovered too few packages",
             corpus.name
         );
         assert!(
             report["stats"]["parityWarnings"].is_null()
-                || report["stats"]["parityWarnings"]
-                    .as_array()
-                    .is_some_and(Vec::is_empty),
-            "corpus `{}` reported parity warnings",
+                || report["stats"]["parityWarnings"].as_array().is_some_and(Vec::is_empty),
+            "[product issue] corpus `{}` reported parity warnings",
             corpus.name
         );
     }
@@ -103,6 +131,11 @@ fn corpora_scan_without_panics() {
 fn corpora_scan_deterministic_ordering() {
     for corpus in load_corpora() {
         if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
@@ -116,13 +149,13 @@ fn corpora_scan_deterministic_ordering() {
             assert_eq!(
                 ff.len(),
                 sf.len(),
-                "corpus `{}` produced different finding counts across runs",
+                "[product issue] corpus `{}` produced different finding counts across runs",
                 corpus.name
             );
             for (idx, (a, b)) in ff.iter().zip(sf.iter()).enumerate() {
                 assert_eq!(
                     a["id"], b["id"],
-                    "corpus `{}` finding at position {idx} has different ID",
+                    "[product issue] corpus `{}` finding at position {idx} has different ID",
                     corpus.name
                 );
             }
@@ -135,13 +168,13 @@ fn corpora_scan_deterministic_ordering() {
             assert_eq!(
                 fe.len(),
                 se.len(),
-                "corpus `{}` produced different entrypoint counts",
+                "[product issue] corpus `{}` produced different entrypoint counts",
                 corpus.name
             );
             for (idx, (a, b)) in fe.iter().zip(se.iter()).enumerate() {
                 assert_eq!(
                     a["source"], b["source"],
-                    "corpus `{}` entrypoint at position {idx} has different source",
+                    "[product issue] corpus `{}` entrypoint at position {idx} has different source",
                     corpus.name
                 );
             }
@@ -154,7 +187,7 @@ fn corpora_scan_deterministic_ordering() {
             assert_eq!(
                 ff.len(),
                 sf.len(),
-                "corpus `{}` produced different file inventory counts",
+                "[product issue] corpus `{}` produced different file inventory counts",
                 corpus.name
             );
         }
@@ -170,6 +203,11 @@ fn corpora_scan_deterministic_ordering() {
 fn corpora_scan_stable_trust_summary() {
     for corpus in load_corpora() {
         if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
@@ -179,17 +217,17 @@ fn corpora_scan_stable_trust_summary() {
         let stats = &report["stats"];
         assert!(
             stats["partialScope"].as_bool().is_some(),
-            "corpus `{}` missing partialScope stat",
+            "[product issue] corpus `{}` missing partialScope stat",
             corpus.name
         );
         assert!(
             stats["confidenceCounts"].is_object(),
-            "corpus `{}` missing confidenceCounts",
+            "[product issue] corpus `{}` missing confidenceCounts",
             corpus.name
         );
         assert!(
             stats["unresolvedSpecifiers"].as_u64().is_some(),
-            "corpus `{}` missing unresolvedSpecifiers",
+            "[product issue] corpus `{}` missing unresolvedSpecifiers",
             corpus.name
         );
     }
@@ -203,15 +241,22 @@ fn corpora_scan_stable_trust_summary() {
 #[ignore = "real-repo smoke is opt-in"]
 fn corpora_impact_without_panics() {
     for corpus in load_corpora() {
-        if !corpus.path.exists() || corpus.representative_targets.is_empty() {
+        if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
-        let target = &corpus.representative_targets[0];
-        let output = run_corpus_command(&corpus, &["impact", target]);
+        let Some(target) = resolve_representative_target(&corpus) else {
+            continue;
+        };
+        let output = run_corpus_command(&corpus, &["impact", &target]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` impact on `{target}` failed\nstderr:\n{}",
+            "[product issue] corpus `{}` impact on `{target}` failed\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stderr),
         );
@@ -220,7 +265,7 @@ fn corpora_impact_without_panics() {
         if report != Value::Null {
             assert!(
                 report["affectedEntrypoints"].as_array().is_some(),
-                "corpus `{}` impact should return affectedEntrypoints",
+                "[product issue] corpus `{}` impact should return affectedEntrypoints",
                 corpus.name
             );
         }
@@ -235,15 +280,22 @@ fn corpora_impact_without_panics() {
 #[ignore = "real-repo smoke is opt-in"]
 fn corpora_explain_without_panics() {
     for corpus in load_corpora() {
-        if !corpus.path.exists() || corpus.representative_targets.is_empty() {
+        if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
-        let target = &corpus.representative_targets[0];
-        let output = run_corpus_command(&corpus, &["explain", target]);
+        let Some(target) = resolve_representative_target(&corpus) else {
+            continue;
+        };
+        let output = run_corpus_command(&corpus, &["explain", &target]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` explain on `{target}` failed\nstderr:\n{}",
+            "[product issue] corpus `{}` explain on `{target}` failed\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stderr),
         );
@@ -252,7 +304,7 @@ fn corpora_explain_without_panics() {
         if report != Value::Null {
             assert!(
                 report["queryKind"].as_str().is_some(),
-                "corpus `{}` explain should return queryKind",
+                "[product issue] corpus `{}` explain should return queryKind",
                 corpus.name
             );
         }
@@ -268,13 +320,18 @@ fn corpora_explain_without_panics() {
 fn corpora_review_without_panics() {
     for corpus in load_corpora() {
         if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
         let output = run_corpus_command(&corpus, &["review"]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` review failed\nstdout:\n{}\nstderr:\n{}",
+            "[product issue] corpus `{}` review failed\nstdout:\n{}\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
@@ -285,17 +342,17 @@ fn corpora_review_without_panics() {
             // Trust summary fields must be present.
             assert!(
                 report["trust"]["fullScope"].as_bool().is_some(),
-                "corpus `{}` review should have trust.fullScope",
+                "[product issue] corpus `{}` review should have trust.fullScope",
                 corpus.name
             );
             assert!(
                 report["trust"]["confidenceCounts"].is_object(),
-                "corpus `{}` review should have trust.confidenceCounts",
+                "[product issue] corpus `{}` review should have trust.confidenceCounts",
                 corpus.name
             );
             assert!(
                 report["trust"]["unresolvedPressure"].is_number(),
-                "corpus `{}` review should have trust.unresolvedPressure",
+                "[product issue] corpus `{}` review should have trust.unresolvedPressure",
                 corpus.name
             );
         }
@@ -310,15 +367,22 @@ fn corpora_review_without_panics() {
 #[ignore = "real-repo smoke is opt-in"]
 fn corpora_safe_delete_without_panics() {
     for corpus in load_corpora() {
-        if !corpus.path.exists() || corpus.representative_targets.is_empty() {
+        if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
-        let target = &corpus.representative_targets[0];
-        let output = run_corpus_command(&corpus, &["safe-delete", target]);
+        let Some(target) = resolve_representative_target(&corpus) else {
+            continue;
+        };
+        let output = run_corpus_command(&corpus, &["safe-delete", &target]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` safe-delete on `{target}` failed\nstderr:\n{}",
+            "[product issue] corpus `{}` safe-delete on `{target}` failed\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stderr),
         );
@@ -327,7 +391,7 @@ fn corpora_safe_delete_without_panics() {
         if report != Value::Null {
             assert!(
                 report["targets"].as_array().is_some(),
-                "corpus `{}` safe-delete should return targets",
+                "[product issue] corpus `{}` safe-delete should return targets",
                 corpus.name
             );
         }
@@ -342,15 +406,22 @@ fn corpora_safe_delete_without_panics() {
 #[ignore = "real-repo smoke is opt-in"]
 fn corpora_fix_plan_without_panics() {
     for corpus in load_corpora() {
-        if !corpus.path.exists() || corpus.representative_targets.is_empty() {
+        if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
-        let target = &corpus.representative_targets[0];
-        let output = run_corpus_command(&corpus, &["fix-plan", target]);
+        let Some(target) = resolve_representative_target(&corpus) else {
+            continue;
+        };
+        let output = run_corpus_command(&corpus, &["fix-plan", &target]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` fix-plan on `{target}` failed\nstderr:\n{}",
+            "[product issue] corpus `{}` fix-plan on `{target}` failed\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stderr),
         );
@@ -358,8 +429,9 @@ fn corpora_fix_plan_without_panics() {
         let report: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
         if report != Value::Null {
             assert!(
-                report["query"].as_array().is_some() || report["matchedFindings"].as_array().is_some(),
-                "corpus `{}` fix-plan should return query or matchedFindings",
+                report["query"].as_array().is_some()
+                    || report["matchedFindings"].as_array().is_some(),
+                "[product issue] corpus `{}` fix-plan should return query or matchedFindings",
                 corpus.name
             );
         }
@@ -375,13 +447,18 @@ fn corpora_fix_plan_without_panics() {
 fn corpora_suggest_rules_without_panics() {
     for corpus in load_corpora() {
         if !corpus.path.exists() {
+            eprintln!(
+                "[corpus issue] skipping `{}`: path {} does not exist",
+                corpus.name,
+                corpus.path.display()
+            );
             continue;
         }
 
         let output = run_corpus_command(&corpus, &["suggest-rules"]);
         assert!(
             output.status.success() || output.status.code() == Some(1),
-            "corpus `{}` suggest-rules failed\nstdout:\n{}\nstderr:\n{}",
+            "[product issue] corpus `{}` suggest-rules failed\nstdout:\n{}\nstderr:\n{}",
             corpus.name,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
@@ -391,9 +468,142 @@ fn corpora_suggest_rules_without_panics() {
         if report != Value::Null {
             assert!(
                 report["suggestedRules"].as_array().is_some(),
-                "corpus `{}` suggest-rules should return suggestedRules",
+                "[product issue] corpus `{}` suggest-rules should return suggestedRules",
                 corpus.name
             );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Framework corpora: scan, trust-level validation, no panics
+// ---------------------------------------------------------------------------
+
+#[test]
+#[ignore = "framework corpora smoke is opt-in"]
+fn framework_corpora_scan_without_panics() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let corpora = load_framework_corpora();
+
+    for fc in &corpora {
+        if fc.local_path.is_empty() {
+            eprintln!("[corpus issue] skipping `{}`: local_path is empty (needs setup)", fc.name);
+            continue;
+        }
+
+        // Resolve local_path relative to the pruneguard workspace root.
+        let corpus_dir = manifest_dir.join("../../").join(&fc.local_path);
+        let corpus_dir = match corpus_dir.canonicalize() {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!(
+                    "[corpus issue] skipping `{}`: resolved path {} does not exist",
+                    fc.name,
+                    corpus_dir.display()
+                );
+                continue;
+            }
+        };
+
+        // Run scan.
+        let output = run_framework_corpus_command(&corpus_dir, &["scan", "."]);
+
+        // Distinguish product panics from expected failures.
+        let stderr_text = String::from_utf8_lossy(&output.stderr);
+        if stderr_text.contains("panicked") || stderr_text.contains("SIGSEGV") {
+            panic!(
+                "[product issue] corpus `{}` (framework: {}) panicked during scan\nstderr:\n{}",
+                fc.name, fc.framework, stderr_text
+            );
+        }
+
+        assert!(
+            output.status.success() || output.status.code() == Some(1),
+            "[product issue] corpus `{}` scan exited with unexpected code {:?}\nstderr:\n{}",
+            fc.name,
+            output.status.code(),
+            stderr_text,
+        );
+
+        // Must emit valid JSON.
+        let report: Value = match serde_json::from_slice(&output.stdout) {
+            Ok(v) => v,
+            Err(e) => {
+                panic!(
+                    "[product issue] corpus `{}` scan emitted invalid JSON: {e}\nstdout (first 500 bytes):\n{}",
+                    fc.name,
+                    String::from_utf8_lossy(&output.stdout[..output.stdout.len().min(500)])
+                );
+            }
+        };
+
+        // Trust-level expectations.
+        match fc.expected_trust.as_str() {
+            "high" => {
+                // High trust: no blocking false positives (severity "error" findings
+                // with confidence < "high" would be false positives).
+                if let Some(findings) = report["findings"].as_array() {
+                    let blocking_fps: Vec<_> = findings
+                        .iter()
+                        .filter(|f| {
+                            f["severity"].as_str() == Some("error")
+                                && f["confidence"].as_str() != Some("high")
+                        })
+                        .collect();
+                    assert!(
+                        blocking_fps.is_empty(),
+                        "[product issue] corpus `{}` (expected_trust=high) has {} blocking false positive(s): {:?}",
+                        fc.name,
+                        blocking_fps.len(),
+                        blocking_fps.iter().map(|f| &f["id"]).collect::<Vec<_>>()
+                    );
+                }
+            }
+            "medium" => {
+                // Medium trust: warnings are advisory only -- no error-severity findings
+                // that are NOT in the known_warnings list.
+                if let Some(findings) = report["findings"].as_array() {
+                    let unexpected_errors: Vec<_> = findings
+                        .iter()
+                        .filter(|f| {
+                            f["severity"].as_str() == Some("error")
+                                && !fc.known_warnings.iter().any(|kw| {
+                                    f["ruleId"]
+                                        .as_str()
+                                        .is_some_and(|rid| rid.contains(kw.as_str()))
+                                })
+                        })
+                        .collect();
+                    assert!(
+                        unexpected_errors.is_empty(),
+                        "[product issue] corpus `{}` (expected_trust=medium) has {} unexpected error(s): {:?}",
+                        fc.name,
+                        unexpected_errors.len(),
+                        unexpected_errors.iter().map(|f| &f["id"]).collect::<Vec<_>>()
+                    );
+                }
+            }
+            "low" => {
+                // Low trust: compatibility warnings must be present (we expect known issues).
+                if !fc.known_warnings.is_empty() {
+                    let has_any_warning =
+                        report["findings"].as_array().is_some_and(|findings| !findings.is_empty())
+                            || report["stats"]["parityWarnings"]
+                                .as_array()
+                                .is_some_and(|pw| !pw.is_empty());
+                    assert!(
+                        has_any_warning,
+                        "[product issue] corpus `{}` (expected_trust=low) expected compatibility warnings but found none",
+                        fc.name
+                    );
+                }
+            }
+            other => {
+                eprintln!(
+                    "[corpus issue] corpus `{}` has unknown expected_trust `{other}`, skipping trust check",
+                    fc.name
+                );
+            }
         }
     }
 }
@@ -406,6 +616,74 @@ fn load_corpora() -> Vec<Corpus> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/corpora.toml");
     let content = fs::read_to_string(path).expect("corpora manifest should exist");
     parse_corpora(&content)
+}
+
+fn load_framework_corpora() -> Vec<FrameworkCorpus> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/framework_corpora.toml");
+    let content = fs::read_to_string(path).expect("framework_corpora manifest should exist");
+    parse_framework_corpora(&content)
+}
+
+/// Resolve the representative target for a corpus. If the configured target
+/// exists on disk, return it as-is. If the target is stale (file moved or
+/// deleted), fall back to a deterministic alternative discovered from the
+/// current scan inventory, and print a parity note to stderr.
+///
+/// Returns `None` only when no fallback can be found (the test should skip
+/// target-dependent assertions in that case).
+fn resolve_representative_target(corpus: &Corpus) -> Option<String> {
+    if corpus.representative_targets.is_empty() {
+        return None;
+    }
+
+    let target = &corpus.representative_targets[0];
+
+    // Fast path: target still exists on disk.
+    if corpus.path.join(target).exists() {
+        return Some(target.clone());
+    }
+
+    // Target is stale. Run a scan to discover the current file inventory
+    // and pick the first .ts/.mjs/.js source file deterministically.
+    eprintln!(
+        "[parity] corpus `{}`: representative target `{target}` is stale, \
+         searching scan inventory for fallback",
+        corpus.name
+    );
+
+    let report = run_corpus_json(corpus, &["scan"]);
+    let files = report["inventories"]["files"].as_array();
+
+    let fallback = files.and_then(|file_list| {
+        file_list.iter().find_map(|entry| {
+            let path = entry["path"].as_str()?;
+            if path.ends_with(".ts")
+                || path.ends_with(".tsx")
+                || path.ends_with(".mjs")
+                || path.ends_with(".js")
+            {
+                Some(path.to_string())
+            } else {
+                None
+            }
+        })
+    });
+
+    if let Some(ref fb) = fallback {
+        eprintln!(
+            "[parity] corpus `{}`: falling back to `{fb}` (original: `{target}`)",
+            corpus.name
+        );
+    } else {
+        eprintln!(
+            "[parity] corpus `{}`: no fallback found for stale target `{target}`, \
+             skipping target-dependent tests",
+            corpus.name
+        );
+    }
+
+    fallback
 }
 
 fn parse_corpora(content: &str) -> Vec<Corpus> {
@@ -446,6 +724,57 @@ fn parse_corpora(content: &str) -> Vec<Corpus> {
             "min_files" => corpus.min_files = value.parse().unwrap_or(0),
             "min_packages" => corpus.min_packages = value.parse().unwrap_or(0),
             "representative_targets" => corpus.representative_targets = parse_array(value),
+            _ => {}
+        }
+    }
+
+    if let Some(corpus) = current {
+        corpora.push(corpus);
+    }
+
+    corpora
+}
+
+fn parse_framework_corpora(content: &str) -> Vec<FrameworkCorpus> {
+    let mut corpora = Vec::new();
+    let mut current = None::<FrameworkCorpus>;
+
+    for line in content.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "[[corpus]]" {
+            if let Some(corpus) = current.take() {
+                corpora.push(corpus);
+            }
+            current = Some(FrameworkCorpus {
+                name: String::new(),
+                framework: String::new(),
+                source_type: String::new(),
+                local_path: String::new(),
+                expected_trust: String::new(),
+                representative_target: String::new(),
+                known_warnings: Vec::new(),
+            });
+            continue;
+        }
+
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = raw_value.trim();
+        let Some(corpus) = current.as_mut() else {
+            continue;
+        };
+        match key {
+            "name" => corpus.name = parse_string(value),
+            "framework" => corpus.framework = parse_string(value),
+            "source_type" => corpus.source_type = parse_string(value),
+            "local_path" => corpus.local_path = parse_string(value),
+            "expected_trust" => corpus.expected_trust = parse_string(value),
+            "representative_target" => corpus.representative_target = parse_string(value),
+            "known_warnings" => corpus.known_warnings = parse_array(value),
             _ => {}
         }
     }

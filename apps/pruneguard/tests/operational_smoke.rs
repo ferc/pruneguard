@@ -316,7 +316,8 @@ fn oneshot_scan_produces_same_findings_as_repeated_run() {
     let root = temp_dir("oneshot-equiv");
     copy_tree(&fixture_root("unused-file-basic"), &root);
 
-    let first = run_pruneguard_json(&root, &["--format", "json", "--no-cache", "--no-baseline", "scan"]);
+    let first =
+        run_pruneguard_json(&root, &["--format", "json", "--no-cache", "--no-baseline", "scan"]);
     let second =
         run_pruneguard_json(&root, &["--format", "json", "--no-cache", "--no-baseline", "scan"]);
 
@@ -360,10 +361,8 @@ fn changed_since_with_baseline_suppresses_old_findings() {
     run(&root, &["git", "add", "."]);
     run(&root, &["git", "commit", "-m", "add new-unused"]);
 
-    let report = run_pruneguard_json(
-        &root,
-        &["--format", "json", "--changed-since", "HEAD~1", "scan"],
-    );
+    let report =
+        run_pruneguard_json(&root, &["--format", "json", "--changed-since", "HEAD~1", "scan"]);
 
     // The baseline should suppress old findings (src/unused.ts).
     assert_eq!(report["stats"]["baselineApplied"].as_bool(), Some(true));
@@ -372,9 +371,7 @@ fn changed_since_with_baseline_suppresses_old_findings() {
     // The new file should still appear in changed-since scope.
     // The original unused.ts should be suppressed by baseline.
     assert!(
-        !findings
-            .iter()
-            .any(|f| f["subject"] == "src/unused.ts"),
+        !findings.iter().any(|f| f["subject"] == "src/unused.ts"),
         "baseline should suppress old unused.ts finding"
     );
 }
@@ -390,17 +387,12 @@ fn scan_with_baseline_auto_discovers_and_suppresses() {
 
     let first = run_pruneguard_json(&root, &["--format", "json", "--no-cache", "scan"]);
     assert!(
-        first["findings"]
-            .as_array()
-            .is_some_and(|arr| !arr.is_empty()),
+        first["findings"].as_array().is_some_and(|arr| !arr.is_empty()),
         "first scan should have findings"
     );
 
-    fs::write(
-        root.join("baseline.json"),
-        serde_json::to_vec_pretty(&first).expect("serialize"),
-    )
-    .expect("write baseline");
+    fs::write(root.join("baseline.json"), serde_json::to_vec_pretty(&first).expect("serialize"))
+        .expect("write baseline");
 
     let second = run_pruneguard_json(&root, &["--format", "json", "--no-cache", "scan"]);
     assert_eq!(
@@ -454,9 +446,7 @@ fn fix_plan_for_unused_file_produces_delete_action() {
 
     // verificationSteps should be present.
     assert!(
-        report["verificationSteps"]
-            .as_array()
-            .is_some_and(|v| !v.is_empty()),
+        report["verificationSteps"].as_array().is_some_and(|v| !v.is_empty()),
         "fix-plan should have verification steps"
     );
 }
@@ -480,10 +470,7 @@ fn suggest_rules_on_simple_project_returns_valid_report() {
         report["suggestedRules"].as_array().is_some(),
         "suggest-rules should return suggestedRules array"
     );
-    assert!(
-        report["tags"].as_array().is_some(),
-        "suggest-rules should return tags array"
-    );
+    assert!(report["tags"].as_array().is_some(), "suggest-rules should return tags array");
 }
 
 // ---------------------------------------------------------------------------
@@ -495,29 +482,22 @@ fn review_trust_summary_is_stable_across_runs() {
     let root = temp_dir("review-stable");
     copy_tree(&fixture_root("unused-file-basic"), &root);
 
-    let first = run_pruneguard_json(
-        &root,
-        &["--format", "json", "--no-cache", "--no-baseline", "review"],
-    );
-    let second = run_pruneguard_json(
-        &root,
-        &["--format", "json", "--no-cache", "--no-baseline", "review"],
-    );
+    let first =
+        run_pruneguard_json(&root, &["--format", "json", "--no-cache", "--no-baseline", "review"]);
+    let second =
+        run_pruneguard_json(&root, &["--format", "json", "--no-cache", "--no-baseline", "review"]);
 
     // Trust summary fields must be identical.
     assert_eq!(
-        first["trust"]["fullScope"],
-        second["trust"]["fullScope"],
+        first["trust"]["fullScope"], second["trust"]["fullScope"],
         "trust.fullScope must be stable"
     );
     assert_eq!(
-        first["trust"]["baselineApplied"],
-        second["trust"]["baselineApplied"],
+        first["trust"]["baselineApplied"], second["trust"]["baselineApplied"],
         "trust.baselineApplied must be stable"
     );
     assert_eq!(
-        first["trust"]["confidenceCounts"],
-        second["trust"]["confidenceCounts"],
+        first["trust"]["confidenceCounts"], second["trust"]["confidenceCounts"],
         "trust.confidenceCounts must be stable"
     );
 }
@@ -533,16 +513,20 @@ fn safe_delete_multiple_targets_classifies_each_independently() {
 
     let output = run_pruneguard(
         &root,
-        &["--format", "json", "--no-cache", "--no-baseline", "safe-delete", "src/unused.ts", "src/used.ts"],
+        &[
+            "--format",
+            "json",
+            "--no-cache",
+            "--no-baseline",
+            "safe-delete",
+            "src/unused.ts",
+            "src/used.ts",
+        ],
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap_or(Value::Null);
 
     // Two targets given.
-    assert_eq!(
-        report["targets"].as_array().map_or(0, Vec::len),
-        2,
-        "should report two targets"
-    );
+    assert_eq!(report["targets"].as_array().map_or(0, Vec::len), 2, "should report two targets");
 
     // unused.ts should be safe; used.ts should be blocked.
     assert!(
@@ -568,10 +552,8 @@ fn scan_sarif_output_is_valid_json_with_schema() {
     let root = temp_dir("sarif-output");
     copy_tree(&fixture_root("unused-file-basic"), &root);
 
-    let output = run_pruneguard(
-        &root,
-        &["--format", "sarif", "--no-cache", "--no-baseline", "scan"],
-    );
+    let output =
+        run_pruneguard(&root, &["--format", "sarif", "--no-cache", "--no-baseline", "scan"]);
     assert!(
         output.status.success() || output.status.code() == Some(1),
         "sarif scan should not crash"
@@ -595,10 +577,8 @@ fn scan_text_output_runs_without_crash() {
     let root = temp_dir("text-output");
     copy_tree(&fixture_root("unused-file-basic"), &root);
 
-    let output = run_pruneguard(
-        &root,
-        &["--format", "text", "--no-cache", "--no-baseline", "scan"],
-    );
+    let output =
+        run_pruneguard(&root, &["--format", "text", "--no-cache", "--no-baseline", "scan"]);
     assert!(
         output.status.success() || output.status.code() == Some(1),
         "text scan should not crash"
@@ -618,11 +598,8 @@ fn scan_text_output_runs_without_crash() {
 fn init_creates_config_file() {
     let root = temp_dir("init-cmd");
     fs::create_dir_all(&root).expect("create dir");
-    fs::write(
-        root.join("package.json"),
-        r#"{"name":"init-test","private":true}"#,
-    )
-    .expect("package.json");
+    fs::write(root.join("package.json"), r#"{"name":"init-test","private":true}"#)
+        .expect("package.json");
 
     let output = run_pruneguard(&root, &["init"]);
     assert!(
@@ -630,10 +607,7 @@ fn init_creates_config_file() {
         "init should succeed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        root.join("pruneguard.json").exists(),
-        "init should create pruneguard.json"
-    );
+    assert!(root.join("pruneguard.json").exists(), "init should create pruneguard.json");
 }
 
 // ---------------------------------------------------------------------------
@@ -644,11 +618,8 @@ fn init_creates_config_file() {
 fn print_config_emits_valid_json() {
     let root = temp_dir("print-config");
     fs::create_dir_all(&root).expect("create dir");
-    fs::write(
-        root.join("package.json"),
-        r#"{"name":"print-config-test","private":true}"#,
-    )
-    .expect("package.json");
+    fs::write(root.join("package.json"), r#"{"name":"print-config-test","private":true}"#)
+        .expect("package.json");
 
     let output = run_pruneguard(&root, &["print-config"]);
     assert!(output.status.success());

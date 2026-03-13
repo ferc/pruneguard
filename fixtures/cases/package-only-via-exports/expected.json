@@ -1,0 +1,17 @@
+{
+  "description": "Workspace package used only through its exports field -- resolved files must remain live",
+  "expectations": [
+    {
+      "assertion": "entrypoint-exists",
+      "kind": "package-exports",
+      "sourceContains": "src/index.ts",
+      "note": "lib's exports field should create a package-exports entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subjectContains": "packages/lib/src/index.ts",
+      "note": "lib index.ts is reachable via package exports -- must not be flagged"
+    }
+  ]
+}

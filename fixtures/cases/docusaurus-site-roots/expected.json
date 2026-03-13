@@ -1,0 +1,29 @@
+{
+  "description": "Docusaurus config, pages, and theme component entrypoints should be recognized",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "docusaurus.config.js",
+      "note": "Docusaurus config -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/pages/index.tsx",
+      "note": "Docusaurus page -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/theme/Footer.tsx",
+      "note": "Docusaurus theme override -- framework entrypoint via swizzling convention"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any Docusaurus convention -- should be flagged"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "vitepress-doc-roots",
+  "version": "0.0.0",
+  "private": true,
+  "devDependencies": {
+    "vitepress": "1.0.0"
+  }
+}

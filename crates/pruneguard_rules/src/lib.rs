@@ -223,6 +223,8 @@ impl CompiledRules {
                         rule_name: Some(rule.name.clone()),
                         primary_action_kind: Some(RemediationActionKind::UpdateBoundaryRule),
                         action_kinds: vec![RemediationActionKind::UpdateBoundaryRule],
+                        trust_notes: None,
+                        framework_context: None,
                     });
                 }
             }

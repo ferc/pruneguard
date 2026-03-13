@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
 /// default extensions, condition names) so that the analysis cache is invalidated.
-pub const RESOLVER_LOGIC_VERSION: u32 = 4;
+pub const RESOLVER_LOGIC_VERSION: u32 = 5;
 
 /// Result of resolving a module specifier.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +71,9 @@ pub enum UnresolvedReason {
     TsconfigPathMiss,
     ExportsConditionMiss,
     Externalized,
+    /// The specifier targets a workspace package whose `exports` map does not
+    /// expose the requested subpath.
+    WorkspaceExportsMiss,
 }
 
 impl UnresolvedReason {
@@ -81,7 +84,14 @@ impl UnresolvedReason {
             Self::TsconfigPathMiss => "tsconfig-path-miss",
             Self::ExportsConditionMiss => "exports-condition-miss",
             Self::Externalized => "externalized",
+            Self::WorkspaceExportsMiss => "workspace-exports-miss",
         }
+    }
+
+    /// Whether this reason represents a "benign" unresolved specifier that
+    /// should not count toward confidence-lowering pressure thresholds.
+    pub const fn is_benign(self) -> bool {
+        matches!(self, Self::UnsupportedSpecifier | Self::Externalized)
     }
 }
 
@@ -91,6 +101,9 @@ pub struct ModuleResolver {
     /// Map of workspace package names to their root directories.
     /// Enables resolution of deep subpath imports like `@scope/pkg/path/to/file`.
     workspace_roots: FxHashMap<String, PathBuf>,
+    /// Cached workspace package.json exports maps, used to validate subpath
+    /// imports against the package's declared public API.
+    workspace_exports: FxHashMap<String, Option<serde_json::Value>>,
 }
 
 impl ModuleResolver {
@@ -148,13 +161,21 @@ impl ModuleResolver {
         });
 
         let inner = Resolver::new(options);
-        Self { inner, workspace_roots: FxHashMap::default() }
+        Self {
+            inner,
+            workspace_roots: FxHashMap::default(),
+            workspace_exports: FxHashMap::default(),
+        }
     }
 
-    /// Register workspace package name → root directory mappings.
+    /// Register workspace package name -> root directory mappings.
     /// This enables resolution of deep subpath imports into workspace packages
-    /// (e.g. `@calcom/features/auth/lib/getLocale` → `packages/features/auth/lib/getLocale.ts`).
+    /// (e.g. `@calcom/features/auth/lib/getLocale` -> `packages/features/auth/lib/getLocale.ts`).
     pub fn set_workspace_roots(&mut self, roots: FxHashMap<String, PathBuf>) {
+        for (pkg_name, root) in &roots {
+            let exports = load_workspace_exports(root);
+            self.workspace_exports.insert(pkg_name.clone(), exports);
+        }
         self.workspace_roots = roots;
     }
 
@@ -183,16 +204,28 @@ impl ModuleResolver {
                 if let Some(resolved) = self.resolve_via_workspace(specifier) {
                     return Ok(resolved);
                 }
+                // Classify the reason; use WorkspaceExportsMiss when appropriate.
+                let reason = if self.is_workspace_exports_miss(specifier) {
+                    UnresolvedReason::WorkspaceExportsMiss
+                } else {
+                    classify_unresolved_reason(specifier, &err.to_string())
+                };
                 Err(ResolveError::NotFound {
                     specifier: specifier.to_string(),
                     from: from.to_path_buf(),
-                    reason: Some(classify_unresolved_reason(specifier, &err.to_string())),
+                    reason: Some(reason),
                 })
             }
         }
     }
 
     /// Try to resolve a bare specifier via workspace package mappings.
+    ///
+    /// When the workspace package has an `exports` map, the specifier is validated
+    /// against it to avoid creating false edges to private internal files.  If the
+    /// exports map provides a concrete file target we use that; otherwise we fall
+    /// back to filesystem probing only when the subpath is declared (or there is no
+    /// exports map at all).
     fn resolve_via_workspace(&self, specifier: &str) -> Option<ResolvedModule> {
         let pkg_name = dependency_name(specifier)?;
         let workspace_root = self.workspace_roots.get(&pkg_name)?;
@@ -200,14 +233,44 @@ impl ModuleResolver {
         // Extract the subpath after the package name.
         let subpath = specifier.strip_prefix(&pkg_name)?;
         let subpath = subpath.strip_prefix('/').unwrap_or(subpath);
+        let exports_key = if subpath.is_empty() { ".".to_string() } else { format!("./{subpath}") };
+
+        // If the workspace package has an exports map, validate the subpath.
+        if let Some(Some(exports_value)) = self.workspace_exports.get(&pkg_name) {
+            if !exports_map_defines_subpath(exports_value, &exports_key) {
+                return None;
+            }
+            // Try to resolve via the exports map target before filesystem probing.
+            if let Some(resolved) =
+                resolve_from_exports_value(exports_value, &exports_key, workspace_root)
+            {
+                return Some(resolved);
+            }
+        }
 
         if subpath.is_empty() {
-            // Bare package import — resolve via the package's main entry.
+            // Bare package import -- resolve via the package's main entry.
             return resolve_with_extensions(workspace_root, "index");
         }
 
-        // Deep subpath import — resolve as a file relative to the workspace root.
+        // Deep subpath import -- resolve as a file relative to the workspace root.
         resolve_with_extensions(workspace_root, subpath)
+    }
+
+    /// Check whether a specifier targets a workspace package whose `exports` map
+    /// does not expose the requested subpath.  Used to emit an
+    /// `UnresolvedReason::WorkspaceExportsMiss` diagnostic.
+    fn is_workspace_exports_miss(&self, specifier: &str) -> bool {
+        let Some(pkg_name) = dependency_name(specifier) else {
+            return false;
+        };
+        let Some(Some(exports_value)) = self.workspace_exports.get(&pkg_name) else {
+            return false;
+        };
+        let subpath = specifier.strip_prefix(&pkg_name).unwrap_or("");
+        let subpath = subpath.strip_prefix('/').unwrap_or(subpath);
+        let exports_key = if subpath.is_empty() { ".".to_string() } else { format!("./{subpath}") };
+        !exports_map_defines_subpath(exports_value, &exports_key)
     }
 }
 
@@ -291,7 +354,7 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
         return UnresolvedReason::UnsupportedSpecifier;
     }
 
-    // Template literal syntax — cannot be statically resolved.
+    // Template literal syntax -- cannot be statically resolved.
     if specifier.contains("${") {
         return UnresolvedReason::UnsupportedSpecifier;
     }
@@ -330,7 +393,7 @@ fn classify_unresolved_reason(specifier: &str, error: &str) -> UnresolvedReason 
         if has_subpath(specifier) && error.contains("Package path") {
             return UnresolvedReason::ExportsConditionMiss;
         }
-        // Looks like a valid package name — treat as a missing/uninstalled dependency
+        // Looks like a valid package name -- treat as a missing/uninstalled dependency
         // rather than a missing file.
         if looks_like_package_name(specifier) {
             return UnresolvedReason::MissingFile;
@@ -354,13 +417,39 @@ fn is_asset_specifier(specifier: &str) -> bool {
     let ext = specifier.rsplit('.').next().unwrap_or("");
     matches!(
         ext.to_ascii_lowercase().as_str(),
-        "css" | "scss" | "sass" | "less" | "styl" | "stylus"
-            | "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" | "webp" | "avif"
-            | "woff" | "woff2" | "ttf" | "eot" | "otf"
-            | "mp4" | "webm" | "ogg" | "mp3" | "wav" | "flac"
-            | "graphql" | "gql"
-            | "yaml" | "yml" | "toml"
-            | "txt" | "csv" | "xml"
+        "css"
+            | "scss"
+            | "sass"
+            | "less"
+            | "styl"
+            | "stylus"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "svg"
+            | "ico"
+            | "webp"
+            | "avif"
+            | "woff"
+            | "woff2"
+            | "ttf"
+            | "eot"
+            | "otf"
+            | "mp4"
+            | "webm"
+            | "ogg"
+            | "mp3"
+            | "wav"
+            | "flac"
+            | "graphql"
+            | "gql"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "txt"
+            | "csv"
+            | "xml"
             | "wasm"
     )
 }
@@ -465,15 +554,128 @@ fn extract_exports_attribution(
     };
 
     // Derive the subpath the user asked for: `@scope/pkg/utils` -> `./utils`.
-    let subpath = specifier
-        .strip_prefix(&package_name)
-        .map_or_else(|| ".".to_string(), |rest| {
+    let subpath = specifier.strip_prefix(&package_name).map_or_else(
+        || ".".to_string(),
+        |rest| {
             let rest = rest.strip_prefix('/').unwrap_or(rest);
             if rest.is_empty() { ".".to_string() } else { format!("./{rest}") }
-        });
+        },
+    );
 
     // We report the subpath that was requested; the condition is not available
     // from the oxc_resolver resolution directly, so we leave it as None.
     // The subpath is sufficient for exports-aware attribution in the graph.
     (Some(subpath), None)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace exports helpers
+// ---------------------------------------------------------------------------
+
+/// Load the `exports` field from a workspace package's `package.json`.
+fn load_workspace_exports(root: &Path) -> Option<serde_json::Value> {
+    let pkg_json_path = root.join("package.json");
+    let content = std::fs::read_to_string(pkg_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed.get("exports").cloned()
+}
+
+/// Check whether an exports map defines a given subpath (exact or wildcard).
+fn exports_map_defines_subpath(exports: &serde_json::Value, subpath: &str) -> bool {
+    match exports {
+        serde_json::Value::Object(map) => {
+            let is_subpath_map = map.keys().any(|k| k.starts_with('.'));
+            if !is_subpath_map {
+                // Condition-only map applies only to the "." subpath.
+                return subpath == ".";
+            }
+            if map.contains_key(subpath) {
+                return true;
+            }
+            // Wildcard/pattern match (e.g. `./*` matches `./foo/bar`).
+            map.keys().any(|pattern| {
+                pattern.strip_suffix('*').is_some_and(|prefix| subpath.starts_with(prefix))
+            })
+        }
+        serde_json::Value::String(_) => subpath == ".",
+        _ => false,
+    }
+}
+
+/// Resolve a subpath from the exports map to a concrete file.
+/// Walks the condition tree preferring `types` then `import` then `require` then `default`.
+fn resolve_from_exports_value(
+    exports: &serde_json::Value,
+    subpath: &str,
+    workspace_root: &Path,
+) -> Option<ResolvedModule> {
+    let target = lookup_exports_target(exports, subpath)?;
+    let relative = target.strip_prefix("./").unwrap_or(&target);
+    let candidate = workspace_root.join(relative);
+    if candidate.is_file() {
+        return Some(ResolvedModule {
+            path: candidate,
+            via_exports: true,
+            exports_subpath: Some(subpath.to_string()),
+            exports_condition: None,
+        });
+    }
+    resolve_with_extensions(workspace_root, relative).map(|mut m| {
+        m.via_exports = true;
+        m.exports_subpath = Some(subpath.to_string());
+        m
+    })
+}
+
+/// Walk the exports value to find the string target for a given subpath.
+fn lookup_exports_target(exports: &serde_json::Value, subpath: &str) -> Option<String> {
+    match exports {
+        serde_json::Value::String(s) if subpath == "." => Some(s.clone()),
+        serde_json::Value::Object(map) => {
+            let is_subpath_map = map.keys().any(|k| k.starts_with('.'));
+            if !is_subpath_map {
+                if subpath == "." {
+                    return resolve_condition_map(map);
+                }
+                return None;
+            }
+            if let Some(value) = map.get(subpath) {
+                return resolve_exports_value(value);
+            }
+            for (pattern, value) in map {
+                if let Some(prefix) = pattern.strip_suffix('*')
+                    && let Some(rest) = subpath.strip_prefix(prefix)
+                    && let Some(target) = resolve_exports_value(value)
+                {
+                    return Some(target.replace('*', rest));
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(|v| lookup_exports_target(v, subpath)),
+        _ => None,
+    }
+}
+
+/// Resolve a single exports value (string, condition map, or array).
+fn resolve_exports_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(map) => resolve_condition_map(map),
+        serde_json::Value::Array(arr) => arr.iter().find_map(resolve_exports_value),
+        _ => None,
+    }
+}
+
+/// Select the best target from a condition map.
+/// Priority: `types` then `import` then `require` then `node` then `default`.
+/// We prefer `types` first because pruneguard is a static analysis tool and
+/// `.d.ts` targets give accurate type-level export surfaces.
+fn resolve_condition_map(map: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    for condition in &["types", "import", "require", "node", "default"] {
+        if let Some(value) = map.get(*condition) {
+            return resolve_exports_value(value);
+        }
+    }
+    map.values().find_map(resolve_exports_value)
 }

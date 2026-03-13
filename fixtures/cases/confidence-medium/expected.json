@@ -1,0 +1,15 @@
+{
+  "description": "Under moderate unresolved pressure, findings should carry a confidence tier (may be downgraded from high)",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/maybe-unused.ts",
+      "note": "Not directly imported; confidence may be medium due to unresolved neighbor specifiers"
+    },
+    {
+      "assertion": "all-findings-have-confidence",
+      "note": "Every finding must carry a confidence field"
+    }
+  ]
+}

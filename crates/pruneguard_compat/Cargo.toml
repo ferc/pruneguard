@@ -1,0 +1,21 @@
+[package]
+name = "pruneguard_compat"
+version = "0.3.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Compatibility analysis and trust downgrade signals for pruneguard"
+publish = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pruneguard_frameworks = { workspace = true }
+pruneguard_manifest = { workspace = true }
+serde = { workspace = true }

@@ -129,12 +129,13 @@ jobs:
 
 ## Inputs
 
-| Input     | Required | Default  | Description                                                    |
-|-----------|----------|----------|----------------------------------------------------------------|
-| `command` | Yes      |          | Command to run: `scan`, `review`, `safe-delete`, or `fix-plan` |
-| `args`    | No       | `""`     | Additional CLI arguments                                       |
-| `version` | No       | `latest` | pruneguard version to install                                  |
-| `format`  | No       | `json`   | Output format: `json`, `text`, or `sarif`                      |
+| Input               | Required | Default  | Description                                                    |
+|---------------------|----------|----------|----------------------------------------------------------------|
+| `command`           | Yes      |          | Command to run: `scan`, `review`, `safe-delete`, or `fix-plan` |
+| `args`              | No       | `""`     | Additional CLI arguments                                       |
+| `version`           | No       | `latest` | pruneguard version to install                                  |
+| `format`            | No       | `json`   | Output format: `json`, `text`, or `sarif`                      |
+| `working-directory` | No       | `.`      | Working directory for the pruneguard command                    |
 
 ## Outputs
 

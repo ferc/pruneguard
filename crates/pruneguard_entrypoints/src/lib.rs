@@ -370,7 +370,10 @@ fn extract_script_entrypoint_candidates(command: &str) -> Vec<String> {
                     #[allow(clippy::while_let_on_iterator)]
                     while let Some(token) = tokens.next() {
                         if token.starts_with('-') {
-                            if matches!(token, "--filter" | "-F" | "--workspace" | "-w" | "--cwd" | "--prefix") {
+                            if matches!(
+                                token,
+                                "--filter" | "-F" | "--workspace" | "-w" | "--cwd" | "--prefix"
+                            ) {
                                 let _ = tokens.next();
                             }
                             continue;
@@ -398,8 +401,9 @@ fn extract_script_entrypoint_candidates(command: &str) -> Vec<String> {
 
         // Generic token scanning for the remaining tokens.
         for raw in tokens {
-            let token =
-                raw.trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '(' | ')')).trim();
+            let token = raw
+                .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';' | '(' | ')'))
+                .trim();
             try_add_candidate(token, &mut candidates, &mut seen);
         }
     }

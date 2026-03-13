@@ -1,4 +1,4 @@
-use crate::config::PruneguardConfig;
+use crate::config::{FrameworksConfig, PruneguardConfig};
 
 /// Merge semantics: extends merge left-to-right, last wins.
 pub(crate) trait Merge {
@@ -43,9 +43,13 @@ impl Merge for PruneguardConfig {
             self.ownership.clone_from(&base.ownership);
         }
 
-        // frameworks: last wins
-        if self.frameworks.is_none() {
-            self.frameworks.clone_from(&base.frameworks);
+        // frameworks: per-field merge (each toggle uses last-wins)
+        if let Some(base_fw) = &base.frameworks {
+            if let Some(self_fw) = &mut self.frameworks {
+                self_fw.merge_from(base_fw);
+            } else {
+                self.frameworks = Some(base_fw.clone());
+            }
         }
 
         // overrides: append
@@ -54,6 +58,25 @@ impl Merge for PruneguardConfig {
             merged.extend(self.overrides.clone());
             self.overrides = merged;
         }
+    }
+}
+
+/// Merge individual framework toggles: self takes precedence, base fills gaps.
+impl Merge for FrameworksConfig {
+    fn merge_from(&mut self, base: &Self) {
+        macro_rules! merge_toggle {
+            ($($field:ident),+ $(,)?) => {
+                $(
+                    if self.$field.is_none() {
+                        self.$field = base.$field;
+                    }
+                )+
+            };
+        }
+        merge_toggle!(
+            next, vite, vitest, jest, storybook, nuxt, astro, sveltekit, remix, angular, nx,
+            turborepo, playwright, cypress, vitepress, docusaurus,
+        );
     }
 }
 

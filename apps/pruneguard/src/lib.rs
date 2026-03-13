@@ -11,10 +11,11 @@ use pruneguard_graph::{
     BuildOptions, GraphBuildResult, ModuleEdge, ModuleNode, build_graph, build_graph_with_options,
 };
 use pruneguard_report::{
-    AnalysisReport, ConfidenceCounts, ExplainQueryKind, ExplainReport, Finding, FindingConfidence,
-    FindingSeverity, FixPlanReport, ImpactReport, ProofNode, RemediationAction,
-    RemediationActionKind, RemediationStep, ReviewReport, ReviewTrust, RiskLevel,
-    SafeDeleteCandidate, SafeDeleteReport, SuggestRulesReport, Summary,
+    AnalysisReport, ConfidenceCounts, DeletionOrderEntry, ExplainQueryKind, ExplainReport, Finding,
+    FindingConfidence, FindingSeverity, FixPlanPhase, FixPlanReport, ImpactReport, ProofNode,
+    RecommendedAction, RecommendedActionKind, RemediationAction, RemediationActionKind,
+    RemediationStep, ReviewReport, ReviewTrust, RiskLevel, SafeDeleteCandidate,
+    SafeDeleteClassification, SafeDeleteReport, SuggestRulesReport, Summary,
 };
 
 #[cfg(feature = "napi")]
@@ -287,6 +288,7 @@ pub struct ReviewOptions {
     pub base_ref: Option<String>,
     pub no_cache: bool,
     pub no_baseline: bool,
+    pub strict_trust: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -307,11 +309,211 @@ pub struct SuggestRulesOptions {
     pub no_cache: bool,
 }
 
+// --- Framework debug and compatibility report types ---
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameworkDebugReport {
+    pub detected_packs: Vec<DetectedPackInfo>,
+    pub all_entrypoints: Vec<FrameworkEntrypointInfo>,
+    pub all_ignore_patterns: Vec<String>,
+    pub all_classification_rules: Vec<ClassificationRuleInfo>,
+    pub heuristic_detections: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedPackInfo {
+    pub name: String,
+    pub confidence: String,
+    pub signals: Vec<String>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameworkEntrypointInfo {
+    pub path: String,
+    pub framework: String,
+    pub kind: String,
+    pub reason: String,
+    pub heuristic: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationRuleInfo {
+    pub pattern: String,
+    pub classification: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompatibilityReportOutput {
+    pub supported_frameworks: Vec<String>,
+    pub heuristic_frameworks: Vec<String>,
+    pub unsupported_signals: Vec<UnsupportedSignalInfo>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnsupportedSignalInfo {
+    pub signal: String,
+    pub source: String,
+    pub suggestion: Option<String>,
+}
+
+/// Debug framework detection: lists detected packs, contributed entrypoints,
+/// ignore patterns, classification rules, and heuristic detections.
+pub fn debug_frameworks(
+    cwd: &Path,
+    profile: EntrypointProfile,
+) -> miette::Result<FrameworkDebugReport> {
+    let config = match PruneguardConfig::load(cwd, None) {
+        Ok(config) => config,
+        Err(pruneguard_config::ConfigError::NotFound) => PruneguardConfig::default(),
+        Err(err) => return Err(err.into()),
+    };
+    let build = build_graph(cwd, &config, &[], profile)?;
+
+    let detected_packs: Vec<DetectedPackInfo> = build
+        .stats
+        .frameworks_detected
+        .iter()
+        .map(|name| DetectedPackInfo {
+            name: name.clone(),
+            confidence: "exact".to_string(),
+            signals: vec![format!("detected in project for profile {}", profile.as_str())],
+            reasons: vec!["matched framework pack definition".to_string()],
+        })
+        .chain(build.stats.heuristic_frameworks.iter().map(|name| DetectedPackInfo {
+            name: name.clone(),
+            confidence: "heuristic".to_string(),
+            signals: vec![format!(
+                "heuristic detection for profile {}",
+                profile.as_str()
+            )],
+            reasons: vec!["matched via file-pattern heuristics".to_string()],
+        }))
+        .collect();
+
+    let all_entrypoints: Vec<FrameworkEntrypointInfo> = build
+        .entrypoints
+        .iter()
+        .filter_map(|ep| {
+            // Only include entrypoints that came from framework detection.
+            if ep.source.contains("framework") || ep.source.contains("heuristic") {
+                Some(FrameworkEntrypointInfo {
+                    path: ep.path.clone(),
+                    framework: ep.framework.clone().unwrap_or_else(|| ep.source.clone()),
+                    kind: ep.kind.clone(),
+                    reason: ep.reason.clone().unwrap_or_default(),
+                    heuristic: ep.heuristic.unwrap_or(false),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let all_ignore_patterns: Vec<String> = config.ignore_patterns.clone();
+
+    // Classification rules are not a top-level config field; return empty for now.
+    let all_classification_rules: Vec<ClassificationRuleInfo> = Vec::new();
+
+    let heuristic_detections: Vec<String> = build
+        .stats
+        .heuristic_frameworks
+        .iter()
+        .map(|name| format!("heuristic: {name}"))
+        .collect();
+
+    Ok(FrameworkDebugReport {
+        detected_packs,
+        all_entrypoints,
+        all_ignore_patterns,
+        all_classification_rules,
+        heuristic_detections,
+    })
+}
+
+/// Generate a compatibility report: lists supported and heuristic frameworks,
+/// unsupported signals, and warnings.
+pub fn compatibility_report(
+    cwd: &Path,
+    profile: EntrypointProfile,
+) -> miette::Result<CompatibilityReportOutput> {
+    let config = match PruneguardConfig::load(cwd, None) {
+        Ok(config) => config,
+        Err(pruneguard_config::ConfigError::NotFound) => PruneguardConfig::default(),
+        Err(err) => return Err(err.into()),
+    };
+    let build = build_graph(cwd, &config, &[], profile)?;
+    Ok(build_compat_output_from_stats(&build.stats))
+}
+
+/// Convenience wrapper used during review strict-trust checks.
+fn compatibility_report_from_scan(
+    _cwd: &Path,
+    _profile: EntrypointProfile,
+    execution: &ScanExecution,
+) -> CompatibilityReportOutput {
+    build_compat_output_from_stats(&execution.build.stats)
+}
+
+/// Build a `CompatibilityReportOutput` from graph build stats.
+fn build_compat_output_from_stats(
+    stats: &pruneguard_report::Stats,
+) -> CompatibilityReportOutput {
+    let supported_frameworks = stats.frameworks_detected.clone();
+    let heuristic_frameworks = stats.heuristic_frameworks.clone();
+
+    let mut unsupported_signals = Vec::new();
+    let mut warnings = Vec::new();
+
+    for warning in &stats.compatibility_warnings {
+        warnings.push(warning.clone());
+    }
+
+    for fw in &heuristic_frameworks {
+        unsupported_signals.push(UnsupportedSignalInfo {
+            signal: fw.clone(),
+            source: "heuristic-detection".to_string(),
+            suggestion: Some(format!(
+                "Consider adding a framework pack for `{fw}` to improve accuracy."
+            )),
+        });
+        warnings.push(format!(
+            "Framework `{fw}` was detected heuristically. Entrypoint coverage may be incomplete."
+        ));
+    }
+
+    if stats.files_resolved > 0 {
+        #[allow(clippy::cast_precision_loss)]
+        let pressure = stats.unresolved_specifiers as f64
+            / (stats.files_resolved + stats.unresolved_specifiers) as f64;
+        if pressure > 0.05 {
+            warnings.push(format!(
+                "Unresolved pressure is {:.1}%. Findings may be less accurate.",
+                pressure * 100.0
+            ));
+        }
+    }
+
+    CompatibilityReportOutput {
+        supported_frameworks,
+        heuristic_frameworks,
+        unsupported_signals,
+        warnings,
+    }
+}
+
 /// Review a branch for CI/agent gating.
 ///
 /// Combines full-scope scan, `--changed-since`, baseline, and trust summary
 /// into a single report with blocking vs advisory findings.
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 pub fn review(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -341,7 +543,7 @@ pub fn review(
     };
 
     let new_findings = report.findings.clone();
-    let blocking_findings = new_findings
+    let mut blocking_findings = new_findings
         .iter()
         .filter(|f| {
             f.confidence == FindingConfidence::High
@@ -349,7 +551,7 @@ pub fn review(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let advisory_findings = new_findings
+    let mut advisory_findings = new_findings
         .iter()
         .filter(|f| {
             f.confidence != FindingConfidence::High || matches!(f.severity, FindingSeverity::Info)
@@ -365,26 +567,136 @@ pub fn review(
     };
 
     let mut recommendations = Vec::new();
+    let mut recommended_actions: Vec<RecommendedAction> = Vec::new();
+    let mut priority = 1usize;
+
     if !blocking_findings.is_empty() {
         recommendations.push(format!(
             "{} blocking finding(s) should be resolved before merge.",
             blocking_findings.len()
         ));
+
+        // Collect safe-deletable targets (unused files/exports with high confidence).
+        let safe_delete_targets: Vec<String> = blocking_findings
+            .iter()
+            .filter(|f| {
+                matches!(f.code.as_str(), "unused-file" | "unused-export")
+                    && f.confidence == FindingConfidence::High
+            })
+            .map(|f| f.subject.clone())
+            .collect();
+
+        if !safe_delete_targets.is_empty() {
+            recommended_actions.push(RecommendedAction {
+                kind: RecommendedActionKind::RunSafeDelete,
+                description: format!(
+                    "Run safe-delete on {} unused target(s) to remove dead code.",
+                    safe_delete_targets.len()
+                ),
+                priority,
+                command: Some(format!("pruneguard safe-delete {}", safe_delete_targets.join(" "))),
+                targets: safe_delete_targets,
+            });
+            priority += 1;
+        }
+
+        // Collect targets that need fix-plan (non-deletable blocking findings).
+        let fix_plan_targets: Vec<String> = blocking_findings
+            .iter()
+            .filter(|f| {
+                !matches!(f.code.as_str(), "unused-file" | "unused-export")
+                    || f.confidence != FindingConfidence::High
+            })
+            .map(|f| f.subject.clone())
+            .collect();
+
+        if !fix_plan_targets.is_empty() {
+            recommended_actions.push(RecommendedAction {
+                kind: RecommendedActionKind::RunFixPlan,
+                description: format!(
+                    "Generate a fix plan for {} blocking finding(s).",
+                    fix_plan_targets.len()
+                ),
+                priority,
+                command: Some(format!("pruneguard fix-plan {}", fix_plan_targets.join(" "))),
+                targets: fix_plan_targets,
+            });
+            priority += 1;
+        }
+
+        recommended_actions.push(RecommendedAction {
+            kind: RecommendedActionKind::ResolveBlocking,
+            description: format!(
+                "Resolve all {} blocking finding(s) before merge.",
+                blocking_findings.len()
+            ),
+            priority,
+            command: None,
+            targets: blocking_findings.iter().map(|f| f.id.clone()).collect(),
+        });
+        priority += 1;
     }
+
     if unresolved_pressure > 0.05 {
         recommendations.push(format!(
             "Unresolved pressure is {:.1}% — findings may be less accurate. Consider configuring resolver paths.",
             unresolved_pressure * 100.0
         ));
+        recommended_actions.push(RecommendedAction {
+            kind: RecommendedActionKind::FixResolverConfig,
+            description: format!(
+                "Unresolved pressure is {:.1}%. Configure resolver paths to improve accuracy.",
+                unresolved_pressure * 100.0
+            ),
+            priority,
+            command: None,
+            targets: Vec::new(),
+        });
+        priority += 1;
     }
+
     if report.stats.partial_scope {
         recommendations.push(
             "Partial-scope analysis was used. Dead-code findings are advisory only.".to_string(),
         );
+        recommended_actions.push(RecommendedAction {
+            kind: RecommendedActionKind::RunFullScope,
+            description: "Run a full-scope scan for higher-confidence dead-code detection."
+                .to_string(),
+            priority,
+            command: Some("pruneguard scan".to_string()),
+            targets: Vec::new(),
+        });
+        priority += 1;
     }
+
+    if !advisory_findings.is_empty() {
+        recommended_actions.push(RecommendedAction {
+            kind: RecommendedActionKind::ReviewAdvisory,
+            description: format!(
+                "Review {} advisory finding(s) for potential improvements.",
+                advisory_findings.len()
+            ),
+            priority,
+            command: None,
+            targets: advisory_findings.iter().map(|f| f.id.clone()).collect(),
+        });
+        priority += 1;
+    }
+
     if blocking_findings.is_empty() && advisory_findings.is_empty() {
         recommendations.push("No new findings. Branch is clean.".to_string());
+        recommended_actions.push(RecommendedAction {
+            kind: RecommendedActionKind::None,
+            description: "No new findings. Branch is clean.".to_string(),
+            priority,
+            command: None,
+            targets: Vec::new(),
+        });
+        priority += 1;
     }
+
+    let _ = priority; // suppress unused assignment warning
 
     let mut proposed_actions: Vec<RemediationAction> = blocking_findings
         .iter()
@@ -404,6 +716,9 @@ pub fn review(
                 verification,
                 risk,
                 confidence: finding.confidence,
+                rank: None,
+                phase: Some(phase_name_for_action(kind).to_string()),
+                finding_ids: vec![finding.id.clone()],
             })
         })
         .collect();
@@ -411,6 +726,64 @@ pub fn review(
     // Apply ranking policy: sort by minimal blast radius first, then high
     // confidence first, then low unresolved pressure first.
     rank_remediation_actions(&mut proposed_actions);
+
+    // --- strict-trust enforcement ---
+    //
+    // When `strict_trust` is enabled, only findings that meet all trust
+    // criteria remain blocking:
+    //   1. Full-scope analysis (not partial)
+    //   2. High confidence
+    //   3. Low unresolved pressure (<=5%)
+    //   4. No heuristic-only framework detection
+    //   5. No unsupported signals
+    //
+    // If trust is insufficient, ALL findings are moved to advisory.
+    let mut strict_trust_applied = report.stats.strict_trust_applied;
+    let mut compatibility_warnings = report.stats.compatibility_warnings.clone();
+
+    if options.strict_trust {
+        let compat = compatibility_report_from_scan(cwd, profile, &execution);
+        let has_heuristic = !compat.heuristic_frameworks.is_empty();
+        let has_unsupported = !compat.unsupported_signals.is_empty();
+        let high_pressure = unresolved_pressure > 0.05;
+
+        let insufficient_trust =
+            has_heuristic || has_unsupported || high_pressure || report.stats.partial_scope;
+
+        if insufficient_trust {
+            strict_trust_applied = true;
+
+            if report.stats.partial_scope {
+                compatibility_warnings
+                    .push("Partial-scope analysis: dead-code findings may be incomplete.".into());
+            }
+            if has_heuristic {
+                compatibility_warnings.push(format!(
+                    "Heuristic framework detection in use: {}. Entrypoints may be approximate.",
+                    compat.heuristic_frameworks.join(", ")
+                ));
+            }
+            if has_unsupported {
+                compatibility_warnings.push(format!(
+                    "{} unsupported signal(s) detected. Some framework conventions are not tracked.",
+                    compat.unsupported_signals.len()
+                ));
+            }
+            if high_pressure {
+                compatibility_warnings.push(format!(
+                    "Unresolved pressure is {:.1}%. Findings may be inaccurate.",
+                    unresolved_pressure * 100.0
+                ));
+            }
+
+            // Move all blocking findings to advisory.
+            advisory_findings.extend(blocking_findings.drain(..));
+            recommendations.push(
+                "strict-trust: trust conditions not met — all findings downgraded to advisory."
+                    .to_string(),
+            );
+        }
+    }
 
     Ok(ReviewReport {
         base_ref: options.base_ref.clone(),
@@ -423,11 +796,15 @@ pub fn review(
             baseline_applied: report.stats.baseline_applied,
             unresolved_pressure,
             confidence_counts: report.stats.confidence_counts.clone(),
+            execution_mode: report.stats.execution_mode,
         },
         recommendations,
+        recommended_actions,
         proposed_actions,
-        execution_mode: None,
+        execution_mode: report.stats.execution_mode,
         latency_ms: None,
+        compatibility_warnings,
+        strict_trust_applied,
     })
 }
 
@@ -462,11 +839,13 @@ pub fn safe_delete(
                 .iter()
                 .map(|target| SafeDeleteCandidate {
                     target: target.clone(),
+                    classification: SafeDeleteClassification::Blocked,
                     confidence: None,
                     reasons: vec![
                         "Partial-scope analysis was used. Full-scope is required for safe-delete."
                             .to_string(),
                     ],
+                    evidence: Vec::new(),
                 })
                 .collect(),
             deletion_order: Vec::new(),
@@ -488,7 +867,7 @@ pub fn safe_delete(
     let mut safe = Vec::new();
     let mut needs_review = Vec::new();
     let mut blocked = Vec::new();
-    let mut deletion_order = Vec::new();
+    let mut deletion_order_targets: Vec<String> = Vec::new();
     let mut all_evidence = Vec::new();
 
     for target in targets {
@@ -500,8 +879,16 @@ pub fn safe_delete(
         if !is_finding {
             blocked.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::Blocked,
                 confidence: None,
                 reasons: vec![format!("`{target}` was not flagged as unused by the analysis.")],
+                evidence: vec![pruneguard_report::Evidence {
+                    kind: "absence".to_string(),
+                    file: Some(target.clone()),
+                    line: None,
+                    description: "No unused-file or unused-export finding matches this target."
+                        .to_string(),
+                }],
             });
             continue;
         }
@@ -535,6 +922,7 @@ pub fn safe_delete(
             let mut reasons = vec![format!(
                 "`{target}` has reverse impact — other files or entrypoints depend on it."
             )];
+            let mut candidate_evidence = Vec::new();
             if let Ok(ir) = &impact_result {
                 if !ir.affected_entrypoints.is_empty() {
                     reasons.push(format!(
@@ -547,7 +935,7 @@ pub fn safe_delete(
                             .join(", ")
                     ));
                 }
-                all_evidence.push(pruneguard_report::Evidence {
+                let impact_evidence = pruneguard_report::Evidence {
                     kind: "impact".to_string(),
                     file: Some(target.clone()),
                     line: None,
@@ -556,12 +944,16 @@ pub fn safe_delete(
                         ir.affected_entrypoints.len(),
                         ir.affected_files.len()
                     ),
-                });
+                };
+                candidate_evidence.push(impact_evidence.clone());
+                all_evidence.push(impact_evidence);
             }
             blocked.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::Blocked,
                 confidence: None,
                 reasons,
+                evidence: candidate_evidence,
             });
             continue;
         }
@@ -571,9 +963,21 @@ pub fn safe_delete(
         let any_low_confidence =
             related_findings.iter().any(|f| f.confidence == FindingConfidence::Low);
 
+        // Collect evidence from related findings for all candidates.
+        let candidate_evidence: Vec<pruneguard_report::Evidence> = related_findings
+            .iter()
+            .map(|f| pruneguard_report::Evidence {
+                kind: "finding".to_string(),
+                file: Some(f.subject.clone()),
+                line: None,
+                description: format!("[{}] {} (confidence: {:?})", f.code, f.message, f.confidence),
+            })
+            .collect();
+
         if high_pressure {
             needs_review.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::NeedsReview,
                 confidence: Some(FindingConfidence::Low),
                 reasons: vec![
                     format!(
@@ -583,10 +987,12 @@ pub fn safe_delete(
                     "Resolve unresolved specifiers and re-run safe-delete for a definitive answer."
                         .to_string(),
                 ],
+                evidence: candidate_evidence,
             });
         } else if any_low_confidence {
             needs_review.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::NeedsReview,
                 confidence: Some(FindingConfidence::Low),
                 reasons: vec![
                     "At least one related finding has low confidence — manual review required."
@@ -594,25 +1000,30 @@ pub fn safe_delete(
                     "Consider running `pruneguard explain` on the target for more context."
                         .to_string(),
                 ],
+                evidence: candidate_evidence,
             });
         } else if all_high_confidence {
             safe.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::Safe,
                 confidence: Some(FindingConfidence::High),
                 reasons: vec![
                     "No reverse impact detected and all related findings have high confidence."
                         .to_string(),
                 ],
+                evidence: candidate_evidence,
             });
-            deletion_order.push(target.clone());
+            deletion_order_targets.push(target.clone());
         } else {
             needs_review.push(SafeDeleteCandidate {
                 target: target.clone(),
+                classification: SafeDeleteClassification::NeedsReview,
                 confidence: Some(FindingConfidence::Medium),
                 reasons: vec![
                     "Finding confidence is not uniformly high — manual review recommended."
                         .to_string(),
                 ],
+                evidence: candidate_evidence,
             });
         }
     }
@@ -620,7 +1031,22 @@ pub fn safe_delete(
     // Compute a stable deletion order: files with fewer dependencies on other
     // targets (leaves) should be deleted first to avoid breaking intermediate
     // references during batch deletion.
-    compute_deletion_order(&mut deletion_order, &execution.build);
+    compute_deletion_order(&mut deletion_order_targets, &execution.build);
+
+    let deletion_order: Vec<DeletionOrderEntry> = deletion_order_targets
+        .iter()
+        .enumerate()
+        .map(|(i, target)| {
+            let reason = if deletion_order_targets.len() <= 1 {
+                None
+            } else if i == 0 {
+                Some("Leaf target — no other safe targets depend on it.".to_string())
+            } else {
+                Some(format!("Depends on {i} other safe target(s) — delete after them."))
+            };
+            DeletionOrderEntry { target: target.clone(), step: i + 1, reason }
+        })
+        .collect();
 
     Ok(SafeDeleteReport {
         targets: targets.to_vec(),
@@ -681,10 +1107,8 @@ pub fn fix_plan(
                 RemediationActionKind::AssignOwner
             }
             _ => {
-                blocked_by.push(format!(
-                    "No remediation strategy for finding code `{}`.",
-                    finding.code
-                ));
+                blocked_by
+                    .push(format!("No remediation strategy for finding code `{}`.", finding.code));
                 continue;
             }
         };
@@ -703,6 +1127,9 @@ pub fn fix_plan(
             verification,
             risk: risk_for_action(kind),
             confidence: finding.confidence,
+            rank: None,
+            phase: Some(phase_name_for_action(kind).to_string()),
+            finding_ids: vec![finding.id.clone()],
         });
     }
 
@@ -731,6 +1158,13 @@ pub fn fix_plan(
         })
         .unwrap_or(FindingConfidence::High);
 
+    let total_actions = actions.len();
+    let high_confidence_actions =
+        actions.iter().filter(|a| matches!(a.confidence, FindingConfidence::High)).count();
+
+    // Build phase summary.
+    let phase_summary = build_phase_summary(&actions);
+
     let verification_steps = vec![
         "Run `pruneguard scan` to verify all findings are resolved.".to_string(),
         "Run your test suite to confirm no regressions.".to_string(),
@@ -745,6 +1179,9 @@ pub fn fix_plan(
         verification_steps,
         risk_level,
         confidence,
+        total_actions,
+        high_confidence_actions,
+        phase_summary,
     })
 }
 
@@ -842,23 +1279,35 @@ fn generate_preconditions(kind: RemediationActionKind, subject: &str) -> Vec<Str
     let file_path = subject.split('#').next().unwrap_or(subject);
     match kind {
         RemediationActionKind::DeleteFile => vec![
-            format!("Verify `{file_path}` is not referenced by dynamic imports or require calls that the analyzer cannot trace."),
-            "Confirm no runtime reflection or string-based module loading references this file.".to_string(),
+            format!(
+                "Verify `{file_path}` is not referenced by dynamic imports or require calls that the analyzer cannot trace."
+            ),
+            "Confirm no runtime reflection or string-based module loading references this file."
+                .to_string(),
         ],
         RemediationActionKind::DeleteExport => vec![
-            format!("Verify the export in `{subject}` is not consumed through re-export barrel files the analyzer may not fully resolve."),
-            "Check that no test files outside the analysis scope depend on this export.".to_string(),
+            format!(
+                "Verify the export in `{subject}` is not consumed through re-export barrel files the analyzer may not fully resolve."
+            ),
+            "Check that no test files outside the analysis scope depend on this export."
+                .to_string(),
         ],
         RemediationActionKind::RemoveDependency => vec![
-            format!("Verify `{subject}` is not loaded by a build tool, test runner, or script runner that bypasses module imports."),
+            format!(
+                "Verify `{subject}` is not loaded by a build tool, test runner, or script runner that bypasses module imports."
+            ),
             "Check scripts in package.json for indirect references.".to_string(),
         ],
         RemediationActionKind::BreakCycle => vec![
-            format!("Identify which edge in the cycle involving `{subject}` is the weakest (least semantic coupling)."),
+            format!(
+                "Identify which edge in the cycle involving `{subject}` is the weakest (least semantic coupling)."
+            ),
             "Ensure the refactor does not introduce a new cycle elsewhere.".to_string(),
         ],
         RemediationActionKind::UpdateBoundaryRule => vec![
-            format!("Review whether the boundary violation for `{subject}` represents an intentional architectural exception."),
+            format!(
+                "Review whether the boundary violation for `{subject}` represents an intentional architectural exception."
+            ),
             "Consider whether the rule itself needs updating rather than the code.".to_string(),
         ],
         RemediationActionKind::AssignOwner => vec![
@@ -868,9 +1317,9 @@ fn generate_preconditions(kind: RemediationActionKind, subject: &str) -> Vec<Str
         RemediationActionKind::MoveImport
         | RemediationActionKind::TightenEntrypoint
         | RemediationActionKind::SplitPackage
-        | RemediationActionKind::AcknowledgeBaseline => vec![
-            format!("Review the current state of `{subject}` before applying the action."),
-        ],
+        | RemediationActionKind::AcknowledgeBaseline => {
+            vec![format!("Review the current state of `{subject}` before applying the action.")]
+        }
     }
 }
 
@@ -886,7 +1335,9 @@ fn generate_verification_steps(kind: RemediationActionKind, subject: &str) -> Ve
             steps.push("Run your build to confirm no compilation errors.".to_string());
         }
         RemediationActionKind::DeleteExport => {
-            steps.push("Run your TypeScript compiler (tsc --noEmit) to verify no type errors.".to_string());
+            steps.push(
+                "Run your TypeScript compiler (tsc --noEmit) to verify no type errors.".to_string(),
+            );
             steps.push("Run your test suite to confirm no regressions.".to_string());
         }
         RemediationActionKind::RemoveDependency => {
@@ -895,13 +1346,21 @@ fn generate_verification_steps(kind: RemediationActionKind, subject: &str) -> Ve
         }
         RemediationActionKind::BreakCycle => {
             steps.push("Run `pruneguard scan` and verify the cycle finding is gone.".to_string());
-            steps.push("Run `pruneguard impact <refactored-file>` to confirm blast radius is acceptable.".to_string());
+            steps.push(
+                "Run `pruneguard impact <refactored-file>` to confirm blast radius is acceptable."
+                    .to_string(),
+            );
         }
         RemediationActionKind::UpdateBoundaryRule => {
-            steps.push("Run `pruneguard scan` and verify no boundary violations remain.".to_string());
+            steps.push(
+                "Run `pruneguard scan` and verify no boundary violations remain.".to_string(),
+            );
         }
         RemediationActionKind::AssignOwner => {
-            steps.push("Run `pruneguard scan` and verify no ownership findings remain for this path.".to_string());
+            steps.push(
+                "Run `pruneguard scan` and verify no ownership findings remain for this path."
+                    .to_string(),
+            );
         }
         _ => {
             steps.push("Run your test suite to confirm no regressions.".to_string());
@@ -930,6 +1389,11 @@ fn rank_remediation_actions(actions: &mut [RemediationAction]) {
             // Then low risk first
             .then_with(|| risk_rank(a.risk).cmp(&risk_rank(b.risk)))
     });
+
+    // Assign rank numbers after sorting.
+    for (i, action) in actions.iter_mut().enumerate() {
+        action.rank = Some(i + 1);
+    }
 }
 
 /// Return a phase number for ordering: dead-code cleanup (0) before governance (1).
@@ -978,6 +1442,47 @@ const fn risk_rank(risk: RiskLevel) -> u8 {
         RiskLevel::Medium => 1,
         RiskLevel::High => 2,
     }
+}
+
+/// Return a human-readable phase name for a remediation action kind.
+const fn phase_name_for_action(kind: RemediationActionKind) -> &'static str {
+    match kind {
+        RemediationActionKind::DeleteExport
+        | RemediationActionKind::DeleteFile
+        | RemediationActionKind::RemoveDependency => "dead-code",
+        RemediationActionKind::BreakCycle
+        | RemediationActionKind::MoveImport
+        | RemediationActionKind::TightenEntrypoint
+        | RemediationActionKind::SplitPackage => "architecture",
+        RemediationActionKind::UpdateBoundaryRule
+        | RemediationActionKind::AssignOwner
+        | RemediationActionKind::AcknowledgeBaseline => "governance",
+    }
+}
+
+/// Build a summary of actions grouped by phase.
+fn build_phase_summary(actions: &[RemediationAction]) -> Vec<FixPlanPhase> {
+    let mut phases: Vec<FixPlanPhase> = Vec::new();
+
+    let phase_defs: &[(&str, usize, &str)] = &[
+        ("dead-code", 0, "Remove unused files, exports, and dependencies."),
+        ("architecture", 1, "Break cycles, move imports, and restructure packages."),
+        ("governance", 2, "Update boundary rules, assign owners, and acknowledge baselines."),
+    ];
+
+    for &(name, order, description) in phase_defs {
+        let count = actions.iter().filter(|a| a.phase.as_deref() == Some(name)).count();
+        if count > 0 {
+            phases.push(FixPlanPhase {
+                name: name.to_string(),
+                order,
+                action_count: count,
+                description: description.to_string(),
+            });
+        }
+    }
+
+    phases
 }
 
 /// Compute a stable deletion order for safe-delete targets.
@@ -1820,6 +2325,48 @@ pub fn migrate_depcruise_json(options: JsMigrateDepcruiseOptions) -> napi::Resul
     )
     .map_err(|err| napi::Error::from_reason(err.to_string()))?;
     serde_json::to_string(&output).map_err(|err| napi::Error::from_reason(err.to_string()))
+}
+
+#[cfg(feature = "napi")]
+#[napi(object)]
+pub struct JsDebugFrameworksOptions {
+    pub cwd: Option<String>,
+    pub config: Option<String>,
+    pub profile: Option<String>,
+}
+
+#[cfg(feature = "napi")]
+#[napi(object)]
+pub struct JsCompatibilityReportOptions {
+    pub cwd: Option<String>,
+    pub config: Option<String>,
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn debug_frameworks_json(options: JsDebugFrameworksOptions) -> napi::Result<String> {
+    let cwd = options
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let report = debug_frameworks(&cwd, parse_profile(options.profile.as_deref()))
+        .map_err(|err| napi::Error::from_reason(err.to_string()))?;
+    serde_json::to_string(&report).map_err(|err| napi::Error::from_reason(err.to_string()))
+}
+
+#[cfg(feature = "napi")]
+#[napi]
+pub fn compatibility_report_json(options: JsCompatibilityReportOptions) -> napi::Result<String> {
+    let cwd = options
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let profile = EntrypointProfile::Both; // compatibility-report uses all profiles
+    let report = compatibility_report(&cwd, profile)
+        .map_err(|err| napi::Error::from_reason(err.to_string()))?;
+    serde_json::to_string(&report).map_err(|err| napi::Error::from_reason(err.to_string()))
 }
 
 #[cfg(feature = "napi")]

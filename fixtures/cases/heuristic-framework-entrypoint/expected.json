@@ -1,0 +1,16 @@
+{
+  "description": "Partial framework signals (pages/ dir + react-router but no explicit framework dep) should trigger heuristic detection with trust notes",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "Unreferenced file should be flagged regardless of heuristic detection"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.frameworkDetection",
+      "note": "Framework detection metadata should indicate heuristic signals were used"
+    }
+  ]
+}

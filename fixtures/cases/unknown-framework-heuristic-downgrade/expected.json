@@ -1,0 +1,16 @@
+{
+  "description": "Unsupported framework (Gatsby) should trigger a compatibility warning and findings should have lower confidence or advisory status",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File with no importers should still be flagged even with unsupported framework"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.frameworkCompatibility",
+      "note": "Compatibility metadata should be present when unsupported frameworks are detected"
+    }
+  ]
+}

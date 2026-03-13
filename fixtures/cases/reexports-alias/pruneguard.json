@@ -1,0 +1,6 @@
+{
+  "analysis": {
+    "unusedExports": "warn",
+    "unusedFiles": "warn"
+  }
+}

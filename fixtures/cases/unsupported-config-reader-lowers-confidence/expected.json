@@ -1,0 +1,22 @@
+{
+  "description": "Highly dynamic next.config.ts should trigger config reader warning and lower finding confidence",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "Unreferenced file should still be flagged"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "app/page.tsx",
+      "note": "Next.js App Router page -- should be recognized as entrypoint"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.configReadStatus",
+      "note": "Config reader should report partial or degraded status for highly dynamic config"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Dependencies referenced in package.json scripts should not be flagged as unused",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-dependency",
+      "subject": "eslint",
+      "note": "eslint is referenced in scripts.lint ('eslint src/') -- should not be flagged"
+    }
+  ]
+}

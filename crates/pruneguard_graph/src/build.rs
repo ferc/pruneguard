@@ -300,6 +300,9 @@ pub fn build_graph_with_options(
                     Some(pruneguard_resolver::UnresolvedReason::Externalized) => {
                         unresolved_by_reason.externalized += 1;
                     }
+                    Some(pruneguard_resolver::UnresolvedReason::WorkspaceExportsMiss) => {
+                        unresolved_by_reason.workspace_exports_miss += 1;
+                    }
                     Some(pruneguard_resolver::UnresolvedReason::MissingFile) | None => {
                         unresolved_by_reason.missing_file += 1;
                     }
@@ -347,6 +350,12 @@ pub fn build_graph_with_options(
         reused_graph_nodes: None,
         reused_graph_edges: None,
         watcher_lag_ms: None,
+        frameworks_detected: Vec::new(),
+        heuristic_frameworks: Vec::new(),
+        heuristic_entrypoints: 0,
+        compatibility_warnings: Vec::new(),
+        strict_trust_applied: false,
+        framework_confidence_counts: pruneguard_report::FrameworkConfidenceCounts::default(),
     };
 
     Ok(GraphBuildResult {
@@ -689,9 +698,7 @@ fn detect_all_entrypoints(
                     && relative
                         .file_name()
                         .and_then(|name| name.to_str())
-                        .is_some_and(|name| {
-                            name.contains(".stories.") || name.contains(".story.")
-                        })
+                        .is_some_and(|name| name.contains(".stories.") || name.contains(".story."))
                 {
                     return false;
                 }
@@ -850,6 +857,9 @@ fn build_entrypoints(
             profile: seed.profile.as_str().to_string(),
             workspace: seed.workspace.clone(),
             source: seed.source.clone(),
+            framework: None,
+            reason: None,
+            heuristic: None,
         });
     }
 

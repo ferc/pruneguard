@@ -63,21 +63,25 @@ pub fn analyze(
         // Only count genuinely-missed specifiers toward the pressure threshold.
         let effective_unresolved = file_unresolved.saturating_sub(file_unresolved_benign);
 
-        let confidence = if effective_unresolved >= 5 || global_pressure_pct > 15.0 {
-            // Many unresolved specifiers locally or globally — high chance of false positive.
-            FindingConfidence::Low
-        } else if has_zero_incoming_edges(build, file_id) && effective_unresolved == 0 {
-            // Zero incoming edges and zero unresolved specifiers — truly unreachable.
-            // But demote to Medium if global pressure is notable.
-            if global_pressure_pct > 5.0 {
-                FindingConfidence::Medium
+        // Check unresolved pressure in sibling files (same directory).
+        let neighbor_pressure = neighbor_unresolved_pressure(build, extracted_file);
+
+        let confidence =
+            if effective_unresolved >= 5 || global_pressure_pct > 15.0 || neighbor_pressure >= 8 {
+                // Many unresolved specifiers locally, globally, or in neighbors.
+                FindingConfidence::Low
+            } else if has_zero_incoming_edges(build, file_id) && effective_unresolved == 0 {
+                // Zero incoming edges AND zero unresolved -- truly unreachable.
+                // Demote to Medium if global pressure or neighbor pressure is notable.
+                if global_pressure_pct > 5.0 || neighbor_pressure >= 3 {
+                    FindingConfidence::Medium
+                } else {
+                    FindingConfidence::High
+                }
             } else {
-                FindingConfidence::High
-            }
-        } else {
-            // Some unresolved specifiers (< 5) or has some incoming edges.
-            FindingConfidence::Medium
-        };
+                // Some unresolved specifiers (< 5) or has some incoming edges.
+                FindingConfidence::Medium
+            };
         if effective_unresolved >= 3 {
             evidence.push(Evidence {
                 kind: "unresolved-pressure".to_string(),
@@ -134,24 +138,43 @@ fn count_unresolved_specifiers(file: &pruneguard_extract::ExtractedFile) -> usiz
         .count()
 }
 
-/// Count unresolved specifiers that are "benign" — i.e. they are asset imports,
-/// externalized built-ins, or unsupported specifiers that should not count toward
-/// the unresolved-pressure threshold.
+/// Count unresolved specifiers that are "benign" -- asset imports,
+/// externalized built-ins, or unsupported specifiers.
 fn count_benign_unresolved(file: &pruneguard_extract::ExtractedFile) -> usize {
     file.resolved_imports
         .iter()
         .chain(&file.resolved_reexports)
         .filter(|edge| {
             matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved)
-                && matches!(
-                    edge.unresolved_reason,
-                    Some(
-                        pruneguard_resolver::UnresolvedReason::UnsupportedSpecifier
-                            | pruneguard_resolver::UnresolvedReason::Externalized
-                    )
-                )
+                && edge
+                    .unresolved_reason
+                    .is_some_and(pruneguard_resolver::UnresolvedReason::is_benign)
         })
         .count()
+}
+
+/// Count effective (non-benign) unresolved specifiers across files in the same
+/// directory.  High neighbor pressure degrades trust in a dead-file finding.
+fn neighbor_unresolved_pressure(
+    build: &GraphBuildResult,
+    target: &pruneguard_extract::ExtractedFile,
+) -> usize {
+    let Some(parent) = target.file.relative_path.parent() else {
+        return 0;
+    };
+    let mut total = 0usize;
+    for file in &build.files {
+        if std::ptr::eq(file, target) {
+            continue;
+        }
+        if file.file.relative_path.parent() != Some(parent) {
+            continue;
+        }
+        let unresolved = count_unresolved_specifiers(file);
+        let benign = count_benign_unresolved(file);
+        total = total.saturating_add(unresolved.saturating_sub(benign));
+    }
+    total
 }
 
 /// Count global unresolved specifiers across the entire build.
@@ -166,9 +189,7 @@ const fn count_global_resolved(build: &GraphBuildResult) -> usize {
 
 fn is_ambient_declaration_file(path: &std::path::Path) -> bool {
     let path_str = path.to_string_lossy();
-    path_str.ends_with(".d.ts")
-        || path_str.ends_with(".d.mts")
-        || path_str.ends_with(".d.cts")
+    path_str.ends_with(".d.ts") || path_str.ends_with(".d.mts") || path_str.ends_with(".d.cts")
 }
 
 /// Exclude files that are global augmentation declarations or environment shims.

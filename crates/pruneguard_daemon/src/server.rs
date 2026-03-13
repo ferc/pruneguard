@@ -7,9 +7,7 @@ use tokio::sync::{Mutex, watch};
 
 use crate::index::HotIndex;
 use crate::metadata::DaemonMetadata;
-use crate::protocol::{
-    DaemonRequest, DaemonResponse, DaemonStatusInfo, read_frame, write_frame,
-};
+use crate::protocol::{DaemonRequest, DaemonResponse, DaemonStatusInfo, read_frame, write_frame};
 use crate::watcher::FileWatcher;
 
 /// Errors that can occur in the daemon server.
@@ -38,10 +36,7 @@ pub struct DaemonServer {
 
 impl DaemonServer {
     /// Create a new daemon server for the given project root and config.
-    pub fn new(
-        project_root: PathBuf,
-        config: pruneguard_config::PruneguardConfig,
-    ) -> Self {
+    pub fn new(project_root: PathBuf, config: pruneguard_config::PruneguardConfig) -> Self {
         let token = DaemonMetadata::generate_token();
         Self {
             index: Arc::new(Mutex::new(HotIndex::new(project_root.clone(), config))),
@@ -62,9 +57,8 @@ impl DaemonServer {
         tracing::info!("daemon listening on 127.0.0.1:{port}");
 
         // Write metadata file.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
+        let now =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let started_at_iso = format_epoch_as_iso(now.as_secs());
 
         let metadata = DaemonMetadata {
@@ -177,9 +171,7 @@ async fn handle_connection(
         Some(data) => {
             let token = String::from_utf8_lossy(&data);
             if token.trim() != expected_token {
-                let resp = DaemonResponse::Error {
-                    message: "authentication failed".to_string(),
-                };
+                let resp = DaemonResponse::Error { message: "authentication failed".to_string() };
                 let json = serde_json::to_vec(&resp).unwrap_or_default();
                 write_frame(&mut writer, &json).await?;
                 return Ok(());
@@ -193,23 +185,15 @@ async fn handle_connection(
         let request: DaemonRequest = match serde_json::from_slice(&data) {
             Ok(req) => req,
             Err(err) => {
-                let resp = DaemonResponse::Error {
-                    message: format!("invalid request: {err}"),
-                };
+                let resp = DaemonResponse::Error { message: format!("invalid request: {err}") };
                 let json = serde_json::to_vec(&resp).unwrap_or_default();
                 write_frame(&mut writer, &json).await?;
                 continue;
             }
         };
 
-        let response = dispatch_request(
-            request,
-            &index,
-            &shutdown_tx,
-            project_root,
-            started_at,
-        )
-        .await;
+        let response =
+            dispatch_request(request, &index, &shutdown_tx, project_root, started_at).await;
 
         let json = serde_json::to_vec(&response).unwrap_or_default();
         write_frame(&mut writer, &json).await?;

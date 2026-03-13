@@ -1,0 +1,29 @@
+{
+  "description": "Cypress config, e2e specs, and support files should be classified correctly, not flagged as dead code",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "cypress.config.ts",
+      "note": "Cypress config -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "cypress/e2e/spec.cy.ts",
+      "note": "Cypress e2e spec -- should be classified as test entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "cypress/support/commands.ts",
+      "note": "Cypress support file -- loaded by Cypress convention"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any Cypress config -- should be flagged"
+    }
+  ]
+}

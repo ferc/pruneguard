@@ -1,0 +1,9 @@
+{
+  "resolver": {
+    "respectExports": true
+  },
+  "analysis": {
+    "unusedFiles": "warn",
+    "unusedExports": "warn"
+  }
+}

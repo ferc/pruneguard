@@ -128,20 +128,24 @@ pub fn analyze(
         let subject = format!("{relative_path}#{}", export.name);
         let (unresolved_count, benign_unresolved) = file_unresolved_counts(build, export.file);
         let effective_unresolved = unresolved_count.saturating_sub(benign_unresolved);
-        let confidence = if effective_unresolved >= 5 || global_pressure_pct > 15.0 {
-            // Many unresolved specifiers — high chance of false positive.
-            FindingConfidence::Low
-        } else if effective_unresolved == 0 && !live.has_any_demand(export.file) {
-            // Truly isolated unused export: no unresolved specifiers and no demand on the file.
-            if global_pressure_pct > 5.0 {
-                FindingConfidence::Medium
+        let neighbor_pressure = neighbor_unresolved_pressure(build, export.file);
+
+        let confidence =
+            if effective_unresolved >= 5 || global_pressure_pct > 15.0 || neighbor_pressure >= 8 {
+                FindingConfidence::Low
+            } else if effective_unresolved == 0
+                && !live.has_any_demand(export.file)
+                && neighbor_pressure == 0
+            {
+                // Truly isolated: no unresolved, no demand, no neighbor pressure.
+                if global_pressure_pct > 5.0 {
+                    FindingConfidence::Medium
+                } else {
+                    FindingConfidence::High
+                }
             } else {
-                FindingConfidence::High
-            }
-        } else {
-            // Some unresolved specifiers (< 5) or file has demand but this export is unused.
-            FindingConfidence::Medium
-        };
+                FindingConfidence::Medium
+            };
         let mut evidence = vec![Evidence {
             kind: if export.is_type { "path" } else { "reachability" }.to_string(),
             file: Some(relative_path.clone()),
@@ -176,7 +180,23 @@ pub fn analyze(
     findings
 }
 
-/// Return (`total_unresolved`, `benign_unresolved`) for a file.
+/// Return (`total_unresolved`, `benign_unresolved`) from an `ExtractedFile`.
+fn file_unresolved_counts_raw(file: &pruneguard_extract::ExtractedFile) -> (usize, usize) {
+    let mut total = 0;
+    let mut benign = 0;
+    for edge in file.resolved_imports.iter().chain(&file.resolved_reexports) {
+        if matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved) {
+            total += 1;
+            if edge.unresolved_reason.is_some_and(pruneguard_resolver::UnresolvedReason::is_benign)
+            {
+                benign += 1;
+            }
+        }
+    }
+    (total, benign)
+}
+
+/// Return (`total_unresolved`, `benign_unresolved`) for a file by ID.
 fn file_unresolved_counts(build: &GraphBuildResult, file_id: FileId) -> (usize, usize) {
     let Some((_, ModuleNode::File { path, .. })) = build.module_graph.file_node_by_id(file_id)
     else {
@@ -185,24 +205,39 @@ fn file_unresolved_counts(build: &GraphBuildResult, file_id: FileId) -> (usize, 
     let Some(file) = build.find_file(path) else {
         return (1, 0);
     };
+    file_unresolved_counts_raw(file)
+}
 
-    let mut total = 0;
-    let mut benign = 0;
-    for edge in file.resolved_imports.iter().chain(&file.resolved_reexports) {
-        if matches!(edge.outcome, pruneguard_resolver::ResolutionOutcome::Unresolved) {
-            total += 1;
-            if matches!(
-                edge.unresolved_reason,
-                Some(
-                    pruneguard_resolver::UnresolvedReason::UnsupportedSpecifier
-                        | pruneguard_resolver::UnresolvedReason::Externalized
-                )
-            ) {
-                benign += 1;
-            }
+/// Count effective (non-benign) unresolved specifiers across files that are
+/// connected to the given file by import/re-export edges.
+fn neighbor_unresolved_pressure(build: &GraphBuildResult, file_id: FileId) -> usize {
+    use petgraph::visit::EdgeRef;
+    let Some((node_index, _)) = build.module_graph.file_node_by_id(file_id) else {
+        return 0;
+    };
+    let mut total = 0usize;
+    let mut visited = FxHashSet::default();
+    for edge in build.module_graph.graph.edges_directed(node_index, petgraph::Direction::Incoming) {
+        if let pruneguard_graph::ModuleNode::File { path, .. } =
+            &build.module_graph.graph[edge.source()]
+            && visited.insert(path.clone())
+            && let Some(file) = build.find_file(path)
+        {
+            let (unresolved, benign) = file_unresolved_counts_raw(file);
+            total = total.saturating_add(unresolved.saturating_sub(benign));
         }
     }
-    (total, benign)
+    for edge in build.module_graph.graph.edges(node_index) {
+        if let pruneguard_graph::ModuleNode::File { path, .. } =
+            &build.module_graph.graph[edge.target()]
+            && visited.insert(path.clone())
+            && let Some(file) = build.find_file(path)
+        {
+            let (unresolved, benign) = file_unresolved_counts_raw(file);
+            total = total.saturating_add(unresolved.saturating_sub(benign));
+        }
+    }
+    total
 }
 
 fn is_ambient_declaration(relative_path: &str) -> bool {
@@ -280,8 +315,7 @@ impl LiveDemand {
         // TypeScript emits the value at runtime).
         // A type export is live if there is value demand (the consumer may be re-exporting
         // the type under a value import specifier).
-        self.is_named_live(file, name, is_type)
-            || self.is_named_live(file, name, !is_type)
+        self.is_named_live(file, name, is_type) || self.is_named_live(file, name, !is_type)
     }
 
     fn has_any_demand(&self, file: FileId) -> bool {

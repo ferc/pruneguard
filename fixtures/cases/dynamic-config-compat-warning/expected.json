@@ -1,0 +1,16 @@
+{
+  "description": "Dynamic framework config (function call, env vars) should trigger a compatibility warning about partial config reading",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "Unreferenced file should still be flagged"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.configReadStatus",
+      "note": "Config read status should indicate partial or degraded reading of dynamic config"
+    }
+  ]
+}

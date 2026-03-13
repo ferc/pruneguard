@@ -300,6 +300,28 @@ pub struct FrameworksConfig {
     pub jest: Option<FrameworkToggle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storybook: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nuxt: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub astro: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sveltekit: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remix: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angular: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nx: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turborepo: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playwright: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cypress: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vitepress: Option<FrameworkToggle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docusaurus: Option<FrameworkToggle>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

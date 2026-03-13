@@ -1,0 +1,35 @@
+{
+  "description": "Astro pages, content config, and middleware should be recognized as entrypoints",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/pages/index.astro",
+      "note": "Astro page -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/pages/about.astro",
+      "note": "Astro page -- auto-discovered entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/content/config.ts",
+      "note": "Astro content collection config -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/middleware.ts",
+      "note": "Astro middleware -- framework entrypoint"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "File not referenced by any Astro convention -- should be flagged"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "strict-trust-review",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "nuxt": "3.9.0",
+    "vue": "3.4.0",
+    "some-unsupported-plugin": "1.0.0"
+  }
+}

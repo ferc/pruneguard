@@ -1,0 +1,146 @@
+# Framework corpus manifest
+# Used for integration testing and parity validation across framework-heavy repos.
+
+# ─── Tier 1: App Frameworks ───────────────────────────────────────────
+
+[[corpus]]
+name = "next-starter"
+framework = "next"
+source_type = "starter"
+# TODO: clone from create-next-app default template
+local_path = ""
+expected_trust = "high"
+representative_target = "app/page.tsx"
+known_warnings = []
+
+[[corpus]]
+name = "nuxt-starter"
+framework = "nuxt"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "app.vue"
+known_warnings = []
+
+[[corpus]]
+name = "astro-starter"
+framework = "astro"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "src/pages/index.astro"
+known_warnings = []
+
+[[corpus]]
+name = "sveltekit-starter"
+framework = "sveltekit"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "src/routes/+page.svelte"
+known_warnings = []
+
+[[corpus]]
+name = "remix-starter"
+framework = "remix"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "app/root.tsx"
+known_warnings = []
+
+# ─── Tier 2: Monorepo/Build Systems ──────────────────────────────────
+
+[[corpus]]
+name = "nx-starter"
+framework = "nx"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "nx.json"
+known_warnings = []
+
+[[corpus]]
+name = "turborepo-starter"
+framework = "turborepo"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "turbo.json"
+known_warnings = []
+
+[[corpus]]
+name = "angular-starter"
+framework = "angular"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "src/main.ts"
+known_warnings = []
+
+# ─── Tier 3: Dev/Runtime Tooling ─────────────────────────────────────
+
+[[corpus]]
+name = "playwright-starter"
+framework = "playwright"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "playwright.config.ts"
+known_warnings = []
+
+[[corpus]]
+name = "cypress-starter"
+framework = "cypress"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "cypress.config.ts"
+known_warnings = []
+
+[[corpus]]
+name = "vitepress-starter"
+framework = "vitepress"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = ".vitepress/config.ts"
+known_warnings = []
+
+[[corpus]]
+name = "docusaurus-starter"
+framework = "docusaurus"
+source_type = "starter"
+local_path = ""
+expected_trust = "high"
+representative_target = "docusaurus.config.js"
+known_warnings = []
+
+# ─── Adversarial Fixtures ────────────────────────────────────────────
+
+[[corpus]]
+name = "adversarial-route-autodiscovery"
+framework = "mixed"
+source_type = "adversarial"
+local_path = "fixtures/cases/heuristic-framework-entrypoint"
+expected_trust = "medium"
+representative_target = "pages/index.tsx"
+known_warnings = ["heuristic-detection"]
+
+[[corpus]]
+name = "adversarial-dynamic-config"
+framework = "next"
+source_type = "adversarial"
+local_path = "fixtures/cases/dynamic-config-compat-warning"
+expected_trust = "medium"
+representative_target = "src/used.ts"
+known_warnings = ["dynamic-config"]
+
+[[corpus]]
+name = "adversarial-unsupported-framework"
+framework = "mixed"
+source_type = "adversarial"
+local_path = "fixtures/cases/unknown-framework-heuristic-downgrade"
+expected_trust = "low"
+representative_target = "src/pages/index.tsx"
+known_warnings = ["unsupported-framework"]

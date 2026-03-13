@@ -1358,6 +1358,7 @@ dependencies = [
  "petgraph",
  "pruneguard_analyzers",
  "pruneguard_cache",
+ "pruneguard_compat",
  "pruneguard_config",
  "pruneguard_daemon",
  "pruneguard_discovery",
@@ -1414,6 +1415,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pruneguard_compat"
+version = "0.3.0"
+dependencies = [
+ "pruneguard_frameworks",
+ "pruneguard_manifest",
+ "serde",
+]
+
+[[package]]
 name = "pruneguard_config"
 version = "0.3.0"
 dependencies = [
@@ -1422,6 +1432,19 @@ dependencies = [
  "miette",
  "rustc-hash",
  "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "pruneguard_config_readers"
+version = "0.3.0"
+dependencies = [
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_parser",
+ "oxc_span",
  "serde",
  "serde_json",
  "thiserror",
@@ -1593,6 +1616,7 @@ dependencies = [
  "pruneguard_config",
  "rustc-hash",
  "serde",
+ "serde_json",
  "thiserror",
  "tracing",
 ]

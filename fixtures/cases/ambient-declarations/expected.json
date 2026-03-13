@@ -1,0 +1,22 @@
+{
+  "description": "Ambient .d.ts declaration files should not be flagged as dead code",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subjectEndsWith": ".d.ts",
+      "note": "No .d.ts file should ever be flagged as unused -- ambient declarations are excluded"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "Regular .ts file with no importers should still be flagged"
+    },
+    {
+      "assertion": "inventory-contains",
+      "path": "src/types.d.ts",
+      "note": "Ambient declaration must appear in file inventory"
+    }
+  ]
+}

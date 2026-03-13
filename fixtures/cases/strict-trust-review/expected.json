@@ -1,0 +1,22 @@
+{
+  "description": "When --strict-trust is used, findings from heuristic or unsupported framework signals should not block the review",
+  "expectations": [
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "pages/index.vue",
+      "note": "Nuxt page -- recognized entrypoint even with unsupported deps present"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/unused.ts",
+      "note": "Clearly unreferenced file should still be flagged"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.trustLevel",
+      "note": "Trust level should be present in stats for strict-trust evaluation"
+    }
+  ]
+}

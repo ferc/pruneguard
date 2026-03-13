@@ -21,6 +21,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "safe_delete_report_schema.json",
             serde_json::to_value(pruneguard_report::SafeDeleteReport::json_schema())?,
         ),
+        (
+            "fix_plan_report_schema.json",
+            serde_json::to_value(pruneguard_report::FixPlanReport::json_schema())?,
+        ),
     ];
 
     for (name, schema) in schemas {

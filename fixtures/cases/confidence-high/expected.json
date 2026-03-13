@@ -1,0 +1,16 @@
+{
+  "description": "All findings in a clean project (no unresolved imports) should have high confidence",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/clearly-unused.ts",
+      "confidence": "high"
+    },
+    {
+      "assertion": "all-findings-have-confidence",
+      "value": "high",
+      "note": "No unresolved imports means zero pressure -- all findings should be high confidence"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "description": "Validates that findings carry correct confidence tiers under varying unresolved pressure",
+  "expectations": [
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/clearly-dead.ts",
+      "note": "Zero incoming edges -- flagged regardless of pressure"
+    },
+    {
+      "assertion": "finding-exists",
+      "code": "unused-file",
+      "subject": "src/maybe-dead.ts",
+      "note": "No direct imports; confidence may be downgraded under unresolved pressure"
+    },
+    {
+      "assertion": "finding-absent",
+      "code": "unused-file",
+      "subject": "src/used.ts",
+      "note": "Directly imported by index.ts -- never flagged"
+    },
+    {
+      "assertion": "stat-present",
+      "field": "stats.confidenceCounts",
+      "note": "Confidence counts object must be present with high/medium/low tiers"
+    },
+    {
+      "assertion": "all-findings-have-confidence",
+      "note": "Every finding must carry a confidence field with a valid tier"
+    }
+  ]
+}

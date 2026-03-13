@@ -89,8 +89,7 @@ pub(crate) fn make_finding(
     });
     let id = finding_id(code, &subject, rule_name.as_deref(), &primary_evidence);
     let primary_action_kind = primary_action_kind_for_code(code);
-    let action_kinds =
-        primary_action_kind.map_or_else(Vec::new, |kind| vec![kind]);
+    let action_kinds = primary_action_kind.map_or_else(Vec::new, |kind| vec![kind]);
 
     Finding {
         id,
@@ -107,6 +106,8 @@ pub(crate) fn make_finding(
         rule_name,
         primary_action_kind,
         action_kinds,
+        trust_notes: None,
+        framework_context: None,
     }
 }
 

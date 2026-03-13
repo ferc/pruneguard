@@ -1,0 +1,9 @@
+{
+  "name": "playwright-config-and-tests",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@playwright/test": "1.40.0"
+  }
+}

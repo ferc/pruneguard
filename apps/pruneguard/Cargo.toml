@@ -41,6 +41,7 @@ pruneguard_rules = { workspace = true }
 pruneguard_report = { workspace = true }
 pruneguard_cache = { workspace = true }
 pruneguard_git = { workspace = true }
+pruneguard_compat = { workspace = true }
 pruneguard_daemon = { workspace = true }
 
 bpaf = { workspace = true }

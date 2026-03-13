@@ -1,0 +1,10 @@
+{
+  "description": "Debug frameworks output should list all detected frameworks (Next.js, Vitest, Storybook) with their signals",
+  "expectations": [
+    {
+      "assertion": "stat-present",
+      "field": "stats.detectedFrameworks",
+      "note": "Detected frameworks list should be present in stats"
+    }
+  ]
+}

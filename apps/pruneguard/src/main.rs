@@ -38,9 +38,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
     match options.command {
         cli::Command::Scan { paths } => {
             // Try daemon-backed scan first.
-            if let Some(exit) = try_daemon_scan(
-                &cwd, effective_daemon, &paths, &options.global,
-            )? {
+            if let Some(exit) = try_daemon_scan(&cwd, effective_daemon, &paths, &options.global)? {
                 return Ok(exit);
             }
 
@@ -70,9 +68,8 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
         }
         cli::Command::Impact { target } => {
             // Try daemon-backed impact first.
-            if let Some(exit) = try_daemon_impact(
-                &cwd, effective_daemon, &target, &options.global,
-            )? {
+            if let Some(exit) = try_daemon_impact(&cwd, effective_daemon, &target, &options.global)?
+            {
                 return Ok(exit);
             }
 
@@ -96,9 +93,8 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
         }
         cli::Command::Explain { query } => {
             // Try daemon-backed explain first.
-            if let Some(exit) = try_daemon_explain(
-                &cwd, effective_daemon, &query, &options.global,
-            )? {
+            if let Some(exit) = try_daemon_explain(&cwd, effective_daemon, &query, &options.global)?
+            {
                 return Ok(exit);
             }
 
@@ -120,11 +116,9 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        cli::Command::Review => {
+        cli::Command::Review { strict_trust } => {
             // Try daemon-backed review first.
-            if let Some(exit) = try_daemon_review(
-                &cwd, effective_daemon, &options.global,
-            )? {
+            if let Some(exit) = try_daemon_review(&cwd, effective_daemon, &options.global)? {
                 return Ok(exit);
             }
 
@@ -138,6 +132,7 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                     base_ref: options.global.changed_since.clone(),
                     no_cache: options.global.no_cache,
                     no_baseline: options.global.no_baseline,
+                    strict_trust,
                 },
             )?;
             print_report(&report, options.global.format)?;
@@ -214,9 +209,58 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             print_report(&report, options.global.format)?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::Command::CompatibilityReport => {
+            let _config = load_config_or_default(&cwd, options.config.as_deref())?;
+            let report = pruneguard::compatibility_report(&cwd, profile)?;
+            match options.global.format {
+                cli::OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&report).expect("serialize report")
+                    );
+                }
+                _ => {
+                    println!("--- compatibility report ---");
+                    println!();
+                    if !report.supported_frameworks.is_empty() {
+                        println!("supported frameworks:");
+                        for fw in &report.supported_frameworks {
+                            println!("  {fw}");
+                        }
+                    }
+                    if !report.heuristic_frameworks.is_empty() {
+                        println!("heuristic frameworks (partial support):");
+                        for fw in &report.heuristic_frameworks {
+                            println!("  {fw}");
+                        }
+                    }
+                    if !report.unsupported_signals.is_empty() {
+                        println!();
+                        println!("unsupported signals:");
+                        for sig in &report.unsupported_signals {
+                            print!("  {} (source: {})", sig.signal, sig.source);
+                            if let Some(suggestion) = &sig.suggestion {
+                                print!(" -- {suggestion}");
+                            }
+                            println!();
+                        }
+                    }
+                    if !report.warnings.is_empty() {
+                        println!();
+                        println!("warnings:");
+                        for warning in &report.warnings {
+                            println!("  {warning}");
+                        }
+                    }
+                    println!();
+                    println!("----------------------------");
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         cli::Command::Debug(debug_cmd) => {
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
-            run_debug(debug_cmd, &config, profile)
+            run_debug(debug_cmd, &config, profile, options.global.format)
         }
         cli::Command::Migrate(ref migrate_cmd) => run_migrate(migrate_cmd, options.global.format),
         cli::Command::Daemon(daemon_cmd) => run_daemon(&daemon_cmd),
@@ -330,9 +374,8 @@ fn try_daemon_review(
         return Ok(None);
     };
 
-    let request = pruneguard_daemon::DaemonRequest::Review {
-        base_ref: flags.changed_since.clone(),
-    };
+    let request =
+        pruneguard_daemon::DaemonRequest::Review { base_ref: flags.changed_since.clone() };
 
     match client.send_request(&request) {
         Ok(pruneguard_daemon::DaemonResponse::ReviewResult { report }) => {
@@ -342,11 +385,7 @@ fn try_daemon_review(
                 .get("blockingFindings")
                 .and_then(serde_json::Value::as_array)
                 .is_some_and(|arr| !arr.is_empty());
-            Ok(Some(if has_blocking {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
-            }))
+            Ok(Some(if has_blocking { ExitCode::from(1) } else { ExitCode::SUCCESS }))
         }
         Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
             if matches!(mode, cli::DaemonMode::Required) {
@@ -447,10 +486,7 @@ fn try_daemon_explain(
 }
 
 /// Print a daemon JSON report using the selected output format.
-fn print_daemon_report(
-    report: &serde_json::Value,
-    format: cli::OutputFormat,
-) {
+fn print_daemon_report(report: &serde_json::Value, format: cli::OutputFormat) {
     match format {
         cli::OutputFormat::Json
         | cli::OutputFormat::Text
@@ -467,6 +503,7 @@ fn run_debug(
     cmd: cli::DebugCommand,
     config: &pruneguard_config::PruneguardConfig,
     profile: EntrypointProfile,
+    format: cli::OutputFormat,
 ) -> miette::Result<ExitCode> {
     let cwd = std::env::current_dir().expect("failed to get current directory");
 
@@ -481,6 +518,72 @@ fn run_debug(
             let entrypoints = pruneguard::debug_entrypoints(&cwd, config, profile)?;
             for entrypoint in &entrypoints {
                 println!("{entrypoint}");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DebugCommand::Frameworks => {
+            let report = pruneguard::debug_frameworks(&cwd, profile)?;
+            match format {
+                cli::OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&report).expect("serialize report")
+                    );
+                }
+                _ => {
+                    println!("--- framework debug report ---");
+                    println!();
+                    if !report.detected_packs.is_empty() {
+                        println!("detected framework packs:");
+                        for pack in &report.detected_packs {
+                            println!(
+                                "  {} (confidence: {}, signals: {})",
+                                pack.name,
+                                pack.confidence,
+                                pack.signals.join(", ")
+                            );
+                            for reason in &pack.reasons {
+                                println!("    reason: {reason}");
+                            }
+                        }
+                    } else {
+                        println!("no framework packs detected.");
+                    }
+                    if !report.all_entrypoints.is_empty() {
+                        println!();
+                        println!("contributed entrypoints:");
+                        for ep in &report.all_entrypoints {
+                            println!(
+                                "  {} (framework: {}, kind: {}, heuristic: {})",
+                                ep.path, ep.framework, ep.kind, ep.heuristic
+                            );
+                            println!("    reason: {}", ep.reason);
+                        }
+                    }
+                    if !report.all_ignore_patterns.is_empty() {
+                        println!();
+                        println!("ignore patterns:");
+                        for pattern in &report.all_ignore_patterns {
+                            println!("  {pattern}");
+                        }
+                    }
+                    if !report.all_classification_rules.is_empty() {
+                        println!();
+                        println!("classification rules:");
+                        for rule in &report.all_classification_rules {
+                            println!("  {} -> {}", rule.pattern, rule.classification);
+                        }
+                    }
+                    if !report.heuristic_detections.is_empty() {
+                        println!();
+                        println!("heuristic detections:");
+                        for detection in &report.heuristic_detections {
+                            println!("  {detection}");
+                        }
+                    }
+                    println!();
+                    println!("------------------------------");
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -509,10 +612,7 @@ fn run_debug(
             println!("config: {config_status}");
             println!("resolution_source: binary");
             println!("ci: {is_ci}");
-            println!(
-                "default_execution_mode: {}",
-                if is_ci { "oneshot" } else { "daemon" }
-            );
+            println!("default_execution_mode: {}", if is_ci { "oneshot" } else { "daemon" });
 
             // Report daemon status if available.
             let project_root = find_project_root_dir(&cwd);
@@ -525,10 +625,7 @@ fn run_debug(
                     println!("daemon_version: {}", client.version());
                     match client.status() {
                         Ok(info) => {
-                            println!(
-                                "daemon_warm: {}",
-                                if info.index_warm { "yes" } else { "no" }
-                            );
+                            println!("daemon_warm: {}", if info.index_warm { "yes" } else { "no" });
                             println!("daemon_graph_nodes: {}", info.graph_nodes);
                             println!("daemon_graph_edges: {}", info.graph_edges);
                             println!("daemon_watched_files: {}", info.watched_files);
@@ -538,6 +635,11 @@ fn run_debug(
                                 println!("daemon_watcher_lag_ms: {lag}");
                             }
                             println!("daemon_uptime_secs: {}", info.uptime_secs);
+                            println!("daemon_project_root: {}", info.project_root);
+                            println!(
+                                "daemon_pending_invalidations: {}",
+                                info.pending_invalidations
+                            );
                         }
                         Err(err) => {
                             println!("daemon_status_error: {err}");
@@ -808,19 +910,34 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                             "  unresolved pressure: {pressure_pct:.1}% (moderate) — some findings may have lower accuracy"
                         );
                     } else {
-                        println!(
-                            "  unresolved pressure: {pressure_pct:.1}% (low)"
-                        );
+                        println!("  unresolved pressure: {pressure_pct:.1}% (low)");
                     }
                 }
 
                 // Unresolved breakdown by reason.
-                if let Some(by_reason) = stats.get("unresolvedByReason").and_then(serde_json::Value::as_object) {
-                    let missing = by_reason.get("missingFile").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let unsupported = by_reason.get("unsupportedSpecifier").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let tsconfig = by_reason.get("tsconfigPathMiss").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let exports_miss = by_reason.get("exportsConditionMiss").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let externalized = by_reason.get("externalized").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                if let Some(by_reason) =
+                    stats.get("unresolvedByReason").and_then(serde_json::Value::as_object)
+                {
+                    let missing = by_reason
+                        .get("missingFile")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let unsupported = by_reason
+                        .get("unsupportedSpecifier")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let tsconfig = by_reason
+                        .get("tsconfigPathMiss")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let exports_miss = by_reason
+                        .get("exportsConditionMiss")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let externalized = by_reason
+                        .get("externalized")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
                     if unresolved > 0 {
                         println!(
                             "  breakdown: missing={missing}, unsupported={unsupported}, tsconfig={tsconfig}, exports={exports_miss}, externalized={externalized}"
@@ -832,12 +949,13 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                 if let Some(confidence) =
                     stats.get("confidenceCounts").and_then(serde_json::Value::as_object)
                 {
-                    let high = confidence.get("high").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let medium = confidence.get("medium").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let low = confidence.get("low").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    println!(
-                        "confidence: high={high}, medium={medium}, low={low}",
-                    );
+                    let high =
+                        confidence.get("high").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let medium =
+                        confidence.get("medium").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let low =
+                        confidence.get("low").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    println!("confidence: high={high}, medium={medium}, low={low}",);
                     if high > 0 && low == 0 && medium == 0 {
                         println!("  all findings are high-confidence — safe to act on.");
                     } else if low > high + medium {
@@ -846,14 +964,18 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
                 }
 
                 // Daemon warm-index info.
-                if let Some(index_warm) = stats.get("indexWarm").and_then(serde_json::Value::as_bool)
-                    && index_warm {
-                        let age_ms = stats.get("indexAgeMs").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                        let reused_nodes = stats.get("reusedGraphNodes").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                        println!(
-                            "warm index: reused {reused_nodes} nodes, age {age_ms}ms"
-                        );
-                    }
+                if let Some(index_warm) =
+                    stats.get("indexWarm").and_then(serde_json::Value::as_bool)
+                    && index_warm
+                {
+                    let age_ms =
+                        stats.get("indexAgeMs").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let reused_nodes = stats
+                        .get("reusedGraphNodes")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    println!("warm index: reused {reused_nodes} nodes, age {age_ms}ms");
+                }
 
                 println!("---------------------");
 
@@ -1035,9 +1157,7 @@ fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
             if let Some(meta) = metadata {
                 let rt = tokio::runtime::Runtime::new()
                     .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
-                rt.block_on(async {
-                    send_daemon_shutdown(meta.port, &meta.token).await
-                })?;
+                rt.block_on(async { send_daemon_shutdown(meta.port, &meta.token).await })?;
                 eprintln!("daemon stopped");
                 Ok(ExitCode::SUCCESS)
             } else {
@@ -1052,12 +1172,10 @@ fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
                     println!("port: {}", client.port());
                     println!("version: {}", client.version());
                     println!("execution_mode: daemon");
+                    println!("project_root: {}", project_root.display());
                     match client.status() {
                         Ok(info) => {
-                            println!(
-                                "warm: {}",
-                                if info.index_warm { "yes" } else { "no" }
-                            );
+                            println!("warm: {}", if info.index_warm { "yes" } else { "no" });
                             println!("graph_nodes: {}", info.graph_nodes);
                             println!("graph_edges: {}", info.graph_edges);
                             println!("watched_files: {}", info.watched_files);
@@ -1084,6 +1202,23 @@ fn run_daemon(cmd: &cli::DaemonCommand) -> miette::Result<ExitCode> {
                     Ok(ExitCode::from(1))
                 }
             }
+        }
+        cli::DaemonCommand::Restart => {
+            // Stop any existing daemon, then start a new one.
+            if let Ok(Some(meta)) = pruneguard_daemon::DaemonMetadata::load(&project_root) {
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
+                rt.block_on(async { send_daemon_shutdown(meta.port, &meta.token).await }).ok();
+                eprintln!("previous daemon stopped");
+            }
+            let config = load_config_or_default(&project_root, None)?;
+            let server = pruneguard_daemon::DaemonServer::new(project_root, config);
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|err| miette::miette!("failed to create tokio runtime: {err}"))?;
+            rt.block_on(async {
+                server.run().await.map_err(|err| miette::miette!("daemon error: {err}"))
+            })?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
