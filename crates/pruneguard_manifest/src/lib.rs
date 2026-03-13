@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 /// A parsed `package.json` manifest.
@@ -24,7 +24,13 @@ pub struct PackageManifest {
     #[serde(default)]
     pub bin: Option<BinField>,
     #[serde(default)]
+    pub browser: Option<BrowserField>,
+    #[serde(default)]
+    pub typings: Option<String>,
+    #[serde(default)]
     pub exports: Option<serde_json::Value>,
+    #[serde(default)]
+    pub imports: Option<serde_json::Value>,
     #[serde(default)]
     pub workspaces: Option<WorkspacesField>,
     #[serde(default)]
@@ -45,6 +51,14 @@ pub struct PackageManifest {
 pub enum BinField {
     Single(String),
     Map(FxHashMap<String, String>),
+}
+
+/// The `browser` field can be a string or a map of replacements.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BrowserField {
+    Single(String),
+    Map(FxHashMap<String, serde_json::Value>),
 }
 
 /// The `workspaces` field can be an array or an object.
@@ -89,7 +103,7 @@ impl PackageManifest {
         self.dev_dependencies.iter().flat_map(|deps| deps.keys()).map(String::as_str)
     }
 
-    /// Get all entrypoint files from main, module, types, bin, and exports.
+    /// Get all entrypoint files from main, module, types, typings, browser, bin, and exports.
     pub fn entrypoint_files(&self) -> Vec<String> {
         let mut files = Vec::new();
         if let Some(main) = &self.main {
@@ -100,6 +114,23 @@ impl PackageManifest {
         }
         if let Some(types) = &self.types {
             files.push(types.clone());
+        }
+        if let Some(typings) = &self.typings {
+            files.push(typings.clone());
+        }
+        if let Some(browser) = &self.browser {
+            match browser {
+                BrowserField::Single(path) => files.push(path.clone()),
+                BrowserField::Map(map) => {
+                    for value in map.values() {
+                        if let Some(path) = value.as_str()
+                            && looks_like_entrypoint(path)
+                        {
+                            files.push(path.to_string());
+                        }
+                    }
+                }
+            }
         }
         if let Some(bin) = &self.bin {
             match bin {
@@ -131,6 +162,73 @@ impl PackageManifest {
     /// Check whether the exports map defines a `types` condition for any subpath.
     pub fn exports_has_types_condition(&self) -> bool {
         self.exports.as_ref().is_some_and(|exports| exports_contains_condition(exports, "types"))
+    }
+
+    /// Expand wildcard patterns in the `exports` map against a file inventory.
+    ///
+    /// For example, given `"exports": { "./*": "./src/*.js" }` and an inventory
+    /// containing `src/foo.js`, this returns `[PathBuf("src/foo.js")]`.
+    pub fn expand_wildcard_exports(&self, file_inventory: &[PathBuf]) -> Vec<PathBuf> {
+        let Some(exports) = &self.exports else {
+            return Vec::new();
+        };
+        let mut wildcard_patterns = Vec::new();
+        collect_wildcard_export_patterns(exports, &mut wildcard_patterns);
+
+        if wildcard_patterns.is_empty() {
+            return Vec::new();
+        }
+
+        let mut result = FxHashSet::default();
+        for pattern in &wildcard_patterns {
+            // Pattern is something like `./src/*.js`.  Convert the `*` into a
+            // simple prefix/suffix match on the file inventory.
+            let pattern_str = pattern.strip_prefix("./").unwrap_or(pattern);
+            if let Some(star_pos) = pattern_str.find('*') {
+                let prefix = &pattern_str[..star_pos];
+                let suffix = &pattern_str[star_pos + 1..];
+                for path in file_inventory {
+                    let path_str = path.to_string_lossy();
+                    // Normalise: strip leading "./"
+                    let normalized = path_str.strip_prefix("./").unwrap_or(&path_str);
+                    if normalized.starts_with(prefix) && normalized.ends_with(suffix) {
+                        result.insert(path.clone());
+                    }
+                }
+            }
+        }
+
+        let mut expanded: Vec<PathBuf> = result.into_iter().collect();
+        expanded.sort();
+        expanded
+    }
+
+    /// Resolve a `#`-prefixed subpath import alias from the `imports` field.
+    ///
+    /// Supports:
+    /// - Exact matches: `"#utils"` → `"./src/utils/index.ts"`
+    /// - Condition maps: `"#utils": { "import": "./src/utils.mjs", "default": "./src/utils.js" }`
+    /// - Wildcard patterns: `"#utils/*"` matches `"#utils/foo"` and substitutes the `*` portion
+    pub fn resolve_import_alias(&self, specifier: &str) -> Option<String> {
+        let Some(serde_json::Value::Object(map)) = &self.imports else {
+            return None;
+        };
+
+        // Exact match.
+        if let Some(value) = map.get(specifier) {
+            return resolve_imports_value(value);
+        }
+
+        // Wildcard pattern match: e.g. `#utils/*` matches `#utils/foo`.
+        for (pattern, value) in map {
+            if let Some(prefix) = pattern.strip_suffix('*')
+                && let Some(rest) = specifier.strip_prefix(prefix)
+            {
+                return resolve_imports_value(value).map(|target| target.replace('*', rest));
+            }
+        }
+
+        None
     }
 
     /// Check whether the exports map defines a specific subpath (exact or wildcard).
@@ -219,6 +317,74 @@ fn exports_contains_condition(value: &serde_json::Value, condition: &str) -> boo
             arr.iter().any(|v| exports_contains_condition(v, condition))
         }
         _ => false,
+    }
+}
+
+/// Collect the target file patterns (values) from wildcard subpath exports.
+fn collect_wildcard_export_patterns(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_subpath_map = map.keys().any(|k| k.starts_with('.'));
+            if is_subpath_map {
+                for (key, val) in map {
+                    if key.contains('*') {
+                        // This is a wildcard subpath — collect its target patterns.
+                        collect_export_paths_including_wildcards(val, output);
+                    }
+                }
+            } else {
+                // Condition map — recurse into values.
+                for val in map.values() {
+                    collect_wildcard_export_patterns(val, output);
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for val in arr {
+                collect_wildcard_export_patterns(val, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Like `collect_export_paths` but includes wildcard patterns (paths containing `*`).
+fn collect_export_paths_including_wildcards(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(path) => {
+            output.push(path.clone());
+        }
+        serde_json::Value::Array(values) => {
+            for v in values {
+                collect_export_paths_including_wildcards(v, output);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values() {
+                collect_export_paths_including_wildcards(v, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Resolve a single value from the `imports` field.
+/// The value can be a string, a condition map, or an array (first match wins).
+fn resolve_imports_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(map) => {
+            // Condition map — try "import", "require", "default" in priority order.
+            for condition in &["import", "require", "default"] {
+                if let Some(v) = map.get(*condition) {
+                    return resolve_imports_value(v);
+                }
+            }
+            // Fall back to any value.
+            map.values().find_map(resolve_imports_value)
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(resolve_imports_value),
+        _ => None,
     }
 }
 

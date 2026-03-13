@@ -1,0 +1,10 @@
+{
+  "$schema": "../../configuration_schema.json",
+  "ignoreIssues": [
+    {
+      "kind": "unusedFile",
+      "files": ["src/legacy/**"],
+      "comment": "Legacy code scheduled for removal"
+    }
+  ]
+}

@@ -58,6 +58,13 @@ impl Merge for PruneguardConfig {
             merged.extend(self.overrides.clone());
             self.overrides = merged;
         }
+
+        // ignore_issues: append
+        if !base.ignore_issues.is_empty() {
+            let mut merged = base.ignore_issues.clone();
+            merged.extend(self.ignore_issues.clone());
+            self.ignore_issues = merged;
+        }
     }
 }
 

@@ -12,7 +12,8 @@ use pruneguard_cache::{
 use pruneguard_config::{EntrypointsConfig, PruneguardConfig};
 use pruneguard_discovery::{DiscoveryResult, discover};
 use pruneguard_entrypoints::{
-    EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, detect_entrypoints,
+    EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, EntrypointSurfaceKind,
+    detect_entrypoints,
 };
 use pruneguard_extract::{ExtractedFile, extract_file_facts};
 use pruneguard_frameworks::built_in_packs;
@@ -280,7 +281,12 @@ pub fn build_graph_with_options(
 
     let entrypoints =
         build_entrypoints(&mut module_graph, &entrypoint_seeds, &file_nodes, &package_nodes);
-    seed_public_exports(&mut symbol_graph, &entrypoint_seeds, &file_nodes);
+    seed_public_exports_with_config(
+        &mut symbol_graph,
+        &entrypoint_seeds,
+        &file_nodes,
+        config.entrypoints.include_entry_exports,
+    );
 
     let mut files_resolved = 0;
     let mut unresolved_specifiers = 0;
@@ -855,13 +861,35 @@ fn build_entrypoints(
     entrypoints
 }
 
-fn seed_public_exports(
+fn seed_public_exports_with_config(
     symbol_graph: &mut SymbolGraph,
     entrypoint_seeds: &[EntrypointSeed],
     file_nodes: &FxHashMap<PathBuf, (crate::FileId, petgraph::graph::NodeIndex)>,
+    include_entry_exports: bool,
 ) {
     for seed in entrypoint_seeds {
-        if let Some((file_id, _)) = file_nodes.get(&seed.path) {
+        let Some((file_id, _)) = file_nodes.get(&seed.path) else {
+            continue;
+        };
+
+        // Decide whether this seed's exports should be marked live.
+        //
+        // - PublicApi and FrameworkConvention exports are always live (these are
+        //   the package's public surface and framework-convention files like
+        //   Next.js pages).
+        // - Runtime / Tooling / Test / Story exports are only live when
+        //   `include_entry_exports` is false (the default).  When the flag is
+        //   true, those exports are *not* automatically marked live so the
+        //   analyzer can report unused exports in those files.
+        let should_mark_live = match seed.surface_kind {
+            EntrypointSurfaceKind::PublicApi | EntrypointSurfaceKind::FrameworkConvention => true,
+            EntrypointSurfaceKind::Runtime
+            | EntrypointSurfaceKind::Tooling
+            | EntrypointSurfaceKind::Test
+            | EntrypointSurfaceKind::Story => !include_entry_exports,
+        };
+
+        if should_mark_live {
             symbol_graph.mark_all_file_exports_live(*file_id, None);
         }
     }

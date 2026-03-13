@@ -21,7 +21,10 @@
         "cycles": "warn",
         "boundaries": "warn",
         "ownership": "warn",
-        "impact": "warn"
+        "impact": "warn",
+        "unusedMembers": "warn",
+        "duplicateExports": "warn",
+        "ignoreExportsUsedInFile": false
       },
       "allOf": [
         {
@@ -34,7 +37,8 @@
       "default": {
         "auto": true,
         "includeTests": false,
-        "includeStories": false
+        "includeStories": false,
+        "includeEntryExports": false
       },
       "allOf": [
         {
@@ -62,6 +66,13 @@
           "type": "null"
         }
       ]
+    },
+    "ignoreIssues": {
+      "description": "Suppress specific finding kinds from the report.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/IgnoreIssueRule"
+      }
     },
     "ignorePatterns": {
       "description": "Glob patterns for files to ignore entirely.",
@@ -143,6 +154,20 @@
             }
           ]
         },
+        "duplicateExports": {
+          "description": "Report duplicate exports (same symbol re-exported from multiple paths).",
+          "default": "warn",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnalysisSeverity"
+            }
+          ]
+        },
+        "ignoreExportsUsedInFile": {
+          "description": "When true, exports consumed only within the same file are still reported as unused.",
+          "default": false,
+          "type": "boolean"
+        },
         "impact": {
           "default": "warn",
           "allOf": [
@@ -176,6 +201,15 @@
           ]
         },
         "unusedFiles": {
+          "default": "warn",
+          "allOf": [
+            {
+              "$ref": "#/definitions/AnalysisSeverity"
+            }
+          ]
+        },
+        "unusedMembers": {
+          "description": "Report unused exported class/enum members (methods, properties, variants).",
           "default": "warn",
           "allOf": [
             {
@@ -224,6 +258,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "includeEntryExports": {
+          "description": "When true, runtime entrypoint exports are eligible to be reported as unused.  By default (`false`), only public-API entrypoint exports are checked.",
+          "default": false,
+          "type": "boolean"
         },
         "includeStories": {
           "description": "Whether to include story files as entrypoints.",
@@ -418,6 +457,33 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "IgnoreIssueRule": {
+      "description": "Rule for suppressing specific finding kinds.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "comment": {
+          "description": "Optional comment explaining why this is suppressed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "description": "Optional glob patterns — only suppress in matching files.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "description": "The finding kind to suppress (e.g. \"unusedExport\", \"unusedFile\", \"cycle\").",
+          "type": "string"
         }
       }
     },

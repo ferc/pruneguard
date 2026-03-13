@@ -21,6 +21,23 @@ pub struct FileFacts {
     pub dynamic_imports: Vec<DynamicImportInfo>,
     /// CJS `require()` calls.
     pub requires: Vec<RequireInfo>,
+    /// Non-standard dependency patterns (require.resolve, import.meta.glob, etc.).
+    #[serde(default)]
+    pub dependency_patterns: Vec<DependencyPattern>,
+}
+
+/// The kind of an exported declaration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportKind {
+    #[default]
+    Value,
+    Type,
+    Class,
+    Enum,
+    Namespace,
+    Reexport,
+    Default,
 }
 
 /// An export from a file.
@@ -30,6 +47,9 @@ pub struct ExportInfo {
     pub name: CompactString,
     /// Whether this is a type-only export.
     pub is_type: bool,
+    /// The kind of the exported declaration.
+    #[serde(default)]
+    pub export_kind: ExportKind,
     /// Source line (1-indexed).
     pub line: u32,
 }
@@ -100,6 +120,20 @@ pub struct RequireInfo {
     pub line: u32,
 }
 
+/// Non-standard dependency patterns detected during extraction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum DependencyPattern {
+    /// `require.resolve('specifier')` — resolves but doesn't import.
+    RequireResolve { specifier: String, line: u32 },
+    /// `import.meta.glob('./dir/*.ts')` — Vite glob import.
+    ImportMetaGlob { pattern: String, line: u32 },
+    /// `/// <reference path="..." />` or `/// <reference types="..." />`.
+    TripleSlashReference { path: String, is_types: bool, line: u32 },
+    /// `JSDoc` `@typedef {import('specifier').Type}` or `@type {import('...')}`.
+    JsDocImport { specifier: String, line: u32 },
+}
+
 /// Extracted and resolved facts for a tracked repository file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedFile {
@@ -160,6 +194,12 @@ fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractEr
 
     refine_runtime_specifier_calls(source, &mut facts);
     refine_namespace_imports(source, &mut facts);
+
+    let mut patterns = detect_require_resolve(source);
+    patterns.extend(detect_import_meta_glob(source));
+    patterns.extend(detect_triple_slash_references(source));
+    patterns.extend(detect_jsdoc_imports(source));
+    facts.dependency_patterns = patterns;
 
     Ok(facts)
 }
@@ -247,6 +287,11 @@ fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFa
                     facts.exports.push(ExportInfo {
                         name: CompactString::new(spec.exported.name().as_str()),
                         is_type: export.export_kind.is_type(),
+                        export_kind: if export.export_kind.is_type() {
+                            ExportKind::Type
+                        } else {
+                            ExportKind::Value
+                        },
                         line: export.span.start,
                     });
                 }
@@ -260,6 +305,7 @@ fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFa
             facts.exports.push(ExportInfo {
                 name: CompactString::new("default"),
                 is_type: false,
+                export_kind: ExportKind::Default,
                 line: export.span.start,
             });
         }
@@ -487,7 +533,11 @@ const fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$'
 }
 
-#[allow(clippy::naive_bytecount)]
+/// Count newlines in a byte slice to determine a 1-indexed line number.
+fn count_newlines(bytes: &[u8]) -> usize {
+    bytes.iter().fold(0, |acc, &b| acc + usize::from(b == b'\n'))
+}
+
 fn find_string_literal_calls<T>(source: &str, callee: &str) -> Vec<T>
 where
     T: FromCallMatch,
@@ -534,7 +584,7 @@ where
         }
 
         let specifier = source[literal_start..literal_end].to_string();
-        let line = 1 + bytes[..index].iter().filter(|byte| **byte == b'\n').count();
+        let line = 1 + count_newlines(&bytes[..index]);
         matches.push(T::from_call_match(specifier, u32::try_from(line).unwrap_or(u32::MAX)));
         index = literal_end + 2;
     }
@@ -573,6 +623,7 @@ fn extract_exports_from_declaration(
                     facts.exports.push(ExportInfo {
                         name: CompactString::new(&name),
                         is_type,
+                        export_kind: if is_type { ExportKind::Type } else { ExportKind::Value },
                         line: declarator.span.start,
                     });
                 }
@@ -583,6 +634,7 @@ fn extract_exports_from_declaration(
                 facts.exports.push(ExportInfo {
                     name: CompactString::new(id.name.as_str()),
                     is_type,
+                    export_kind: if is_type { ExportKind::Type } else { ExportKind::Value },
                     line: func.span.start,
                 });
             }
@@ -592,6 +644,7 @@ fn extract_exports_from_declaration(
                 facts.exports.push(ExportInfo {
                     name: CompactString::new(id.name.as_str()),
                     is_type,
+                    export_kind: if is_type { ExportKind::Type } else { ExportKind::Class },
                     line: class.span.start,
                 });
             }
@@ -600,6 +653,7 @@ fn extract_exports_from_declaration(
             facts.exports.push(ExportInfo {
                 name: CompactString::new(alias.id.name.as_str()),
                 is_type: true,
+                export_kind: ExportKind::Type,
                 line: alias.span.start,
             });
         }
@@ -607,6 +661,7 @@ fn extract_exports_from_declaration(
             facts.exports.push(ExportInfo {
                 name: CompactString::new(iface.id.name.as_str()),
                 is_type: true,
+                export_kind: ExportKind::Type,
                 line: iface.span.start,
             });
         }
@@ -614,6 +669,7 @@ fn extract_exports_from_declaration(
             facts.exports.push(ExportInfo {
                 name: CompactString::new(enum_decl.id.name.as_str()),
                 is_type,
+                export_kind: if is_type { ExportKind::Type } else { ExportKind::Enum },
                 line: enum_decl.span.start,
             });
         }
@@ -822,6 +878,207 @@ fn find_byte(haystack: &[u8], start: usize, byte: u8) -> Option<usize> {
     haystack[start..].iter().position(|&b| b == byte).map(|pos| pos + start)
 }
 
+// ---------------------------------------------------------------------------
+// Dynamic dependency pattern detectors
+// ---------------------------------------------------------------------------
+
+/// Detect `require.resolve('specifier')` calls via simple text scanning.
+fn detect_require_resolve(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"require.resolve(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        // Check word boundary before `require`
+        let before = index.checked_sub(1).and_then(|i| bytes.get(i).copied());
+        if before.is_some_and(is_identifier_byte) {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() || bytes.get(literal_end + 1) != Some(&b')') {
+            index += 1;
+            continue;
+        }
+
+        let specifier = source[literal_start..literal_end].to_string();
+        let line = 1 + count_newlines(&bytes[..index]);
+        results.push(DependencyPattern::RequireResolve {
+            specifier,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
+        });
+        index = literal_end + 2;
+    }
+
+    results
+}
+
+/// Detect `import.meta.glob('pattern')` calls via simple text scanning.
+fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"import.meta.glob(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() {
+            index += 1;
+            continue;
+        }
+
+        let pattern = source[literal_start..literal_end].to_string();
+        let line = 1 + count_newlines(&bytes[..index]);
+        results.push(DependencyPattern::ImportMetaGlob {
+            pattern,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
+        });
+        index = literal_end + 1;
+    }
+
+    results
+}
+
+/// Detect `/// <reference path="..." />` and `/// <reference types="..." />`
+/// directives via line-by-line text scanning.
+fn detect_triple_slash_references(source: &str) -> Vec<DependencyPattern> {
+    let mut results = Vec::new();
+
+    for (line_number, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("/// <reference ") {
+            continue;
+        }
+
+        let line_u32 = u32::try_from(line_number + 1).unwrap_or(u32::MAX);
+
+        if let Some(path_val) = extract_attr_value(trimmed, "path") {
+            results.push(DependencyPattern::TripleSlashReference {
+                path: path_val,
+                is_types: false,
+                line: line_u32,
+            });
+        } else if let Some(types_val) = extract_attr_value(trimmed, "types") {
+            results.push(DependencyPattern::TripleSlashReference {
+                path: types_val,
+                is_types: true,
+                line: line_u32,
+            });
+        }
+    }
+
+    results
+}
+
+/// Extract the value of an XML-like attribute, e.g. `path="foo"` -> `"foo"`.
+fn extract_attr_value(text: &str, attr: &str) -> Option<String> {
+    // Look for `attr="value"` or `attr='value'`
+    for separator in ['"', '\''] {
+        let pattern = format!("{attr}={separator}");
+        if let Some(start) = text.find(&pattern) {
+            let val_start = start + pattern.len();
+            if let Some(val_end) = text[val_start..].find(separator) {
+                return Some(text[val_start..val_start + val_end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Detect `JSDoc` `@type {import('specifier')}` and `@typedef {import('specifier')...}`
+/// patterns via simple text scanning.
+fn detect_jsdoc_imports(source: &str) -> Vec<DependencyPattern> {
+    let bytes = source.as_bytes();
+    let needle = b"import(";
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    while index + needle.len() + 2 < bytes.len() {
+        if !bytes[index..].starts_with(needle) {
+            index += 1;
+            continue;
+        }
+
+        // Only match inside JSDoc: look backward for `@type` or `@typedef` on the
+        // same line (or preceding line within a `/** ... */` block).
+        let line_start = bytes[..index].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        let prefix = &source[line_start..index];
+        let is_jsdoc =
+            prefix.contains("@type") || prefix.contains("@param") || prefix.contains("@returns");
+        if !is_jsdoc {
+            index += 1;
+            continue;
+        }
+
+        let quote_pos = index + needle.len();
+        let Some(quote) = bytes.get(quote_pos).copied() else {
+            break;
+        };
+        if !matches!(quote, b'"' | b'\'') {
+            index += 1;
+            continue;
+        }
+
+        let literal_start = quote_pos + 1;
+        let mut literal_end = literal_start;
+        while literal_end < bytes.len() && bytes[literal_end] != quote {
+            literal_end += 1;
+        }
+        if literal_end >= bytes.len() || bytes.get(literal_end + 1) != Some(&b')') {
+            index += 1;
+            continue;
+        }
+
+        let specifier = source[literal_start..literal_end].to_string();
+        let line = 1 + count_newlines(&bytes[..index]);
+        results.push(DependencyPattern::JsDocImport {
+            specifier,
+            line: u32::try_from(line).unwrap_or(u32::MAX),
+        });
+        index = literal_end + 2;
+    }
+
+    results
+}
+
 fn merge_facts(target: &mut FileFacts, source: FileFacts) {
     target.exports.extend(source.exports);
     target.imports.extend(source.imports);
@@ -829,6 +1086,7 @@ fn merge_facts(target: &mut FileFacts, source: FileFacts) {
     target.has_side_effects = target.has_side_effects || source.has_side_effects;
     target.dynamic_imports.extend(source.dynamic_imports);
     target.requires.extend(source.requires);
+    target.dependency_patterns.extend(source.dependency_patterns);
 }
 
 /// Errors from extraction.

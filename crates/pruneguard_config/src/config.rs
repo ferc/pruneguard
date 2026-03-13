@@ -53,6 +53,10 @@ pub struct PruneguardConfig {
     /// Per-path or per-workspace overrides.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overrides: Vec<OverrideConfig>,
+
+    /// Suppress specific finding kinds from the report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore_issues: Vec<IgnoreIssueRule>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -122,6 +126,7 @@ impl Default for ResolverConfig {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrypointsConfig {
@@ -145,6 +150,12 @@ pub struct EntrypointsConfig {
     #[serde(default)]
     pub include_stories: bool,
 
+    /// When true, runtime entrypoint exports are eligible to be reported as
+    /// unused.  By default (`false`), only public-API entrypoint exports are
+    /// checked.
+    #[serde(default)]
+    pub include_entry_exports: bool,
+
     /// Profile-specific entrypoint overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profiles: Option<ProfilesConfig>,
@@ -158,6 +169,7 @@ impl Default for EntrypointsConfig {
             exclude: Vec::new(),
             include_tests: false,
             include_stories: false,
+            include_entry_exports: false,
             profiles: None,
         }
     }
@@ -203,6 +215,33 @@ pub struct AnalysisConfig {
     pub ownership: AnalysisSeverity,
     #[serde(default)]
     pub impact: AnalysisSeverity,
+
+    /// Report unused exported class/enum members (methods, properties, variants).
+    #[serde(default)]
+    pub unused_members: AnalysisSeverity,
+
+    /// Report duplicate exports (same symbol re-exported from multiple paths).
+    #[serde(default)]
+    pub duplicate_exports: AnalysisSeverity,
+
+    /// When true, exports consumed only within the same file are still
+    /// reported as unused.
+    #[serde(default)]
+    pub ignore_exports_used_in_file: bool,
+}
+
+/// Rule for suppressing specific finding kinds.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoreIssueRule {
+    /// The finding kind to suppress (e.g. "unusedExport", "unusedFile", "cycle").
+    pub kind: String,
+    /// Optional glob patterns — only suppress in matching files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// Optional comment explaining why this is suppressed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]

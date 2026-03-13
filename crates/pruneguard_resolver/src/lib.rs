@@ -104,6 +104,9 @@ pub struct ModuleResolver {
     /// Cached workspace package.json exports maps, used to validate subpath
     /// imports against the package's declared public API.
     workspace_exports: FxHashMap<String, Option<serde_json::Value>>,
+    /// Cached workspace package.json `imports` maps (subpath imports),
+    /// keyed by workspace root directory.  Used to resolve `#`-prefixed specifiers.
+    workspace_imports: FxHashMap<PathBuf, Option<serde_json::Value>>,
 }
 
 impl ModuleResolver {
@@ -165,6 +168,7 @@ impl ModuleResolver {
             inner,
             workspace_roots: FxHashMap::default(),
             workspace_exports: FxHashMap::default(),
+            workspace_imports: FxHashMap::default(),
         }
     }
 
@@ -175,12 +179,22 @@ impl ModuleResolver {
         for (pkg_name, root) in &roots {
             let exports = load_workspace_exports(root);
             self.workspace_exports.insert(pkg_name.clone(), exports);
+            let imports = load_workspace_imports(root);
+            self.workspace_imports.insert(root.clone(), imports);
         }
         self.workspace_roots = roots;
     }
 
     /// Resolve a module specifier from a given file.
     pub fn resolve(&self, specifier: &str, from: &Path) -> Result<ResolvedModule, ResolveError> {
+        // Resolve `#`-prefixed subpath imports via the workspace's package.json
+        // `imports` field before falling through to the standard resolver.
+        if specifier.starts_with('#')
+            && let Some(resolved) = self.resolve_subpath_import(specifier, from)
+        {
+            return Ok(resolved);
+        }
+
         let directory = from.parent().unwrap_or(from);
         match self.inner.resolve(directory, specifier) {
             Ok(resolution) => {
@@ -255,6 +269,37 @@ impl ModuleResolver {
 
         // Deep subpath import -- resolve as a file relative to the workspace root.
         resolve_with_extensions(workspace_root, subpath)
+    }
+
+    /// Try to resolve a `#`-prefixed subpath import via the workspace's
+    /// package.json `imports` field.
+    ///
+    /// Finds the workspace root that contains `from`, looks up the `imports`
+    /// map, and resolves the alias to a concrete file path.
+    fn resolve_subpath_import(&self, specifier: &str, from: &Path) -> Option<ResolvedModule> {
+        // Find the workspace whose root contains the importing file.
+        let (workspace_root, imports_value) = self
+            .workspace_imports
+            .iter()
+            .find(|(root, _)| from.starts_with(root))
+            .and_then(|(root, imports)| Some((root, imports.as_ref()?)))?;
+
+        let resolved_path = resolve_imports_alias(imports_value, specifier)?;
+
+        // The resolved path is relative (e.g. `./src/utils/index.ts`).
+        let relative = resolved_path.strip_prefix("./").unwrap_or(&resolved_path);
+        let candidate = workspace_root.join(relative);
+
+        if candidate.is_file() {
+            return Some(ResolvedModule {
+                path: candidate,
+                via_exports: false,
+                exports_subpath: None,
+                exports_condition: None,
+            });
+        }
+
+        resolve_with_extensions(workspace_root, relative)
     }
 
     /// Check whether a specifier targets a workspace package whose `exports` map
@@ -578,6 +623,57 @@ fn load_workspace_exports(root: &Path) -> Option<serde_json::Value> {
     let content = std::fs::read_to_string(pkg_json_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
     parsed.get("exports").cloned()
+}
+
+/// Load the `imports` field from a workspace package's `package.json`.
+fn load_workspace_imports(root: &Path) -> Option<serde_json::Value> {
+    let pkg_json_path = root.join("package.json");
+    let content = std::fs::read_to_string(pkg_json_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed.get("imports").cloned()
+}
+
+/// Resolve a `#`-prefixed specifier against an `imports` map value.
+///
+/// Supports exact matches, condition maps (`import`/`require`/`default`),
+/// and wildcard patterns (e.g. `#utils/*` matching `#utils/foo`).
+fn resolve_imports_alias(imports: &serde_json::Value, specifier: &str) -> Option<String> {
+    let map = imports.as_object()?;
+
+    // Exact match.
+    if let Some(value) = map.get(specifier) {
+        return resolve_imports_value(value);
+    }
+
+    // Wildcard pattern match.
+    for (pattern, value) in map {
+        if let Some(prefix) = pattern.strip_suffix('*')
+            && let Some(rest) = specifier.strip_prefix(prefix)
+        {
+            return resolve_imports_value(value).map(|target| target.replace('*', rest));
+        }
+    }
+
+    None
+}
+
+/// Resolve a single value from an `imports` field entry.
+/// The value can be a string, a condition map, or an array (first match wins).
+fn resolve_imports_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(map) => {
+            // Condition map — try common conditions in priority order.
+            for condition in &["import", "require", "default"] {
+                if let Some(v) = map.get(*condition) {
+                    return resolve_imports_value(v);
+                }
+            }
+            map.values().find_map(resolve_imports_value)
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(resolve_imports_value),
+        _ => None,
+    }
 }
 
 /// Check whether an exports map defines a given subpath (exact or wildcard).

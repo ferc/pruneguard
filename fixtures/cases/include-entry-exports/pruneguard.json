@@ -1,0 +1,6 @@
+{
+  "$schema": "../../configuration_schema.json",
+  "entrypoints": {
+    "includeEntryExports": true
+  }
+}

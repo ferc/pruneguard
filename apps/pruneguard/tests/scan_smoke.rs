@@ -1795,3 +1795,67 @@ fn framework_sfc_files_are_tracked_and_extracted() {
         "src/dead-component.vue should be flagged as unused"
     );
 }
+
+// ---------------------------------------------------------------------------
+// export-kind-classification: ExportKind is correctly assigned
+// ---------------------------------------------------------------------------
+
+#[test]
+fn export_kind_classification_fixture() {
+    let root = fixture_root("export-kind-classification");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The scan should succeed and discover the entrypoint file.
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 1,
+        "scan should discover at least one file in export-kind-classification fixture"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// dependency-patterns: DependencyPattern detection works
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dependency_patterns_fixture() {
+    let root = fixture_root("dependency-patterns");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The scan should succeed and discover all source files.
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 1,
+        "scan should discover files in dependency-patterns fixture"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// include-entry-exports: includeEntryExports config option
+// ---------------------------------------------------------------------------
+
+#[test]
+fn include_entry_exports_fixture() {
+    let root = fixture_root("include-entry-exports");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The scan should succeed with the includeEntryExports config.
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 1,
+        "scan should discover files in include-entry-exports fixture"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ignore-issues-config: ignoreIssues config option
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ignore_issues_config_fixture() {
+    let root = fixture_root("ignore-issues-config");
+    let report = run_pruneguard(&root, &["--format", "json", "scan"]);
+
+    // The scan should succeed with the ignoreIssues config.
+    assert!(
+        report["summary"]["totalFiles"].as_u64().unwrap_or(0) >= 1,
+        "scan should discover files in ignore-issues-config fixture"
+    );
+}

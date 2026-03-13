@@ -11,6 +11,7 @@ use rustc_hash::FxHashSet;
 pub struct EntrypointSeed {
     pub path: PathBuf,
     pub kind: EntrypointKind,
+    pub surface_kind: EntrypointSurfaceKind,
     pub profile: EntrypointProfile,
     pub workspace: Option<String>,
     pub source: String,
@@ -36,6 +37,38 @@ pub enum EntrypointProfile {
     Both,
 }
 
+/// What surface category an entrypoint belongs to.
+///
+/// Derived from `EntrypointKind` and the framework pack name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntrypointSurfaceKind {
+    /// Public package API: main, bin, exports.
+    PublicApi,
+    /// General runtime entrypoints: explicit config, conventions, scripts.
+    Runtime,
+    /// Tooling-related entrypoints (linters, bundler config, etc.).
+    Tooling,
+    /// Test entrypoints (vitest, jest, etc.).
+    Test,
+    /// Story/doc entrypoints (storybook, etc.).
+    Story,
+    /// Framework-convention entrypoints (Next.js pages, Nuxt routes, etc.).
+    FrameworkConvention,
+}
+
+impl EntrypointSurfaceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PublicApi => "public-api",
+            Self::Runtime => "runtime",
+            Self::Tooling => "tooling",
+            Self::Test => "test",
+            Self::Story => "story",
+            Self::FrameworkConvention => "framework-convention",
+        }
+    }
+}
+
 impl EntrypointProfile {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -56,6 +89,35 @@ impl EntrypointKind {
             Self::FrameworkPack => "framework-pack",
             Self::Convention => "convention",
             Self::PackageScript => "package-script",
+        }
+    }
+}
+
+/// Derive the surface kind from an `EntrypointKind` and the source string.
+///
+/// The `source` string carries framework information (e.g. `"framework:vitest"`).
+fn derive_surface_kind(kind: EntrypointKind, source: &str) -> EntrypointSurfaceKind {
+    match kind {
+        EntrypointKind::PackageMain
+        | EntrypointKind::PackageBin
+        | EntrypointKind::PackageExports => EntrypointSurfaceKind::PublicApi,
+        EntrypointKind::ExplicitConfig => EntrypointSurfaceKind::Runtime,
+        EntrypointKind::Convention | EntrypointKind::PackageScript => {
+            EntrypointSurfaceKind::Runtime
+        }
+        EntrypointKind::FrameworkPack => {
+            // Determine more specific surface kind from the framework name
+            // embedded in the source string (e.g. "framework:vitest", "framework:storybook").
+            let fw_name = source
+                .strip_prefix("framework:")
+                .or_else(|| source.strip_prefix("framework-auto-load:"))
+                .and_then(|rest| rest.split(':').next())
+                .unwrap_or("");
+            match fw_name {
+                "vitest" | "jest" | "playwright" | "cypress" => EntrypointSurfaceKind::Test,
+                "storybook" => EntrypointSurfaceKind::Story,
+                _ => EntrypointSurfaceKind::FrameworkConvention,
+            }
         }
     }
 }
@@ -250,9 +312,11 @@ fn push_entrypoint(
     source: String,
 ) {
     if seen.insert(path.clone()) {
+        let surface_kind = derive_surface_kind(kind, &source);
         entrypoints.push(EntrypointSeed {
             path,
             kind,
+            surface_kind,
             profile,
             workspace: workspace_name.map(ToString::to_string),
             source,
