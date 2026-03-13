@@ -221,6 +221,48 @@ fn collect_files_recursive(dir: &Path, entries: &mut Vec<PathBuf>) {
     }
 }
 
+/// Recursively collect JS/TS files as [`FrameworkEntrypointSeed`]s.
+fn collect_entrypoint_seeds_recursive(
+    dir: &Path,
+    seeds: &mut Vec<FrameworkEntrypointSeed>,
+    profile: &'static str,
+    kind: &'static str,
+    reason_prefix: &str,
+    heuristic: bool,
+) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(
+                name,
+                "node_modules" | ".git" | "dist" | ".next" | ".nuxt" | ".output" | ".svelte-kit"
+            ) {
+                continue;
+            }
+            collect_entrypoint_seeds_recursive(
+                &path,
+                seeds,
+                profile,
+                kind,
+                reason_prefix,
+                heuristic,
+            );
+        } else if pruneguard_fs::has_js_ts_extension(&path) {
+            seeds.push(FrameworkEntrypointSeed {
+                path,
+                profile: Some(profile),
+                kind,
+                reason: reason_prefix.to_string(),
+                heuristic,
+            });
+        }
+    }
+}
+
 /// Collect `*.stories.*` and `*.story.*` files recursively.
 fn collect_story_files(dir: &Path, entries: &mut Vec<PathBuf>) {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
@@ -266,6 +308,37 @@ fn collect_spec_files_recursive(dir: &Path, entries: &mut Vec<PathBuf>) {
     }
 }
 
+/// Recursively collect `*.spec.*` files as [`FrameworkEntrypointSeed`]s.
+fn collect_spec_seeds_recursive(
+    dir: &Path,
+    seeds: &mut Vec<FrameworkEntrypointSeed>,
+    profile: &'static str,
+    kind: &'static str,
+    reason_prefix: &str,
+) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_spec_seeds_recursive(&path, seeds, profile, kind, reason_prefix);
+        } else if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| name.contains(".spec."))
+        {
+            seeds.push(FrameworkEntrypointSeed {
+                path,
+                profile: Some(profile),
+                kind,
+                reason: reason_prefix.to_string(),
+                heuristic: false,
+            });
+        }
+    }
+}
+
 /// Recursively collect `SvelteKit` route files (`+page.*`, `+layout.*`, etc.).
 fn collect_sveltekit_route_files(dir: &Path, entries: &mut Vec<PathBuf>) {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
@@ -282,6 +355,63 @@ fn collect_sveltekit_route_files(dir: &Path, entries: &mut Vec<PathBuf>) {
                 || name.starts_with("+error."))
         {
             entries.push(path);
+        }
+    }
+}
+
+/// Recursively collect `SvelteKit` route files as entrypoint seeds.
+fn collect_sveltekit_route_seeds(dir: &Path, seeds: &mut Vec<FrameworkEntrypointSeed>) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sveltekit_route_seeds(&path, seeds);
+        } else if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && (name.starts_with("+page.")
+                || name.starts_with("+layout.")
+                || name.starts_with("+server.")
+                || name.starts_with("+error."))
+        {
+            seeds.push(FrameworkEntrypointSeed {
+                path,
+                profile: Some("production"),
+                kind: "route",
+                reason: "SvelteKit route file convention".to_string(),
+                heuristic: false,
+            });
+        }
+    }
+}
+
+/// Recursively collect `*.stories.*` / `*.story.*` files as [`FrameworkEntrypointSeed`]s.
+fn collect_story_seeds(dir: &Path, seeds: &mut Vec<FrameworkEntrypointSeed>) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if matches!(
+                name,
+                "node_modules" | ".git" | "dist" | ".next" | ".storybook" | "storybook-static"
+            ) {
+                continue;
+            }
+            collect_story_seeds(&path, seeds);
+        } else if path.file_name().and_then(|n| n.to_str()).is_some_and(|name| {
+            (name.contains(".stories.") || name.contains(".story."))
+                && pruneguard_fs::has_js_ts_extension(&path)
+        }) {
+            seeds.push(FrameworkEntrypointSeed {
+                path,
+                profile: Some("development"),
+                kind: "story",
+                reason: "Storybook story file".to_string(),
+                heuristic: false,
+            });
         }
     }
 }
@@ -438,6 +568,91 @@ impl FrameworkPack for NextPack {
     fn generated_output_patterns(&self) -> Vec<String> {
         vec![".next/**".to_string()]
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // App Router: all files under app/
+        let app_dir = workspace_root.join("app");
+        if app_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &app_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Next.js App Router convention",
+                false,
+            );
+        }
+
+        // Pages Router: all files under pages/
+        let pages_dir = workspace_root.join("pages");
+        if pages_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &pages_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Next.js Pages Router convention",
+                false,
+            );
+        }
+
+        // next.config.*
+        for name in &["next.config.js", "next.config.mjs", "next.config.ts"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Next.js configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Instrumentation hooks (auto-loaded)
+        for name in &[
+            "instrumentation.ts",
+            "instrumentation.js",
+            "instrumentation-client.ts",
+            "instrumentation-client.js",
+            "src/instrumentation.ts",
+            "src/instrumentation.js",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "auto-loaded",
+                    reason: "Next.js instrumentation hook (auto-loaded)".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Middleware (auto-loaded)
+        for name in &["middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "auto-loaded",
+                    reason: "Next.js middleware (auto-loaded)".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        seeds
+    }
+
+    fn auto_loaded_patterns(&self) -> Vec<String> {
+        vec!["middleware.*".to_string(), "instrumentation.*".to_string()]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +711,23 @@ impl FrameworkPack for VitePack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["dist/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+        for name in &["vite.config.ts", "vite.config.js", "vite.config.mts"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Vite configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+        seeds
     }
 }
 
@@ -570,6 +802,23 @@ impl FrameworkPack for VitestPack {
                 classification: FileClassification::Test,
             },
         ]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+        for name in &["vitest.config.ts", "vitest.config.js", "vitest.config.mts"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("development"),
+                    kind: "config",
+                    reason: "Vitest configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+        seeds
     }
 }
 
@@ -646,6 +895,23 @@ impl FrameworkPack for JestPack {
                 classification: FileClassification::Test,
             },
         ]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+        for name in &["jest.config.js", "jest.config.ts", "jest.config.cjs", "jest.config.mjs"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("development"),
+                    kind: "config",
+                    reason: "Jest configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+        seeds
     }
 }
 
@@ -753,6 +1019,39 @@ impl FrameworkPack for StorybookPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["storybook-static/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+        let storybook_dir = workspace_root.join(".storybook");
+        if storybook_dir.exists() {
+            for name in &[
+                "main.ts",
+                "main.tsx",
+                "main.js",
+                "main.jsx",
+                "preview.ts",
+                "preview.tsx",
+                "preview.js",
+                "preview.jsx",
+            ] {
+                let path = storybook_dir.join(name);
+                if path.exists() {
+                    seeds.push(FrameworkEntrypointSeed {
+                        path,
+                        profile: Some("development"),
+                        kind: "config",
+                        reason: "Storybook configuration file".to_string(),
+                        heuristic: false,
+                    });
+                }
+            }
+        }
+
+        // Story files
+        collect_story_seeds(workspace_root, &mut seeds);
+
+        seeds
     }
 }
 
@@ -889,6 +1188,94 @@ impl FrameworkPack for FileBasedRoutingPack {
             classification: FileClassification::Generated,
         }]
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // Routes directories (heuristic — may overlap with specific framework packs)
+        for routes_dir in &["src/routes", "app/routes"] {
+            let dir = workspace_root.join(routes_dir);
+            if dir.exists() {
+                collect_entrypoint_seeds_recursive(
+                    &dir,
+                    &mut seeds,
+                    "production",
+                    "route",
+                    "file-based routing convention",
+                    true,
+                );
+            }
+        }
+
+        // Pages directories
+        for pages_dir in &["pages", "src/pages"] {
+            let dir = workspace_root.join(pages_dir);
+            if dir.exists() {
+                collect_entrypoint_seeds_recursive(
+                    &dir,
+                    &mut seeds,
+                    "production",
+                    "route",
+                    "file-based routing convention (pages)",
+                    true,
+                );
+            }
+        }
+
+        // Generated route tree
+        for name in &["src/routeTree.gen.ts", "src/routeTree.gen.tsx"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "generated",
+                    reason: "TanStack Router generated route tree".to_string(),
+                    heuristic: true,
+                });
+            }
+        }
+
+        // Router config files
+        for name in &[
+            "src/router.ts",
+            "src/router.tsx",
+            "src/router.js",
+            "app/client.tsx",
+            "app/server.tsx",
+            "app/router.tsx",
+            "app/ssr.tsx",
+            "app/entry.client.tsx",
+            "app/entry.server.tsx",
+            "app/root.tsx",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "file-based router configuration".to_string(),
+                    heuristic: true,
+                });
+            }
+        }
+
+        seeds
+    }
+
+    fn trust_notes(
+        &self,
+        _workspace_root: &Path,
+        _manifest: &PackageManifest,
+    ) -> Vec<FrameworkTrustNote> {
+        vec![FrameworkTrustNote {
+            message: "File-based routing detection is always heuristic; specific framework \
+                      packs (Next.js, Nuxt, SvelteKit, Remix) provide more accurate detection"
+                .into(),
+            affects: TrustNoteScope::AllFindings,
+        }]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,6 +1393,82 @@ impl FrameworkPack for RootConfigPack {
     fn file_kinds(&self) -> Vec<(String, FileClassification)> {
         Vec::new()
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let config_files = [
+            "content-collections.ts",
+            "content-collections.js",
+            "tailwind.config.ts",
+            "tailwind.config.js",
+            "tailwind.config.mjs",
+            "postcss.config.ts",
+            "postcss.config.js",
+            "postcss.config.cjs",
+            "postcss.config.mjs",
+            "drizzle.config.ts",
+            "drizzle.config.js",
+            "knexfile.ts",
+            "knexfile.js",
+            "tsup.config.ts",
+            "tsup.config.js",
+            "rollup.config.ts",
+            "rollup.config.js",
+            "rollup.config.mjs",
+            "esbuild.config.ts",
+            "esbuild.config.js",
+            "webpack.config.ts",
+            "webpack.config.js",
+            "babel.config.ts",
+            "babel.config.js",
+            "release.config.ts",
+            "release.config.js",
+            "release.config.mts",
+            "commitlint.config.ts",
+            "commitlint.config.js",
+            ".lintstagedrc.ts",
+            ".lintstagedrc.js",
+            "playwright.config.ts",
+            "playwright.config.js",
+            "cypress.config.ts",
+            "cypress.config.js",
+            "wrangler.config.ts",
+            "eslint.config.ts",
+            "eslint.config.js",
+            "eslint.config.mjs",
+            "eslint.config.cjs",
+            ".eslintrc.js",
+            ".eslintrc.cjs",
+            ".eslintrc.mjs",
+            "prettier.config.ts",
+            "prettier.config.js",
+            "prettier.config.mjs",
+            ".prettierrc.js",
+            ".prettierrc.cjs",
+            ".prettierrc.mjs",
+            "i18n/request.ts",
+            "i18n/request.js",
+            "sentry.client.config.ts",
+            "sentry.server.config.ts",
+            "sentry.edge.config.ts",
+            "sentry.client.config.js",
+            "sentry.server.config.js",
+        ];
+
+        let mut seeds = Vec::new();
+        for name in &config_files {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "root configuration file consumed by tooling".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+        seeds
+    }
 }
 
 // ===========================================================================
@@ -1084,11 +1547,79 @@ impl FrameworkPack for NuxtPack {
     }
 
     fn auto_loaded_patterns(&self) -> Vec<String> {
-        vec!["composables/**".to_string(), "utils/**".to_string()]
+        vec!["composables/**".to_string(), "utils/**".to_string(), "plugins/**".to_string()]
     }
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec![".nuxt/**".to_string(), ".output/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // nuxt.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("nuxt.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Nuxt configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // app.vue
+        let app_vue = workspace_root.join("app.vue");
+        if app_vue.exists() {
+            seeds.push(FrameworkEntrypointSeed {
+                path: app_vue,
+                profile: Some("production"),
+                kind: "route",
+                reason: "Nuxt root app component".to_string(),
+                heuristic: false,
+            });
+        }
+
+        // Convention directories
+        for (dir_name, kind, reason) in &[
+            ("pages", "route", "Nuxt file-based routing"),
+            ("layouts", "layout", "Nuxt layout convention"),
+            ("plugins", "auto-loaded", "Nuxt auto-loaded plugin"),
+            ("server/api", "route", "Nuxt server API route"),
+            ("server/routes", "route", "Nuxt server route"),
+            ("server/middleware", "auto-loaded", "Nuxt server middleware"),
+        ] {
+            let dir = workspace_root.join(dir_name);
+            if dir.exists() {
+                collect_entrypoint_seeds_recursive(
+                    &dir,
+                    &mut seeds,
+                    "production",
+                    kind,
+                    reason,
+                    false,
+                );
+            }
+        }
+
+        seeds
+    }
+
+    fn trust_notes(
+        &self,
+        _workspace_root: &Path,
+        _manifest: &PackageManifest,
+    ) -> Vec<FrameworkTrustNote> {
+        vec![FrameworkTrustNote {
+            message: "Nuxt auto-imports composables and utils without explicit import \
+                      statements; files in composables/ and utils/ may appear unused but \
+                      are consumed at runtime via auto-import"
+                .into(),
+            affects: TrustNoteScope::EntrypointsOnly,
+        }]
     }
 }
 
@@ -1167,6 +1698,67 @@ impl FrameworkPack for AstroPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["dist/**".to_string(), ".astro/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // astro.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("astro.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Astro configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // src/pages/**
+        let pages_dir = workspace_root.join("src/pages");
+        if pages_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &pages_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Astro file-based routing",
+                false,
+            );
+        }
+
+        // src/middleware.*
+        for ext in &["ts", "js", "mts", "mjs"] {
+            let path = workspace_root.join(format!("src/middleware.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "auto-loaded",
+                    reason: "Astro middleware (auto-loaded)".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // src/content/config.*
+        for ext in &["ts", "js", "mts"] {
+            let path = workspace_root.join(format!("src/content/config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Astro content collections config".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        seeds
     }
 }
 
@@ -1249,6 +1841,69 @@ impl FrameworkPack for SvelteKitPack {
     fn generated_output_patterns(&self) -> Vec<String> {
         vec![".svelte-kit/**".to_string(), "build/**".to_string()]
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // svelte.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("svelte.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "SvelteKit configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // SvelteKit route files
+        let routes_dir = workspace_root.join("src/routes");
+        if routes_dir.exists() {
+            collect_sveltekit_route_seeds(&routes_dir, &mut seeds);
+        }
+
+        // Hook files (auto-loaded)
+        for name in &[
+            "src/hooks.server.ts",
+            "src/hooks.server.js",
+            "src/hooks.client.ts",
+            "src/hooks.client.js",
+        ] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "auto-loaded",
+                    reason: "SvelteKit hook file (auto-loaded)".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // Service worker
+        for name in &["src/service-worker.ts", "src/service-worker.js"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "auto-loaded",
+                    reason: "SvelteKit service worker".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        seeds
+    }
+
+    fn auto_loaded_patterns(&self) -> Vec<String> {
+        vec!["hooks.server.*".to_string(), "hooks.client.*".to_string()]
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,6 +1979,58 @@ impl FrameworkPack for RemixPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["build/**".to_string(), ".cache/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // app/root.*
+        for ext in &["tsx", "ts", "jsx", "js"] {
+            let path = workspace_root.join(format!("app/root.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "route",
+                    reason: "Remix root layout".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // app/routes/**
+        let routes_dir = workspace_root.join("app/routes");
+        if routes_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &routes_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Remix file-based routing",
+                false,
+            );
+        }
+
+        // app/entry.client.* and app/entry.server.*
+        for (base, reason) in &[
+            ("app/entry.client", "Remix client entry"),
+            ("app/entry.server", "Remix server entry"),
+        ] {
+            for ext in &["tsx", "ts", "jsx", "js"] {
+                let path = workspace_root.join(format!("{base}.{ext}"));
+                if path.exists() {
+                    seeds.push(FrameworkEntrypointSeed {
+                        path,
+                        profile: Some("production"),
+                        kind: "entry",
+                        reason: reason.to_string(),
+                        heuristic: false,
+                    });
+                }
+            }
+        }
+
+        seeds
     }
 }
 
@@ -1417,6 +2124,34 @@ impl FrameworkPack for NxPack {
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["tmp/**".to_string(), ".nx/**".to_string()]
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        let nx_json = workspace_root.join("nx.json");
+        if nx_json.exists() {
+            seeds.push(FrameworkEntrypointSeed {
+                path: nx_json,
+                profile: Some("production"),
+                kind: "config",
+                reason: "Nx workspace configuration".to_string(),
+                heuristic: false,
+            });
+        }
+
+        let project_json = workspace_root.join("project.json");
+        if project_json.exists() {
+            seeds.push(FrameworkEntrypointSeed {
+                path: project_json,
+                profile: Some("production"),
+                kind: "config",
+                reason: "Nx project configuration".to_string(),
+                heuristic: false,
+            });
+        }
+
+        seeds
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1497,6 +2232,23 @@ impl FrameworkPack for TurboPack {
 
         notes
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        let turbo_json = workspace_root.join("turbo.json");
+        if turbo_json.exists() {
+            seeds.push(FrameworkEntrypointSeed {
+                path: turbo_json,
+                profile: Some("production"),
+                kind: "config",
+                reason: "Turborepo pipeline configuration".to_string(),
+                heuristic: false,
+            });
+        }
+
+        seeds
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1568,6 +2320,50 @@ impl FrameworkPack for AngularPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["dist/**".to_string(), ".angular/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        let angular_json = workspace_root.join("angular.json");
+        if angular_json.exists() {
+            seeds.push(FrameworkEntrypointSeed {
+                path: angular_json,
+                profile: Some("production"),
+                kind: "config",
+                reason: "Angular workspace configuration".to_string(),
+                heuristic: false,
+            });
+        }
+
+        for name in &["src/main.ts", "src/polyfills.ts"] {
+            let path = workspace_root.join(name);
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "entry",
+                    reason: "Angular application bootstrap".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        seeds
+    }
+
+    fn trust_notes(
+        &self,
+        _workspace_root: &Path,
+        _manifest: &PackageManifest,
+    ) -> Vec<FrameworkTrustNote> {
+        vec![FrameworkTrustNote {
+            message: "Angular uses decorator-based dependency injection; \
+                      services and modules referenced only via DI metadata may appear \
+                      unused to static analysis"
+                .into(),
+            affects: TrustNoteScope::AllFindings,
+        }]
     }
 }
 
@@ -1641,6 +2437,40 @@ impl FrameworkPack for PlaywrightPack {
             pattern: "**/*.spec.*".into(),
             classification: FileClassification::Test,
         }]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // playwright.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("playwright.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("development"),
+                    kind: "config",
+                    reason: "Playwright configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // e2e/**/*.spec.* and tests/**/*.spec.*
+        for dir_name in &["e2e", "tests"] {
+            let dir = workspace_root.join(dir_name);
+            if dir.exists() {
+                collect_spec_seeds_recursive(
+                    &dir,
+                    &mut seeds,
+                    "development",
+                    "test",
+                    "Playwright test file",
+                );
+            }
+        }
+
+        seeds
     }
 }
 
@@ -1729,6 +2559,58 @@ impl FrameworkPack for CypressPack {
             },
         ]
     }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // cypress.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("cypress.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("development"),
+                    kind: "config",
+                    reason: "Cypress configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // cypress/support/*
+        let support_dir = workspace_root.join("cypress/support");
+        if support_dir.exists()
+            && let Ok(read_dir) = std::fs::read_dir(&support_dir)
+        {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if path.is_file() && pruneguard_fs::has_js_ts_extension(&path) {
+                    seeds.push(FrameworkEntrypointSeed {
+                        path,
+                        profile: Some("development"),
+                        kind: "config",
+                        reason: "Cypress support file".to_string(),
+                        heuristic: false,
+                    });
+                }
+            }
+        }
+
+        // cypress/e2e/**
+        let e2e_dir = workspace_root.join("cypress/e2e");
+        if e2e_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &e2e_dir,
+                &mut seeds,
+                "development",
+                "test",
+                "Cypress e2e test file",
+                false,
+            );
+        }
+
+        seeds
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1798,6 +2680,39 @@ impl FrameworkPack for VitePressPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec![".vitepress/dist/**".to_string(), ".vitepress/cache/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // .vitepress/config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!(".vitepress/config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "VitePress configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // .vitepress/theme/**
+        let theme_dir = workspace_root.join(".vitepress/theme");
+        if theme_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &theme_dir,
+                &mut seeds,
+                "production",
+                "theme",
+                "VitePress theme customization",
+                false,
+            );
+        }
+
+        seeds
     }
 }
 
@@ -1870,5 +2785,51 @@ impl FrameworkPack for DocusaurusPack {
 
     fn generated_output_patterns(&self) -> Vec<String> {
         vec!["build/**".to_string(), ".docusaurus/**".to_string()]
+    }
+
+    fn entrypoint_seeds(&self, workspace_root: &Path) -> Vec<FrameworkEntrypointSeed> {
+        let mut seeds = Vec::new();
+
+        // docusaurus.config.*
+        for ext in &["ts", "js", "mjs", "cjs", "mts"] {
+            let path = workspace_root.join(format!("docusaurus.config.{ext}"));
+            if path.exists() {
+                seeds.push(FrameworkEntrypointSeed {
+                    path,
+                    profile: Some("production"),
+                    kind: "config",
+                    reason: "Docusaurus configuration file".to_string(),
+                    heuristic: false,
+                });
+            }
+        }
+
+        // src/pages/**
+        let pages_dir = workspace_root.join("src/pages");
+        if pages_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &pages_dir,
+                &mut seeds,
+                "production",
+                "route",
+                "Docusaurus custom page",
+                false,
+            );
+        }
+
+        // src/theme/**
+        let theme_dir = workspace_root.join("src/theme");
+        if theme_dir.exists() {
+            collect_entrypoint_seeds_recursive(
+                &theme_dir,
+                &mut seeds,
+                "production",
+                "theme",
+                "Docusaurus theme customization",
+                false,
+            );
+        }
+
+        seeds
     }
 }

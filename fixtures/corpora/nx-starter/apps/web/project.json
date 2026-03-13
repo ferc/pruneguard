@@ -1,0 +1,1 @@
+{ "name": "web", "sourceRoot": "apps/web/src", "targets": { "build": { "executor": "@nx/webpack:webpack" } } }

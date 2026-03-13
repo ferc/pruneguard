@@ -1,0 +1,6 @@
+{
+  "name": "nx-starter",
+  "private": true,
+  "devDependencies": { "nx": "^20.0.0" },
+  "workspaces": ["apps/*", "libs/*"]
+}

@@ -120,6 +120,45 @@ pub fn scan_with_options(
     let mut report = report_from_build(cwd, &build, findings, profile);
     report.stats.full_scope_required = options.require_full_scope;
 
+    // --- Compute compatibility report and enrich findings with trust context ---
+    let compat = compute_compat_report_from_build(&build);
+    report.stats.frameworks_detected.clone_from(&compat.supported_frameworks);
+    report.stats.heuristic_frameworks.clone_from(&compat.heuristic_frameworks);
+    report.stats.heuristic_entrypoints =
+        build.entrypoints.iter().filter(|ep| ep.heuristic.unwrap_or(false)).count();
+    report.stats.compatibility_warnings =
+        compat.warnings.iter().map(|w| w.message.clone()).collect();
+
+    // Annotate findings with trust notes and framework context.
+    for finding in &mut report.findings {
+        let notes = compat.trust_notes_for_path(&finding.subject);
+        if !notes.is_empty() {
+            finding.trust_notes = Some(notes);
+        }
+
+        let fw_context: Vec<String> =
+            build
+                .entrypoints
+                .iter()
+                .filter_map(|ep| {
+                    ep.framework.as_ref().filter(|_| {
+                        // Attach framework context when the finding subject is in the
+                        // same workspace as a framework-contributed entrypoint.
+                        finding.workspace.as_ref() == ep.workspace.as_ref()
+                            || finding.subject.split('#').next().is_some_and(|path| {
+                                ep.path.contains(path) || path.contains(&ep.path)
+                            })
+                    })
+                })
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+        if !fw_context.is_empty() {
+            finding.framework_context = Some(fw_context);
+        }
+    }
+
     if let Some(reference) = &options.changed_since {
         let mut changed_scope =
             collect_changed_scope(&build.discovery.project_root, reference, &scan_roots)?;
@@ -498,6 +537,41 @@ fn build_compat_output_from_stats(stats: &pruneguard_report::Stats) -> Compatibi
         unsupported_signals,
         warnings,
     }
+}
+
+/// Compute a full `pruneguard_compat::CompatibilityReport` from the graph build
+/// result by running framework detection and collecting trust notes from all
+/// detected packs against each workspace.
+fn compute_compat_report_from_build(
+    build: &GraphBuildResult,
+) -> pruneguard_compat::CompatibilityReport {
+    let packs = pruneguard_frameworks::built_in_packs();
+    let mut all_detections = Vec::new();
+    let mut all_trust_notes = Vec::new();
+
+    // Use the first (root) workspace manifest for the compat report.
+    let root_manifest = build.discovery.workspaces.values().next().map(|w| &w.manifest);
+
+    for workspace in build.discovery.workspaces.values() {
+        let detections =
+            pruneguard_frameworks::detect_all_frameworks(&workspace.root, &workspace.manifest);
+        all_detections.extend(detections);
+
+        for pack in &packs {
+            if pack.detect(&workspace.root, &workspace.manifest) {
+                let notes = pack.trust_notes(&workspace.root, &workspace.manifest);
+                all_trust_notes.extend(notes);
+            }
+        }
+    }
+
+    // Deduplicate framework detections by name (keep first, which is the
+    // highest confidence since exact wins over heuristic).
+    let mut seen_names = BTreeSet::new();
+    all_detections.retain(|d| seen_names.insert(d.name));
+
+    let manifest = root_manifest.cloned().unwrap_or_default();
+    pruneguard_compat::CompatibilityReport::compute(&all_detections, &all_trust_notes, &manifest)
 }
 
 /// Review a branch for CI/agent gating.
@@ -1019,6 +1093,52 @@ pub fn safe_delete(
         }
     }
 
+    // --- Trust-aware downgrades for Safe candidates ---
+    //
+    // Even when the base classification is Safe, trust signals may lower
+    // confidence enough to warrant manual review.
+    let compat = compute_compat_report_from_build(&execution.build);
+
+    #[allow(clippy::cast_precision_loss)]
+    let unresolved_pressure_high = unresolved_pressure > 0.10;
+
+    let mut downgraded_safe = Vec::new();
+    safe.retain(|candidate| {
+        // Check: compatibility trust downgrades affect this target
+        if compat.is_path_affected(&candidate.target) {
+            let trust_reason = compat
+                .trust_notes_for_path(&candidate.target)
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "compatibility trust downgrade".to_string());
+            downgraded_safe.push(SafeDeleteCandidate {
+                target: candidate.target.clone(),
+                classification: SafeDeleteClassification::NeedsReview,
+                confidence: Some(FindingConfidence::Medium),
+                reasons: vec![trust_reason],
+                evidence: candidate.evidence.clone(),
+            });
+            deletion_order_targets.retain(|t| t != &candidate.target);
+            return false;
+        }
+
+        // Check: high unresolved pressure (>10%)
+        if unresolved_pressure_high {
+            downgraded_safe.push(SafeDeleteCandidate {
+                target: candidate.target.clone(),
+                classification: SafeDeleteClassification::NeedsReview,
+                confidence: Some(FindingConfidence::Medium),
+                reasons: vec!["high unresolved specifier pressure".to_string()],
+                evidence: candidate.evidence.clone(),
+            });
+            deletion_order_targets.retain(|t| t != &candidate.target);
+            return false;
+        }
+
+        true
+    });
+    needs_review.extend(downgraded_safe);
+
     // Compute a stable deletion order: files with fewer dependencies on other
     // targets (leaves) should be deleted first to avoid breaking intermediate
     // references during batch deletion.
@@ -1053,6 +1173,7 @@ pub fn safe_delete(
 ///
 /// Matches targets against findings by ID, file path, or export name,
 /// then generates remediation actions for each matched finding.
+#[allow(clippy::too_many_lines)]
 pub fn fix_plan(
     cwd: &Path,
     config: &PruneguardConfig,
@@ -1122,6 +1243,35 @@ pub fn fix_plan(
             phase: Some(phase_name_for_action(kind).to_string()),
             finding_ids: vec![finding.id.clone()],
         });
+    }
+
+    // --- Trust-aware confidence adjustments ---
+    //
+    // If the scan conditions reduce trust, lower the confidence of each
+    // remediation action so that agents treat the plan more cautiously.
+    let is_partial_scope = report.stats.partial_scope;
+    let has_heuristic_framework = !report.stats.heuristic_frameworks.is_empty();
+
+    if is_partial_scope || has_heuristic_framework {
+        for action in &mut actions {
+            if is_partial_scope {
+                action.confidence = lower_confidence(action.confidence);
+            }
+            if has_heuristic_framework {
+                // Check if any heuristic framework is relevant to this action's targets.
+                let heuristic_affects_target = action.targets.iter().any(|target| {
+                    report.findings.iter().any(|f| {
+                        (f.subject == *target
+                            || f.subject.starts_with(target)
+                            || f.subject.split('#').next() == Some(target.as_str()))
+                            && f.framework_context.is_some()
+                    })
+                });
+                if heuristic_affects_target {
+                    action.confidence = lower_confidence(action.confidence);
+                }
+            }
+        }
     }
 
     // Apply ranking policy: minimal blast radius first, high confidence first,
@@ -1424,6 +1574,14 @@ const fn confidence_rank(confidence: FindingConfidence) -> u8 {
         FindingConfidence::High => 0,
         FindingConfidence::Medium => 1,
         FindingConfidence::Low => 2,
+    }
+}
+
+/// Lower confidence by one level (High -> Medium -> Low -> Low).
+const fn lower_confidence(confidence: FindingConfidence) -> FindingConfidence {
+    match confidence {
+        FindingConfidence::High => FindingConfidence::Medium,
+        FindingConfidence::Medium | FindingConfidence::Low => FindingConfidence::Low,
     }
 }
 

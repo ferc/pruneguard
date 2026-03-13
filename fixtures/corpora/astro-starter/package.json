@@ -1,0 +1,6 @@
+{
+  "name": "astro-starter",
+  "private": true,
+  "dependencies": { "astro": "^5.0.0" },
+  "scripts": { "dev": "astro dev", "build": "astro build" }
+}

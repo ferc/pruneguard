@@ -369,4 +369,40 @@ impl HotIndex {
             "steps": []
         }))
     }
+
+    /// Suggest governance rules from graph analysis.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub fn query_suggest_rules(&self) -> Result<serde_json::Value, IndexError> {
+        // Stub: return a minimal suggest-rules result.
+        // Full implementation will analyze the graph to suggest governance rules.
+        Ok(serde_json::json!({
+            "kind": "suggestRulesResult",
+            "suggestedRules": [],
+            "analysisNotes": []
+        }))
+    }
+
+    /// Generate a compatibility report.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub fn query_compatibility_report(&self) -> Result<serde_json::Value, IndexError> {
+        // Stub: return a minimal compatibility report.
+        // Full implementation will compute cross-package compatibility data.
+        Ok(serde_json::json!({
+            "kind": "compatibilityReportResult",
+            "packages": [],
+            "issues": []
+        }))
+    }
+
+    /// Debug framework detection.
+    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub fn query_debug_frameworks(&self) -> Result<serde_json::Value, IndexError> {
+        // Stub: return a minimal debug-frameworks result.
+        // Full implementation will report detected frameworks and their configuration.
+        Ok(serde_json::json!({
+            "kind": "debugFrameworksResult",
+            "detectedFrameworks": [],
+            "detectionDetails": []
+        }))
+    }
 }

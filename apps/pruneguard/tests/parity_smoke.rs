@@ -789,6 +789,138 @@ fn parse_framework_corpora(content: &str) -> Vec<FrameworkCorpus> {
     corpora
 }
 
+// ---------------------------------------------------------------------------
+// Individual framework corpus tests
+// ---------------------------------------------------------------------------
+
+fn corpus_fixture_root(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../fixtures/corpora/{name}"))
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_next_starter() {
+    let root = corpus_fixture_root("next-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_nuxt_starter() {
+    let root = corpus_fixture_root("nuxt-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_astro_starter() {
+    let root = corpus_fixture_root("astro-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_sveltekit_starter() {
+    let root = corpus_fixture_root("sveltekit-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_remix_starter() {
+    let root = corpus_fixture_root("remix-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_angular_starter() {
+    let root = corpus_fixture_root("angular-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_nx_starter() {
+    let root = corpus_fixture_root("nx-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_turborepo_starter() {
+    let root = corpus_fixture_root("turborepo-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_playwright_starter() {
+    let root = corpus_fixture_root("playwright-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_cypress_starter() {
+    let root = corpus_fixture_root("cypress-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_vitepress_starter() {
+    let root = corpus_fixture_root("vitepress-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+#[test]
+#[ignore = "requires corpus fixture"]
+fn framework_corpus_docusaurus_starter() {
+    let root = corpus_fixture_root("docusaurus-starter");
+    let output = run_framework_corpus_command(&root, &["--severity", "info", "scan"]);
+    assert!(output.status.code().is_some(), "should not panic");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert!(report["inventories"]["files"].as_array().is_some_and(|a| !a.is_empty()));
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 fn parse_string(value: &str) -> String {
     value.trim_matches('"').to_string()
 }

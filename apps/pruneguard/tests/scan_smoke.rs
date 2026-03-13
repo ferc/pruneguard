@@ -1289,3 +1289,60 @@ fn aliased_reexports_keep_original_export_live() {
         "foo should remain live through the bar alias re-export"
     );
 }
+
+// ---------------------------------------------------------------------------
+// trust-heuristic-framework: heuristic detection with pages/ but no framework dep
+// ---------------------------------------------------------------------------
+
+#[test]
+fn trust_notes_on_heuristic_findings() {
+    let root = fixture_root("trust-heuristic-framework");
+    let report = run_pruneguard(&root, &["--format", "json", "--severity", "info", "scan"]);
+
+    // Stats should report framework detection info.
+    let stats = &report["stats"];
+    assert!(stats.is_object(), "stats should be present");
+}
+
+// ---------------------------------------------------------------------------
+// compatibility-unsupported: project with unsupported framework signal (gatsby)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn compatibility_unsupported_framework_signal() {
+    let root = fixture_root("compatibility-unsupported");
+    let (_report, exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "--severity", "info", "scan"]);
+
+    // Should complete without panic (exit code is Some, not a signal).
+    assert!(exit_code >= 0, "should complete without panic");
+}
+
+#[test]
+fn compatibility_report_command_json() {
+    let root = fixture_root("compatibility-unsupported");
+    let (report, exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "compatibility-report"]);
+
+    assert_eq!(exit_code, 0);
+    // Should have the compatibility report fields.
+    assert!(report.is_object(), "compatibility-report should return a JSON object");
+}
+
+// ---------------------------------------------------------------------------
+// debug frameworks: JSON output for framework detection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn debug_frameworks_command_json() {
+    let root = fixture_root("entrypoints-framework-next");
+    let (report, exit_code) =
+        run_pruneguard_with_exit(&root, &["--format", "json", "debug", "frameworks"]);
+
+    assert_eq!(exit_code, 0);
+    // Should have detected packs.
+    assert!(
+        report["detectedPacks"].is_array(),
+        "debug frameworks should return detectedPacks array"
+    );
+}

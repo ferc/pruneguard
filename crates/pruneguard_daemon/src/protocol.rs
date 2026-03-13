@@ -48,6 +48,12 @@ pub enum DaemonRequest {
         /// Files or exports to generate a fix plan for.
         targets: Vec<String>,
     },
+    /// Suggest governance rules from graph analysis.
+    SuggestRules,
+    /// Generate a compatibility report.
+    CompatibilityReport,
+    /// Debug framework detection.
+    DebugFrameworks,
     /// Query the daemon's status.
     Status,
     /// Request a graceful shutdown.
@@ -86,6 +92,21 @@ pub enum DaemonResponse {
     /// Result of a fix-plan request.
     FixPlanResult {
         /// The fix-plan report as JSON.
+        report: serde_json::Value,
+    },
+    /// Result of a suggest-rules request.
+    SuggestRulesResult {
+        /// The suggest-rules report as JSON.
+        report: serde_json::Value,
+    },
+    /// Result of a compatibility-report request.
+    CompatibilityReportResult {
+        /// The compatibility report as JSON.
+        report: serde_json::Value,
+    },
+    /// Result of a debug-frameworks request.
+    DebugFrameworksResult {
+        /// The debug-frameworks report as JSON.
         report: serde_json::Value,
     },
     /// Daemon status information.

@@ -1,0 +1,1 @@
+{ "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler", "paths": { "@nx-starter/shared": ["libs/shared/src/index.ts"] } } }

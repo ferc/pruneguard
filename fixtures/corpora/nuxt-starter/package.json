@@ -1,0 +1,7 @@
+{
+  "name": "nuxt-starter",
+  "private": true,
+  "dependencies": { "nuxt": "^3.14.0" },
+  "devDependencies": { "typescript": "^5.0.0" },
+  "scripts": { "dev": "nuxt dev", "build": "nuxt build" }
+}

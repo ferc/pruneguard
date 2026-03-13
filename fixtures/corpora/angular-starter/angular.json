@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "projects": {
+    "app": {
+      "root": "",
+      "sourceRoot": "src",
+      "architect": {
+        "build": { "builder": "@angular-devkit/build-angular:browser", "options": { "main": "src/main.ts" } }
+      }
+    }
+  }
+}

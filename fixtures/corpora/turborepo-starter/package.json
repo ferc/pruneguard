@@ -1,0 +1,6 @@
+{
+  "name": "turborepo-starter",
+  "private": true,
+  "devDependencies": { "turbo": "^2.0.0" },
+  "workspaces": ["apps/*", "packages/*"]
+}

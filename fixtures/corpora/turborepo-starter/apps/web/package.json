@@ -1,0 +1,1 @@
+{ "name": "@turbo/web", "private": true, "dependencies": { "@turbo/ui": "workspace:*" } }

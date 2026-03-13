@@ -259,6 +259,27 @@ async fn dispatch_request(
                 Err(err) => DaemonResponse::Error { message: err.to_string() },
             }
         }
+        DaemonRequest::SuggestRules => {
+            let idx = index.lock().await;
+            match idx.query_suggest_rules() {
+                Ok(report) => DaemonResponse::SuggestRulesResult { report },
+                Err(err) => DaemonResponse::Error { message: err.to_string() },
+            }
+        }
+        DaemonRequest::CompatibilityReport => {
+            let idx = index.lock().await;
+            match idx.query_compatibility_report() {
+                Ok(report) => DaemonResponse::CompatibilityReportResult { report },
+                Err(err) => DaemonResponse::Error { message: err.to_string() },
+            }
+        }
+        DaemonRequest::DebugFrameworks => {
+            let idx = index.lock().await;
+            match idx.query_debug_frameworks() {
+                Ok(report) => DaemonResponse::DebugFrameworksResult { report },
+                Err(err) => DaemonResponse::Error { message: err.to_string() },
+            }
+        }
         DaemonRequest::Status => {
             let idx = index.lock().await;
             let uptime_secs = started_at.elapsed().as_secs();

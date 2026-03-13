@@ -144,6 +144,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(exit)
         }
         cli::Command::SafeDelete { targets } => {
+            // Try daemon-backed safe-delete first.
+            if let Some(exit) =
+                try_daemon_safe_delete(&cwd, effective_daemon, &targets, &options.global)?
+            {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             if targets.is_empty() {
                 miette::bail!("safe-delete requires at least one target");
@@ -178,6 +185,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::FixPlan { targets } => {
+            // Try daemon-backed fix-plan first.
+            if let Some(exit) =
+                try_daemon_fix_plan(&cwd, effective_daemon, &targets, &options.global)?
+            {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             if targets.is_empty() {
                 miette::bail!("fix-plan requires at least one target");
@@ -196,6 +210,11 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::SuggestRules => {
+            // Try daemon-backed suggest-rules first.
+            if let Some(exit) = try_daemon_suggest_rules(&cwd, effective_daemon, &options.global)? {
+                return Ok(exit);
+            }
+
             let config = load_config_or_default(&cwd, options.config.as_deref())?;
             let report = pruneguard::suggest_rules(
                 &cwd,
@@ -210,6 +229,13 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::CompatibilityReport => {
+            // Try daemon-backed compatibility-report first.
+            if let Some(exit) =
+                try_daemon_compatibility_report(&cwd, effective_daemon, &options.global)?
+            {
+                return Ok(exit);
+            }
+
             let _config = load_config_or_default(&cwd, options.config.as_deref())?;
             let report = pruneguard::compatibility_report(&cwd, profile)?;
             if matches!(options.global.format, cli::OutputFormat::Json) {
@@ -474,6 +500,164 @@ fn try_daemon_explain(
                 miette::bail!("daemon explain failed: {err}");
             }
             tracing::debug!("daemon explain request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed safe-delete evaluation.
+fn try_daemon_safe_delete(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    targets: &[String],
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::SafeDelete { targets: targets.to_vec() };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::SafeDeleteResult { report }) => {
+            eprintln!("(daemon-backed safe-delete)");
+            print_daemon_report(&report, flags.format);
+            let has_blocked = report
+                .get("blocked")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|arr| !arr.is_empty());
+            let has_needs_review = report
+                .get("needsReview")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|arr| !arr.is_empty());
+            Ok(Some(if has_blocked || has_needs_review {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon safe-delete failed: {message}");
+            }
+            tracing::debug!("daemon safe-delete returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon safe-delete failed: {err}");
+            }
+            tracing::debug!("daemon safe-delete request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed fix-plan generation.
+fn try_daemon_fix_plan(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    targets: &[String],
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::FixPlan { targets: targets.to_vec() };
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::FixPlanResult { report }) => {
+            eprintln!("(daemon-backed fix-plan)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon fix-plan failed: {message}");
+            }
+            tracing::debug!("daemon fix-plan returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon fix-plan failed: {err}");
+            }
+            tracing::debug!("daemon fix-plan request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed suggest-rules query.
+fn try_daemon_suggest_rules(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::SuggestRules;
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::SuggestRulesResult { report }) => {
+            eprintln!("(daemon-backed suggest-rules)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon suggest-rules failed: {message}");
+            }
+            tracing::debug!("daemon suggest-rules returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon suggest-rules failed: {err}");
+            }
+            tracing::debug!("daemon suggest-rules request failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+/// Try a daemon-backed compatibility report.
+fn try_daemon_compatibility_report(
+    cwd: &std::path::Path,
+    mode: cli::DaemonMode,
+    flags: &cli::GlobalFlags,
+) -> miette::Result<Option<ExitCode>> {
+    let Some(client) = try_daemon_client(cwd, mode)? else {
+        return Ok(None);
+    };
+
+    let request = pruneguard_daemon::DaemonRequest::CompatibilityReport;
+
+    match client.send_request(&request) {
+        Ok(pruneguard_daemon::DaemonResponse::CompatibilityReportResult { report }) => {
+            eprintln!("(daemon-backed compatibility-report)");
+            print_daemon_report(&report, flags.format);
+            Ok(Some(ExitCode::SUCCESS))
+        }
+        Ok(pruneguard_daemon::DaemonResponse::Error { message }) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon compatibility-report failed: {message}");
+            }
+            tracing::debug!("daemon compatibility-report returned error: {message}");
+            Ok(None)
+        }
+        Ok(_) => Ok(None),
+        Err(err) => {
+            if matches!(mode, cli::DaemonMode::Required) {
+                miette::bail!("daemon compatibility-report failed: {err}");
+            }
+            tracing::debug!("daemon compatibility-report request failed: {err}");
             Ok(None)
         }
     }

@@ -105,6 +105,8 @@ export type AnalysisReport = {
     ruleName?: string;
     primaryActionKind?: string;
     actionKinds?: string[];
+    trustNotes?: string[];
+    frameworkContext?: string[];
   }>;
   entrypoints: Array<{
     path: string;
@@ -198,6 +200,7 @@ export type ReviewOptions = {
   baseRef?: string;
   noCache?: boolean;
   noBaseline?: boolean;
+  strictTrust?: boolean;
 };
 
 export type ReviewReport = {
@@ -224,6 +227,9 @@ export type ReviewReport = {
     risk: "low" | "medium" | "high";
     confidence: "high" | "medium" | "low";
   }>;
+  compatibilityWarnings?: string[];
+  strictTrustApplied?: boolean;
+  recommendedActions?: Array<{ kind: string; description: string; priority: number; command?: string; targets?: string[]; }>;
   executionMode?: "oneshot" | "daemon";
   latencyMs?: number;
 };
@@ -314,6 +320,69 @@ export type DaemonStatusReport = {
   version?: string;
   startedAt?: string;
   projectRoot?: string;
+  indexWarm?: boolean;
+  lastUpdateMs?: number;
+  graphNodes?: number;
+  graphEdges?: number;
+  watcherLagMs?: number;
+  pendingInvalidations?: number;
+  generation?: number;
+  uptimeSecs?: number;
+};
+
+export type CompatibilityReportOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+};
+
+export type DebugFrameworksOptions = {
+  cwd?: string;
+  config?: string;
+  profile?: Profile;
+};
+
+export type CompatibilityReport = {
+  supportedFrameworks: string[];
+  heuristicFrameworks: string[];
+  unsupportedSignals: Array<{
+    signal: string;
+    source: string;
+    suggestion?: string;
+  }>;
+  warnings: Array<{
+    code: string;
+    message: string;
+    affectedScope?: string;
+    severity: "low" | "medium" | "high";
+  }>;
+  trustDowngrades: Array<{
+    reason: string;
+    scope: string;
+    severity: "low" | "medium" | "high";
+  }>;
+};
+
+export type FrameworkDebugReport = {
+  detectedPacks: Array<{
+    name: string;
+    confidence: string;
+    signals: string[];
+    reasons: string[];
+  }>;
+  allEntrypoints: Array<{
+    path: string;
+    framework: string;
+    kind: string;
+    heuristic: boolean;
+    reason: string;
+  }>;
+  allIgnorePatterns: string[];
+  allClassificationRules: Array<{
+    pattern: string;
+    classification: string;
+  }>;
+  heuristicDetections: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -478,6 +547,7 @@ export async function review(options: ReviewOptions = {}): Promise<ReviewReport>
   if (options.baseRef) args.push("--changed-since", options.baseRef);
   if (options.noCache) args.push("--no-cache");
   if (options.noBaseline) args.push("--no-baseline");
+  if (options.strictTrust) args.push("--strict-trust");
   args.push("review");
 
   const result = await runBinary(args, { cwd: options.cwd });
@@ -573,4 +643,24 @@ export async function daemonStatus(options?: {
     else if (key === "started_at") report.startedAt = value;
   }
   return report;
+}
+
+export async function compatibilityReport(options: CompatibilityReportOptions = {}): Promise<CompatibilityReport> {
+  const args = ["--format", "json"];
+  pushGlobalFlags(args, options);
+  args.push("compatibility-report");
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  requireSuccess(result);
+  return parseJson<CompatibilityReport>(result);
+}
+
+export async function debugFrameworks(options: DebugFrameworksOptions = {}): Promise<FrameworkDebugReport> {
+  const args = ["--format", "json"];
+  pushGlobalFlags(args, options);
+  args.push("debug", "frameworks");
+
+  const result = await runBinary(args, { cwd: options.cwd });
+  requireSuccess(result);
+  return parseJson<FrameworkDebugReport>(result);
 }
