@@ -26,6 +26,7 @@ pruneguard_manifest = { workspace = true }
 pruneguard_report = { workspace = true }
 pruneguard_resolver = { workspace = true }
 pruneguard_cache = { workspace = true }
+pruneguard_config_readers = { workspace = true }
 
 globset = { workspace = true }
 miette = { workspace = true }

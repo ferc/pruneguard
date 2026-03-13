@@ -4,7 +4,7 @@ use oxc_resolver::{
     ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences,
 };
 use pruneguard_config::ResolverConfig;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 /// Bump this whenever hardcoded resolver behaviour changes (e.g. `extension_alias`,
@@ -139,6 +139,12 @@ pub struct ModuleResolver {
     workspace_browser: FxHashMap<String, Option<serde_json::Value>>,
     /// Cached workspace package.json fallback main fields (`typings`, `types`, `module`).
     workspace_main_fields: FxHashMap<String, WorkspaceMainFields>,
+    /// Aliases from framework config adapters (e.g. Vite resolve.alias, Webpack resolve.alias).
+    /// Each entry maps a prefix pattern to an absolute target directory.
+    config_aliases: Vec<(String, PathBuf)>,
+    /// External packages from framework config adapters.
+    /// Specifiers matching these names are treated as external dependencies.
+    config_externals: FxHashSet<String>,
 }
 
 impl ModuleResolver {
@@ -203,6 +209,8 @@ impl ModuleResolver {
             workspace_imports: FxHashMap::default(),
             workspace_browser: FxHashMap::default(),
             workspace_main_fields: FxHashMap::default(),
+            config_aliases: Vec::new(),
+            config_externals: FxHashSet::default(),
         }
     }
 
@@ -223,8 +231,51 @@ impl ModuleResolver {
         self.workspace_roots = roots;
     }
 
+    /// Register aliases from framework config adapters (e.g. Vite resolve.alias).
+    ///
+    /// Each alias maps a prefix (e.g. `@`) to a target directory (e.g. `./src`).
+    /// Relative targets are resolved against `project_root`.
+    pub fn set_config_aliases(&mut self, aliases: Vec<(String, String)>, project_root: &Path) {
+        self.config_aliases = aliases
+            .into_iter()
+            .map(|(pattern, target)| {
+                let abs = if Path::new(&target).is_absolute() {
+                    PathBuf::from(&target)
+                } else {
+                    let stripped = target.strip_prefix("./").unwrap_or(&target);
+                    project_root.join(stripped)
+                };
+                (pattern, abs)
+            })
+            .collect();
+    }
+
+    /// Register external packages from framework config adapters.
+    ///
+    /// Specifiers matching these names are treated as external dependencies
+    /// without attempting filesystem resolution.
+    pub fn set_config_externals(&mut self, externals: Vec<String>) {
+        self.config_externals = externals.into_iter().collect();
+    }
+
     /// Resolve a module specifier from a given file.
     pub fn resolve(&self, specifier: &str, from: &Path) -> Result<ResolvedModule, ResolveError> {
+        // Check config-derived externals first.
+        if let Some(pkg) = dependency_name(specifier)
+            && self.config_externals.contains(&pkg)
+        {
+            return Err(ResolveError::NotFound {
+                specifier: specifier.to_string(),
+                from: from.to_path_buf(),
+                reason: Some(UnresolvedReason::Externalized),
+            });
+        }
+
+        // Try config-derived aliases (e.g. Vite resolve.alias).
+        if let Some(resolved) = self.resolve_via_config_alias(specifier, from) {
+            return Ok(resolved);
+        }
+
         // Resolve `#`-prefixed subpath imports via the workspace's package.json
         // `imports` field before falling through to the standard resolver.
         if specifier.starts_with('#')
@@ -273,6 +324,26 @@ impl ModuleResolver {
                 })
             }
         }
+    }
+
+    /// Try to resolve a specifier via config-derived aliases.
+    ///
+    /// For each alias `(pattern, target_dir)`, if the specifier starts with
+    /// `pattern`, replace the prefix and resolve the remainder relative to the
+    /// target directory.
+    fn resolve_via_config_alias(&self, specifier: &str, _from: &Path) -> Option<ResolvedModule> {
+        for (pattern, target_dir) in &self.config_aliases {
+            // Exact match: `@` → `./src` means `@` resolves to `./src/index`
+            if specifier == pattern {
+                return resolve_with_extensions(target_dir, "index");
+            }
+            // Prefix match: `@/utils` with alias `@` → `./src` means `./src/utils`
+            let prefix_with_sep = format!("{pattern}/");
+            if let Some(rest) = specifier.strip_prefix(&prefix_with_sep) {
+                return resolve_with_extensions(target_dir, rest);
+            }
+        }
+        None
     }
 
     /// Try to resolve a bare specifier via workspace package mappings.

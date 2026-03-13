@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
-pub use adapters::{AliasEntry, ConfigAdapter, ConfigInputs, extract_all_inputs};
+pub use adapters::{AdapterConfidence, AliasEntry, ConfigAdapter, ConfigInputs, extract_all_inputs};
 
 #[derive(Debug, Error)]
 pub enum ConfigReaderError {

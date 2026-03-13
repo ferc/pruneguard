@@ -1573,6 +1573,7 @@ dependencies = [
  "petgraph",
  "pruneguard_cache",
  "pruneguard_config",
+ "pruneguard_config_readers",
  "pruneguard_discovery",
  "pruneguard_entrypoints",
  "pruneguard_extract",

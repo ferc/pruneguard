@@ -3,6 +3,7 @@ pub mod cycles;
 pub mod duplicate_exports;
 pub mod impact;
 pub mod ownership;
+pub mod parity;
 pub mod suggest_rules;
 pub mod unused_dependencies;
 pub mod unused_exports;

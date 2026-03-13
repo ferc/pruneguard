@@ -12,6 +12,12 @@ pub struct SymbolGraph {
     pub import_edges: Vec<ImportEdge>,
     /// Re-export chains.
     pub reexport_edges: Vec<ReexportEdge>,
+    /// Member access references (e.g. `MyEnum.Variant`).
+    pub member_refs: Vec<MemberRef>,
+    /// Same-file references to exports (not via import).
+    pub same_file_refs: Vec<SameFileRef>,
+    /// Individual members of exported classes/enums/namespaces.
+    pub member_exports: Vec<MemberExportNode>,
     /// Next export ID counter.
     next_export_id: u32,
 }
@@ -55,6 +61,46 @@ pub struct ReexportEdge {
     pub is_star: bool,
     /// Whether this is a type-only re-export.
     pub is_type: bool,
+}
+
+/// Tracks when a consumer accesses a specific member of an exported binding
+/// (e.g. `MyEnum.Variant`, `instance.method`).
+#[derive(Debug, Clone)]
+pub struct MemberRef {
+    /// File doing the access.
+    pub accessor: FileId,
+    /// File that exports the parent.
+    pub source: FileId,
+    /// Parent export name.
+    pub export_name: CompactString,
+    /// Member being accessed (e.g. method name, enum variant).
+    pub member_name: CompactString,
+    /// Whether this is a type-only access.
+    pub is_type: bool,
+}
+
+/// Tracks when an export is referenced within its own file (not via import).
+#[derive(Debug, Clone)]
+pub struct SameFileRef {
+    /// File containing the export and the reference.
+    pub file: FileId,
+    /// The export name being referenced.
+    pub export_name: CompactString,
+    /// Line number of the reference.
+    pub ref_line: u32,
+}
+
+/// Tracks individual members of exported classes/enums/namespaces.
+#[derive(Debug, Clone)]
+pub struct MemberExportNode {
+    /// The parent export name.
+    pub parent_export: CompactString,
+    /// The member name.
+    pub member_name: CompactString,
+    /// File containing the parent export.
+    pub file: FileId,
+    /// Whether this member is live (reachable).
+    pub is_live: bool,
 }
 
 impl SymbolGraph {
@@ -122,5 +168,184 @@ impl SymbolGraph {
     /// Get all dead (unused) exports.
     pub fn dead_exports(&self) -> impl Iterator<Item = &ExportNode> {
         self.exports.values().filter(|node| !node.is_live)
+    }
+
+    /// Record a member access (e.g. `MyEnum.Variant`, `instance.method`).
+    pub fn add_member_ref(
+        &mut self,
+        accessor: FileId,
+        source: FileId,
+        export_name: CompactString,
+        member_name: CompactString,
+        is_type: bool,
+    ) {
+        self.member_refs.push(MemberRef { accessor, source, export_name, member_name, is_type });
+    }
+
+    /// Record a same-file reference to an export.
+    pub fn add_same_file_ref(
+        &mut self,
+        file: FileId,
+        export_name: CompactString,
+        ref_line: u32,
+    ) {
+        self.same_file_refs.push(SameFileRef { file, export_name, ref_line });
+    }
+
+    /// Register a member of an exported class/enum/namespace.
+    pub fn add_member_export(
+        &mut self,
+        file: FileId,
+        parent_export: CompactString,
+        member_name: CompactString,
+    ) {
+        self.member_exports.push(MemberExportNode {
+            parent_export,
+            member_name,
+            file,
+            is_live: false,
+        });
+    }
+
+    /// Mark a specific member as live.
+    pub fn mark_member_live(&mut self, file: FileId, parent_export: &str, member_name: &str) {
+        for member in &mut self.member_exports {
+            if member.file == file
+                && member.parent_export == parent_export
+                && member.member_name == member_name
+            {
+                member.is_live = true;
+            }
+        }
+    }
+
+    /// Mark all members of a parent export as live.
+    pub fn mark_all_members_live(&mut self, file: FileId, parent_export: &str) {
+        for member in &mut self.member_exports {
+            if member.file == file && member.parent_export == parent_export {
+                member.is_live = true;
+            }
+        }
+    }
+
+    /// Get dead (unused) members for a given file.
+    pub fn dead_members(&self, file: FileId) -> impl Iterator<Item = &MemberExportNode> {
+        self.member_exports
+            .iter()
+            .filter(move |m| m.file == file && !m.is_live)
+    }
+
+    /// Get all members for a specific export.
+    pub fn members_for_export(
+        &self,
+        file: FileId,
+        parent_export: &str,
+    ) -> impl Iterator<Item = &MemberExportNode> {
+        let parent = CompactString::new(parent_export);
+        self.member_exports
+            .iter()
+            .filter(move |m| m.file == file && m.parent_export == parent)
+    }
+
+    /// Check if an export has any same-file references.
+    pub fn has_same_file_refs(&self, file: FileId, export_name: &str) -> bool {
+        self.same_file_refs
+            .iter()
+            .any(|r| r.file == file && r.export_name == export_name)
+    }
+
+    /// Propagate liveness through all edges.
+    ///
+    /// 1. For each import edge, mark the target export as live.
+    /// 2. For each reexport edge, if the re-exported name is live in the
+    ///    reexporter, mark the original in the source as live (follow chains).
+    /// 3. For each member ref, mark the specific member as live.
+    /// 4. For each same-file ref, mark the export as live.
+    pub fn propagate_liveness(&mut self) {
+        // Step 1: import edges -> mark target exports live.
+        let import_targets: Vec<(FileId, CompactString)> = self
+            .import_edges
+            .iter()
+            .map(|e| (e.source, e.export_name.clone()))
+            .collect();
+        for (file, name) in import_targets {
+            if let Some(node) = self.exports.get_mut(&(file, name)) {
+                node.is_live = true;
+            }
+        }
+
+        // Step 2: reexport edges -> propagate liveness through chains.
+        // Iterate until no new liveness is discovered (handles transitive chains).
+        loop {
+            let mut changed = false;
+            for i in 0..self.reexport_edges.len() {
+                let reexporter = self.reexport_edges[i].reexporter;
+                let exported_name = self.reexport_edges[i].exported_name.clone();
+                let source = self.reexport_edges[i].source;
+                let original_name = self.reexport_edges[i].original_name.clone();
+                let is_star = self.reexport_edges[i].is_star;
+
+                let reexported_is_live = self
+                    .exports
+                    .get(&(reexporter, exported_name))
+                    .is_some_and(|n| n.is_live);
+
+                if reexported_is_live {
+                    if is_star {
+                        // Star re-export: mark all source exports live.
+                        let source_keys: Vec<CompactString> = self
+                            .exports
+                            .iter()
+                            .filter(|((f, _), _)| *f == source)
+                            .map(|((_, name), _)| name.clone())
+                            .collect();
+                        for name in source_keys {
+                            if let Some(node) = self.exports.get_mut(&(source, name)) {
+                                if !node.is_live {
+                                    node.is_live = true;
+                                    changed = true;
+                                }
+                            }
+                        }
+                    } else if let Some(node) =
+                        self.exports.get_mut(&(source, original_name))
+                    {
+                        if !node.is_live {
+                            node.is_live = true;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Step 3: member refs -> mark specific members live.
+        let member_targets: Vec<(FileId, CompactString, CompactString)> = self
+            .member_refs
+            .iter()
+            .map(|r| (r.source, r.export_name.clone(), r.member_name.clone()))
+            .collect();
+        for (file, parent, member) in member_targets {
+            for m in &mut self.member_exports {
+                if m.file == file && m.parent_export == parent && m.member_name == member {
+                    m.is_live = true;
+                }
+            }
+        }
+
+        // Step 4: same-file refs -> mark exports live.
+        let same_file_targets: Vec<(FileId, CompactString)> = self
+            .same_file_refs
+            .iter()
+            .map(|r| (r.file, r.export_name.clone()))
+            .collect();
+        for (file, name) in same_file_targets {
+            if let Some(node) = self.exports.get_mut(&(file, name)) {
+                node.is_live = true;
+            }
+        }
     }
 }

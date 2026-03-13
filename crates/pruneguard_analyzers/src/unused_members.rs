@@ -1,51 +1,171 @@
+use compact_str::CompactString;
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use pruneguard_config::AnalysisSeverity;
-use pruneguard_graph::GraphBuildResult;
-use pruneguard_report::Finding;
+use pruneguard_extract::ExportKind;
+use pruneguard_graph::{FileId, GraphBuildResult};
+use pruneguard_report::{Evidence, Finding, FindingCategory, FindingConfidence};
 
-use crate::severity;
+use crate::{make_finding, severity};
 
-/// Detect exported classes/enums whose individual members (methods, properties,
-/// variants) are never referenced by any consumer.
+/// Detect exported classes/enums/namespaces whose individual members (methods,
+/// properties, variants) are never referenced by any consumer.
 ///
-/// # Current status
-///
-/// Member-level liveness analysis requires two capabilities that are not yet
-/// present in the extraction pipeline:
-///
-/// 1. **Member extraction**: `FileFacts` does not yet capture the individual
-///    members (methods, properties, enum variants) of exported classes and
-///    enums.  The `ExportInfo` struct records the export name and kind, but not
-///    its constituent members.
-///
-/// 2. **Property-access tracking**: The symbol graph records named imports and
-///    re-exports, but does not track which *members* of an imported binding are
-///    accessed (e.g. `MyEnum.Variant` or `instance.method()`).  Without this
-///    information, we cannot distinguish "the enum is imported and all variants
-///    are used" from "the enum is imported but only one variant is used."
-///
-/// Once these extraction capabilities are added, this analyzer should:
-///
-/// 1. Iterate over exports whose `export_kind` is `Enum` or `Class`.
-/// 2. For each such export, enumerate its members from the extraction data.
-/// 3. Cross-reference the members against property-access edges in the symbol
-///    graph to determine which members are live.
-/// 4. Emit a `FindingCategory::UnusedMember` finding for each member that has
-///    no live reference, using `FindingConfidence::Medium` (since property
-///    access tracking may miss dynamic access patterns).
-///
-/// Note: Completely dead enums/classes (those with no imports at all) are
-/// already reported by the `unused_exports` analyzer, so this analyzer should
-/// only flag *partially* used exports where some members are live and others
-/// are not.
+/// Completely dead exports (those with no imports at all) are already reported
+/// by the `unused_exports` analyzer; this analyzer only flags *partially* used
+/// exports where some members are live and others are not.
 pub fn analyze(
-    _build: &GraphBuildResult,
+    build: &GraphBuildResult,
     level: AnalysisSeverity,
 ) -> Vec<Finding> {
-    let Some(_finding_severity) = severity(level) else {
+    let Some(finding_severity) = severity(level) else {
         return Vec::new();
     };
 
-    // Awaiting member-level extraction and property-access tracking in the
-    // symbol graph before findings can be emitted.
-    Vec::new()
+    let mut findings = Vec::new();
+
+    // Build a set of member references keyed by (source_file, export_name, member_name).
+    let referenced_members: FxHashSet<(FileId, CompactString, CompactString)> = build
+        .symbol_graph
+        .member_refs
+        .iter()
+        .map(|r| (r.source, r.export_name.clone(), r.member_name.clone()))
+        .collect();
+
+    // Build a set of live exports (exports that have at least one import).
+    let imported_exports: FxHashSet<(FileId, CompactString)> = build
+        .symbol_graph
+        .import_edges
+        .iter()
+        .map(|e| (e.source, e.export_name.clone()))
+        .collect();
+
+    // Also count which member refs exist per parent to identify partially-used exports.
+    let members_per_export: FxHashMap<(FileId, CompactString), Vec<&CompactString>> = {
+        let mut map: FxHashMap<(FileId, CompactString), Vec<&CompactString>> = FxHashMap::default();
+        for member_node in &build.symbol_graph.member_exports {
+            map.entry((member_node.file, member_node.parent_export.clone()))
+                .or_default()
+                .push(&member_node.member_name);
+        }
+        map
+    };
+
+    // For each file, look at exports with members.
+    for extracted_file in &build.files {
+        let Some(facts) = &extracted_file.facts else {
+            continue;
+        };
+
+        let Some(file_id) = build.module_graph.file_id(&extracted_file.file.path.to_string_lossy()) else {
+            continue;
+        };
+
+        for export in &facts.exports {
+            // Only analyze class/enum/namespace exports that have tracked members.
+            if !matches!(export.export_kind, ExportKind::Class | ExportKind::Enum | ExportKind::Namespace) {
+                continue;
+            }
+
+            // Skip exports that are completely unused — unused_exports handles those.
+            if !imported_exports.contains(&(file_id, export.name.clone())) {
+                // Also check if all file exports are live (entrypoint file).
+                let is_live = build
+                    .symbol_graph
+                    .exports
+                    .get(&(file_id, export.name.clone()))
+                    .is_some_and(|node| node.is_live);
+                if !is_live {
+                    continue;
+                }
+            }
+
+            let Some(members) = members_per_export.get(&(file_id, export.name.clone())) else {
+                // No tracked members — nothing to analyze.
+                continue;
+            };
+
+            // Find which members are referenced and which are dead.
+            let mut dead_members = Vec::new();
+            let mut live_count = 0;
+            for member_name in members {
+                let key = (file_id, export.name.clone(), (*member_name).clone());
+                if referenced_members.contains(&key) {
+                    live_count += 1;
+                } else {
+                    // Also check if the member is marked live in the symbol graph.
+                    let is_member_live = build
+                        .symbol_graph
+                        .member_exports
+                        .iter()
+                        .any(|m| {
+                            m.file == file_id
+                                && m.parent_export == export.name
+                                && m.member_name == **member_name
+                                && m.is_live
+                        });
+                    if is_member_live {
+                        live_count += 1;
+                    } else {
+                        dead_members.push((*member_name).clone());
+                    }
+                }
+            }
+
+            // Only report partially-used exports (some live, some dead).
+            if dead_members.is_empty() || live_count == 0 {
+                continue;
+            }
+
+            let relative_path = &extracted_file.file.relative_path;
+            let kind_label = match export.export_kind {
+                ExportKind::Class => "class",
+                ExportKind::Enum => "enum",
+                ExportKind::Namespace => "namespace",
+                _ => "export",
+            };
+
+            for dead_member in &dead_members {
+                let evidence = vec![Evidence {
+                    kind: "unused-member".to_string(),
+                    file: Some(relative_path.to_string_lossy().to_string()),
+                    line: Some(export.line as usize),
+                    description: format!(
+                        "`{}.{}` is never referenced by any consumer ({} of {} members used)",
+                        export.name,
+                        dead_member,
+                        live_count,
+                        members.len(),
+                    ),
+                }];
+
+                findings.push(make_finding(
+                    "unused-member",
+                    finding_severity,
+                    FindingCategory::UnusedMember,
+                    FindingConfidence::Medium,
+                    format!(
+                        "{}.{}",
+                        relative_path.to_string_lossy(),
+                        export.name,
+                    ),
+                    extracted_file.file.workspace.clone(),
+                    extracted_file.file.package.clone(),
+                    format!(
+                        "{kind_label} `{}` member `{dead_member}` is exported but never used ({live_count}/{} members referenced)",
+                        export.name,
+                        members.len(),
+                    ),
+                    evidence,
+                    Some(format!(
+                        "Remove the unused member `{dead_member}` from `{}`",
+                        export.name,
+                    )),
+                    None,
+                ));
+            }
+        }
+    }
+
+    findings
 }

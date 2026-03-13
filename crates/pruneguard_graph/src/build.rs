@@ -10,6 +10,7 @@ use pruneguard_cache::{
     PathIndexEntry,
 };
 use pruneguard_config::{EntrypointsConfig, PruneguardConfig};
+use pruneguard_config_readers::{extract_all_inputs, read_workspace_configs};
 use pruneguard_discovery::{DiscoveryResult, discover};
 use pruneguard_entrypoints::{
     EntrypointKind as SeedKind, EntrypointProfile, EntrypointSeed, EntrypointSurfaceKind,
@@ -123,6 +124,28 @@ pub fn build_graph_with_options(
         .collect();
     resolver.set_workspace_roots(workspace_roots);
 
+    // --- Phase 1: Read framework configs and feed into graph pipeline ---
+    let mut all_workspace_configs = Vec::new();
+    for workspace in discovery.workspaces.values() {
+        all_workspace_configs.extend(read_workspace_configs(&workspace.root));
+    }
+    let config_inputs = extract_all_inputs(&all_workspace_configs);
+
+    // Feed config-derived aliases to the resolver.
+    if !config_inputs.aliases.is_empty() {
+        let aliases = config_inputs
+            .aliases
+            .iter()
+            .map(|a| (a.pattern.clone(), a.target.clone()))
+            .collect();
+        resolver.set_config_aliases(aliases, &discovery.project_root);
+    }
+
+    // Feed config-derived externals to the resolver.
+    if !config_inputs.externals.is_empty() {
+        resolver.set_config_externals(config_inputs.externals.clone());
+    }
+
     let base_hashes = CacheHashes {
         config: hash_json(config),
         resolver: {
@@ -202,6 +225,35 @@ pub fn build_graph_with_options(
         exclude_matcher.as_ref(),
         &scan_roots,
     );
+    // --- Phase 1: Inject config-derived entrypoints ---
+    inject_config_entrypoints(
+        &mut entrypoint_seeds,
+        &config_inputs,
+        &discovery,
+    );
+
+    // --- Phase 4: Seed from wildcard exports in manifests ---
+    let file_inventory: Vec<PathBuf> = extracted_files
+        .iter()
+        .map(|f| f.file.relative_path.clone())
+        .collect();
+    for workspace in discovery.workspaces.values() {
+        let expanded = workspace.manifest.expand_wildcard_exports(&file_inventory);
+        for path in expanded {
+            let abs = discovery.project_root.join(&path);
+            if !entrypoint_seeds.iter().any(|s| s.path == abs) {
+                entrypoint_seeds.push(EntrypointSeed {
+                    path: abs,
+                    kind: SeedKind::PackageExports,
+                    surface_kind: EntrypointSurfaceKind::PublicApi,
+                    profile: EntrypointProfile::Both,
+                    workspace: Some(workspace.name.clone()),
+                    source: "wildcard-exports".to_string(),
+                });
+            }
+        }
+    }
+
     let file_roles = extracted_files
         .iter()
         .map(|file| (file.file.path.clone(), file.file.role))
@@ -287,6 +339,10 @@ pub fn build_graph_with_options(
         &file_nodes,
         config.entrypoints.include_entry_exports,
     );
+
+    // Propagate liveness through the symbol graph (import edges, re-export chains,
+    // member references, and same-file references).
+    symbol_graph.propagate_liveness();
 
     let mut files_resolved = 0;
     let mut unresolved_specifiers = 0;
@@ -487,10 +543,16 @@ fn populate_extracted_file(
                         ));
                     }
                     pruneguard_extract::DependencyPattern::ImportMetaGlob { pattern: glob_pattern, line } => {
-                        // For literal glob patterns, expand against tracked source inventory.
-                        // Only create edges for literal specifiers (no wildcards) here;
-                        // glob expansion against inventory is deferred to Phase 1.
-                        if !glob_pattern.contains('*') && !glob_pattern.contains('?') {
+                        if glob_pattern.contains('*') || glob_pattern.contains('?') {
+                            // Expand wildcard glob against tracked source inventory.
+                            expand_glob_into_edges(
+                                extracted_file,
+                                glob_pattern,
+                                *line,
+                                resolver,
+                                repo_files,
+                            );
+                        } else {
                             extracted_file.resolved_imports.push(resolve_edge(
                                 resolver,
                                 &extracted_file.file.path,
@@ -536,17 +598,16 @@ fn populate_extracted_file(
                             repo_files,
                         ));
                     }
-                    pruneguard_extract::DependencyPattern::RequireContext { directory, line, .. } => {
-                        // Resolve the context directory as a dependency edge.
-                        // Glob expansion of matched files is deferred.
-                        extracted_file.resolved_imports.push(resolve_edge(
-                            resolver,
-                            &extracted_file.file.path,
+                    pruneguard_extract::DependencyPattern::RequireContext { directory, recursive, line } => {
+                        // Expand require.context directory against tracked source inventory.
+                        expand_require_context_into_edges(
+                            extracted_file,
                             directory,
-                            ResolvedEdgeKind::RequireContext,
+                            *recursive,
                             *line,
+                            resolver,
                             repo_files,
-                        ));
+                        );
                     }
                     pruneguard_extract::DependencyPattern::UrlConstructor { specifier, line } => {
                         extracted_file.resolved_imports.push(resolve_edge(
@@ -569,9 +630,16 @@ fn populate_extracted_file(
                         ));
                     }
                     pruneguard_extract::DependencyPattern::ImportMetaGlobArray { patterns, line } => {
-                        // Each pattern in the array becomes a separate edge.
                         for glob_pattern in patterns {
-                            if !glob_pattern.contains('*') && !glob_pattern.contains('?') {
+                            if glob_pattern.contains('*') || glob_pattern.contains('?') {
+                                expand_glob_into_edges(
+                                    extracted_file,
+                                    glob_pattern,
+                                    *line,
+                                    resolver,
+                                    repo_files,
+                                );
+                            } else {
                                 extracted_file.resolved_imports.push(resolve_edge(
                                     resolver,
                                     &extracted_file.file.path,
@@ -1083,6 +1151,20 @@ fn add_symbol_edges(
             );
         }
     }
+
+    // Register member exports (class methods, enum variants, namespace members).
+    for member in &facts.member_exports {
+        symbol_graph.add_member_export(
+            importer_id,
+            member.parent_name.clone(),
+            member.member_name.clone(),
+        );
+    }
+
+    // Register same-file references to exports.
+    for same_ref in &facts.same_file_refs {
+        symbol_graph.add_same_file_ref(importer_id, same_ref.export_name.clone(), same_ref.line);
+    }
 }
 
 const fn to_module_edge(kind: ResolvedEdgeKind) -> ModuleEdge {
@@ -1103,6 +1185,249 @@ const fn to_module_edge(kind: ResolvedEdgeKind) -> ModuleEdge {
         ResolvedEdgeKind::RequireContext => ModuleEdge::RequireContext,
         ResolvedEdgeKind::UrlConstructor => ModuleEdge::UrlConstructor,
         ResolvedEdgeKind::ImportEquals => ModuleEdge::ImportEquals,
+    }
+}
+
+/// Hard cap on expanded edges from a single glob/context pattern to prevent runaway expansion.
+const MAX_EXPANDED_EDGES: usize = 500;
+
+/// Expand an `import.meta.glob` wildcard pattern against the tracked source inventory.
+///
+/// For each file in `repo_files` that matches the glob, a `ResolvedEdgeKind::ImportMetaGlob`
+/// edge is added.  Negation patterns (starting with `!`) are skipped.
+fn expand_glob_into_edges(
+    extracted_file: &mut ExtractedFile,
+    pattern: &str,
+    line: u32,
+    resolver: &ModuleResolver,
+    repo_files: &FxHashSet<PathBuf>,
+) {
+    // Skip negation patterns — they exclude rather than include.
+    if pattern.starts_with('!') {
+        return;
+    }
+
+    let source_dir = extracted_file.file.path.parent().unwrap_or(&extracted_file.file.path);
+    let glob = match Glob::new(pattern) {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let matcher = glob.compile_matcher();
+
+    let mut count = 0;
+    for file_path in repo_files {
+        if count >= MAX_EXPANDED_EDGES {
+            break;
+        }
+        // Match against the relative path from the source file's directory.
+        let Ok(relative) = file_path.strip_prefix(source_dir) else {
+            continue;
+        };
+        if matcher.is_match(relative) {
+            extracted_file.resolved_imports.push(resolve_edge(
+                resolver,
+                &extracted_file.file.path,
+                &file_path.to_string_lossy(),
+                ResolvedEdgeKind::ImportMetaGlob,
+                line,
+                repo_files,
+            ));
+            count += 1;
+        }
+    }
+}
+
+/// Expand a `require.context(directory, recursive)` against the tracked source inventory.
+fn expand_require_context_into_edges(
+    extracted_file: &mut ExtractedFile,
+    directory: &str,
+    recursive: bool,
+    line: u32,
+    resolver: &ModuleResolver,
+    repo_files: &FxHashSet<PathBuf>,
+) {
+    let source_dir = extracted_file.file.path.parent().unwrap_or(&extracted_file.file.path);
+    let context_dir = if Path::new(directory).is_absolute() {
+        PathBuf::from(directory)
+    } else {
+        let stripped = directory.strip_prefix("./").unwrap_or(directory);
+        source_dir.join(stripped)
+    };
+
+    let mut count = 0;
+    for file_path in repo_files {
+        if count >= MAX_EXPANDED_EDGES {
+            break;
+        }
+        if !file_path.starts_with(&context_dir) {
+            continue;
+        }
+        // Non-recursive: only direct children.
+        if !recursive {
+            let Ok(relative) = file_path.strip_prefix(&context_dir) else {
+                continue;
+            };
+            if relative.components().count() > 1 {
+                continue;
+            }
+        }
+        extracted_file.resolved_imports.push(resolve_edge(
+            resolver,
+            &extracted_file.file.path,
+            &file_path.to_string_lossy(),
+            ResolvedEdgeKind::RequireContext,
+            line,
+            repo_files,
+        ));
+        count += 1;
+    }
+}
+
+/// Inject entrypoints discovered from framework config adapters.
+fn inject_config_entrypoints(
+    entrypoint_seeds: &mut Vec<EntrypointSeed>,
+    config_inputs: &pruneguard_config_readers::ConfigInputs,
+    discovery: &DiscoveryResult,
+) {
+    let project_root = &discovery.project_root;
+    let existing: FxHashSet<PathBuf> = entrypoint_seeds.iter().map(|s| s.path.clone()).collect();
+
+    // General entrypoints from config.
+    for entry_path in &config_inputs.entrypoints {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::Runtime,
+                profile: EntrypointProfile::Both,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
+    }
+
+    // Runtime entrypoints.
+    for entry_path in &config_inputs.runtime_entrypoints {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::Runtime,
+                profile: EntrypointProfile::Production,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
+    }
+
+    // Production entrypoints.
+    for entry_path in &config_inputs.production_entrypoints {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::FrameworkConvention,
+                profile: EntrypointProfile::Production,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
+    }
+
+    // Development entrypoints.
+    for entry_path in &config_inputs.development_entrypoints {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::Tooling,
+                profile: EntrypointProfile::Development,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
+    }
+
+    // Setup files.
+    for entry_path in config_inputs.setup_files.iter().chain(&config_inputs.global_setup_files) {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::Tooling,
+                profile: EntrypointProfile::Development,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
+    }
+
+    // Story entrypoints.
+    for entry_path in &config_inputs.story_entrypoints {
+        let abs = if entry_path.is_absolute() {
+            entry_path.clone()
+        } else {
+            project_root.join(entry_path)
+        };
+        if !existing.contains(&abs) && abs.exists() {
+            entrypoint_seeds.push(EntrypointSeed {
+                path: abs,
+                kind: SeedKind::FrameworkPack,
+                surface_kind: EntrypointSurfaceKind::Story,
+                profile: EntrypointProfile::Development,
+                workspace: None,
+                source: config_inputs
+                    .framework
+                    .as_deref()
+                    .unwrap_or("config-adapter")
+                    .to_string(),
+            });
+        }
     }
 }
 

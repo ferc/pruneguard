@@ -24,6 +24,12 @@ pub struct FileFacts {
     /// Non-standard dependency patterns (require.resolve, import.meta.glob, etc.).
     #[serde(default)]
     pub dependency_patterns: Vec<DependencyPattern>,
+    /// Members of exported classes, enums, and namespaces.
+    #[serde(default)]
+    pub member_exports: Vec<MemberExportInfo>,
+    /// References to exported symbols from within the same file.
+    #[serde(default)]
+    pub same_file_refs: Vec<SameFileRefInfo>,
 }
 
 /// The kind of an exported declaration.
@@ -51,6 +57,41 @@ pub struct ExportInfo {
     #[serde(default)]
     pub export_kind: ExportKind,
     /// Source line (1-indexed).
+    pub line: u32,
+}
+
+/// Individual members of an exported class, enum, or namespace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberExportInfo {
+    /// The name of the parent export (e.g. "MyClass", "MyEnum").
+    pub parent_name: CompactString,
+    /// The member name (e.g. method name, enum variant, namespace member).
+    pub member_name: CompactString,
+    /// The kind of member.
+    pub member_kind: MemberKind,
+    /// Line number where the member is defined.
+    pub line: u32,
+}
+
+/// The kind of member within an exported class, enum, or namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MemberKind {
+    Method,
+    Property,
+    EnumVariant,
+    NamespaceMember,
+    StaticMethod,
+    StaticProperty,
+    Getter,
+    Setter,
+}
+
+/// A reference to an exported symbol from within the same file (not via import).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SameFileRefInfo {
+    /// The export name being referenced.
+    pub export_name: CompactString,
+    /// Line number of the reference.
     pub line: u32,
 }
 
@@ -314,7 +355,77 @@ fn extract_js_ts_facts(path: &Path, source: &str) -> Result<FileFacts, ExtractEr
     patterns.extend(detect_import_equals(program));
     facts.dependency_patterns = patterns;
 
+    // Build semantic model to detect same-file references to exported symbols.
+    if !facts.exports.is_empty() {
+        detect_same_file_refs(program, &mut facts);
+    }
+
     Ok(facts)
+}
+
+/// Detect same-file references to exported symbols using the semantic model.
+///
+/// For each exported name, find the corresponding binding in the root scope
+/// and collect all non-declaration references to it.
+fn detect_same_file_refs(
+    program: &oxc_ast::ast::Program<'_>,
+    facts: &mut FileFacts,
+) {
+    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(program);
+    let semantic = &semantic_ret.semantic;
+    let scoping = semantic.scoping();
+
+    // Collect export names (excluding "default" which is harder to track by binding name).
+    let export_names: FxHashSet<&str> = facts
+        .exports
+        .iter()
+        .filter(|e| e.name.as_str() != "default")
+        .map(|e| e.name.as_str())
+        .collect();
+
+    if export_names.is_empty() {
+        return;
+    }
+
+    // Collect imported names so we can exclude them — they are not same-file symbols.
+    let imported_locals: FxHashSet<&str> = facts
+        .imports
+        .iter()
+        .flat_map(|imp| imp.names.iter().map(|n| n.local.as_str()))
+        .collect();
+
+    let root_scope_id = scoping.root_scope_id();
+
+    for symbol_id in scoping.symbol_ids() {
+        let name = scoping.symbol_name(symbol_id);
+
+        // Only care about symbols that are exported and not imports.
+        if !export_names.contains(name) || imported_locals.contains(name) {
+            continue;
+        }
+
+        // Only look at symbols declared in the root scope (module-level).
+        if scoping.symbol_scope_id(symbol_id) != root_scope_id {
+            continue;
+        }
+
+        let decl_span = scoping.symbol_span(symbol_id);
+        let export_name = CompactString::new(name);
+
+        for reference in scoping.get_resolved_references(symbol_id) {
+            let ref_span = semantic.reference_span(reference);
+
+            // Skip the declaration site itself.
+            if ref_span == decl_span {
+                continue;
+            }
+
+            facts.same_file_refs.push(SameFileRefInfo {
+                export_name: export_name.clone(),
+                line: ref_span.start,
+            });
+        }
+    }
 }
 
 /// Determine the source type from a file path.
@@ -421,6 +532,18 @@ fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFa
                 export_kind: ExportKind::Default,
                 line: export.span.start,
             });
+
+            // Extract members from default-exported classes.
+            if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
+                &export.declaration
+            {
+                let parent = if let Some(id) = &class.id {
+                    CompactString::new(id.name.as_str())
+                } else {
+                    CompactString::new("default")
+                };
+                extract_class_members(&parent, class, facts);
+            }
         }
 
         Statement::ExportAllDeclaration(export) => {
@@ -754,12 +877,14 @@ fn extract_exports_from_declaration(
         }
         Declaration::ClassDeclaration(class) => {
             if let Some(id) = &class.id {
+                let class_name = CompactString::new(id.name.as_str());
                 facts.exports.push(ExportInfo {
-                    name: CompactString::new(id.name.as_str()),
+                    name: class_name.clone(),
                     is_type,
                     export_kind: if is_type { ExportKind::Type } else { ExportKind::Class },
                     line: class.span.start,
                 });
+                extract_class_members(&class_name, class, facts);
             }
         }
         Declaration::TSTypeAliasDeclaration(alias) => {
@@ -779,12 +904,24 @@ fn extract_exports_from_declaration(
             });
         }
         Declaration::TSEnumDeclaration(enum_decl) => {
+            let enum_name = CompactString::new(enum_decl.id.name.as_str());
             facts.exports.push(ExportInfo {
-                name: CompactString::new(enum_decl.id.name.as_str()),
+                name: enum_name.clone(),
                 is_type,
                 export_kind: if is_type { ExportKind::Type } else { ExportKind::Enum },
                 line: enum_decl.span.start,
             });
+            extract_enum_members(&enum_name, enum_decl, facts);
+        }
+        Declaration::TSModuleDeclaration(module_decl) => {
+            let ns_name = CompactString::new(module_decl.id.name().as_str());
+            facts.exports.push(ExportInfo {
+                name: ns_name.clone(),
+                is_type,
+                export_kind: if is_type { ExportKind::Type } else { ExportKind::Namespace },
+                line: module_decl.span.start,
+            });
+            extract_namespace_members(&ns_name, module_decl, facts);
         }
         _ => {}
     }
@@ -796,6 +933,212 @@ fn extract_binding_name(pattern: &oxc_ast::ast::BindingPattern<'_>) -> Option<St
     match pattern {
         BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
         _ => None, // Destructuring patterns not handled yet
+    }
+}
+
+/// Extract members from an exported class declaration.
+fn extract_class_members(
+    class_name: &CompactString,
+    class: &oxc_ast::ast::Class<'_>,
+    facts: &mut FileFacts,
+) {
+    use oxc_ast::ast::{ClassElement, MethodDefinitionKind};
+
+    for element in &class.body.body {
+        match element {
+            ClassElement::MethodDefinition(method) => {
+                // Skip constructors — they aren't individual "members" for dead-code purposes.
+                if method.kind == MethodDefinitionKind::Constructor {
+                    continue;
+                }
+                let Some(name) = method.key.static_name() else {
+                    continue;
+                };
+                let member_kind = match (method.kind, method.r#static) {
+                    (MethodDefinitionKind::Get, _) => MemberKind::Getter,
+                    (MethodDefinitionKind::Set, _) => MemberKind::Setter,
+                    (_, true) => MemberKind::StaticMethod,
+                    _ => MemberKind::Method,
+                };
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: class_name.clone(),
+                    member_name: CompactString::new(&*name),
+                    member_kind,
+                    line: method.span.start,
+                });
+            }
+            ClassElement::PropertyDefinition(prop) => {
+                let Some(name) = prop.key.static_name() else {
+                    continue;
+                };
+                let member_kind = if prop.r#static {
+                    MemberKind::StaticProperty
+                } else {
+                    MemberKind::Property
+                };
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: class_name.clone(),
+                    member_name: CompactString::new(&*name),
+                    member_kind,
+                    line: prop.span.start,
+                });
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                let Some(name) = accessor.key.static_name() else {
+                    continue;
+                };
+                let member_kind = if accessor.r#static {
+                    MemberKind::StaticProperty
+                } else {
+                    MemberKind::Property
+                };
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: class_name.clone(),
+                    member_name: CompactString::new(&*name),
+                    member_kind,
+                    line: accessor.span.start,
+                });
+            }
+            // StaticBlock and TSIndexSignature don't contribute named members.
+            _ => {}
+        }
+    }
+}
+
+/// Extract members from an exported enum declaration.
+fn extract_enum_members(
+    enum_name: &CompactString,
+    enum_decl: &oxc_ast::ast::TSEnumDeclaration<'_>,
+    facts: &mut FileFacts,
+) {
+    for member in &enum_decl.body.members {
+        let variant_name = member.id.static_name();
+        facts.member_exports.push(MemberExportInfo {
+            parent_name: enum_name.clone(),
+            member_name: CompactString::new(variant_name.as_str()),
+            member_kind: MemberKind::EnumVariant,
+            line: member.span.start,
+        });
+    }
+}
+
+/// Extract members from an exported namespace / module declaration.
+fn extract_namespace_members(
+    ns_name: &CompactString,
+    module_decl: &oxc_ast::ast::TSModuleDeclaration<'_>,
+    facts: &mut FileFacts,
+) {
+    use oxc_ast::ast::{Statement, TSModuleDeclarationBody};
+
+    let Some(body) = &module_decl.body else {
+        return;
+    };
+
+    // Walk through nested TSModuleDeclarations to reach the block body.
+    let block = match body {
+        TSModuleDeclarationBody::TSModuleBlock(block) => block,
+        TSModuleDeclarationBody::TSModuleDeclaration(_) => {
+            // Nested namespace (e.g. `namespace A.B { ... }`). We only extract
+            // top-level members here; the inner namespace becomes a member itself.
+            return;
+        }
+    };
+
+    for stmt in &block.body {
+        match stmt {
+            // `export const foo = ...;` / `export function bar() {}` etc.
+            Statement::ExportNamedDeclaration(export) => {
+                if let Some(decl) = &export.declaration {
+                    extract_namespace_decl_members(ns_name, decl, facts);
+                }
+                for spec in &export.specifiers {
+                    facts.member_exports.push(MemberExportInfo {
+                        parent_name: ns_name.clone(),
+                        member_name: CompactString::new(spec.exported.name().as_str()),
+                        member_kind: MemberKind::NamespaceMember,
+                        line: spec.span.start,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract member info from a declaration inside a namespace body.
+fn extract_namespace_decl_members(
+    ns_name: &CompactString,
+    decl: &oxc_ast::ast::Declaration<'_>,
+    facts: &mut FileFacts,
+) {
+    use oxc_ast::ast::Declaration;
+
+    match decl {
+        Declaration::VariableDeclaration(var_decl) => {
+            for declarator in &var_decl.declarations {
+                if let Some(name) = extract_binding_name(&declarator.id) {
+                    facts.member_exports.push(MemberExportInfo {
+                        parent_name: ns_name.clone(),
+                        member_name: CompactString::new(&name),
+                        member_kind: MemberKind::NamespaceMember,
+                        line: declarator.span.start,
+                    });
+                }
+            }
+        }
+        Declaration::FunctionDeclaration(func) => {
+            if let Some(id) = &func.id {
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: ns_name.clone(),
+                    member_name: CompactString::new(id.name.as_str()),
+                    member_kind: MemberKind::NamespaceMember,
+                    line: func.span.start,
+                });
+            }
+        }
+        Declaration::ClassDeclaration(class) => {
+            if let Some(id) = &class.id {
+                facts.member_exports.push(MemberExportInfo {
+                    parent_name: ns_name.clone(),
+                    member_name: CompactString::new(id.name.as_str()),
+                    member_kind: MemberKind::NamespaceMember,
+                    line: class.span.start,
+                });
+            }
+        }
+        Declaration::TSEnumDeclaration(enum_decl) => {
+            facts.member_exports.push(MemberExportInfo {
+                parent_name: ns_name.clone(),
+                member_name: CompactString::new(enum_decl.id.name.as_str()),
+                member_kind: MemberKind::NamespaceMember,
+                line: enum_decl.span.start,
+            });
+        }
+        Declaration::TSTypeAliasDeclaration(alias) => {
+            facts.member_exports.push(MemberExportInfo {
+                parent_name: ns_name.clone(),
+                member_name: CompactString::new(alias.id.name.as_str()),
+                member_kind: MemberKind::NamespaceMember,
+                line: alias.span.start,
+            });
+        }
+        Declaration::TSInterfaceDeclaration(iface) => {
+            facts.member_exports.push(MemberExportInfo {
+                parent_name: ns_name.clone(),
+                member_name: CompactString::new(iface.id.name.as_str()),
+                member_kind: MemberKind::NamespaceMember,
+                line: iface.span.start,
+            });
+        }
+        Declaration::TSModuleDeclaration(inner_ns) => {
+            facts.member_exports.push(MemberExportInfo {
+                parent_name: ns_name.clone(),
+                member_name: CompactString::new(inner_ns.id.name().as_str()),
+                member_kind: MemberKind::NamespaceMember,
+                line: inner_ns.span.start,
+            });
+        }
+        _ => {}
     }
 }
 
@@ -1386,6 +1729,8 @@ fn merge_facts(target: &mut FileFacts, source: FileFacts) {
     target.dynamic_imports.extend(source.dynamic_imports);
     target.requires.extend(source.requires);
     target.dependency_patterns.extend(source.dependency_patterns);
+    target.member_exports.extend(source.member_exports);
+    target.same_file_refs.extend(source.same_file_refs);
 }
 
 /// Errors from extraction.
