@@ -12,6 +12,9 @@ cargo check --workspace
 echo "pre-commit: cargo clippy --workspace -- --deny warnings"
 cargo clippy --workspace -- --deny warnings
 
+echo "pre-commit: clippy suppression audit"
+./scripts/lint_audit.sh
+
 echo "pre-commit: cargo test --workspace"
 cargo test --workspace
 
