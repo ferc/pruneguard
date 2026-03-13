@@ -3,7 +3,9 @@
 use std::process::ExitCode;
 
 use pruneguard_entrypoints::EntrypointProfile;
-use pruneguard_report::{ConfidenceCounts, Finding, FindingConfidence, FindingSeverity};
+use pruneguard_report::{
+    ConfidenceCounts, Finding, FindingConfidence, FindingSeverity, ReviewReport,
+};
 
 mod cli;
 mod migrate;
@@ -116,6 +118,15 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        cli::Command::BarePathsError { paths } => {
+            eprintln!("error: unexpected positional arguments: {}", paths.join(", "));
+            eprintln!();
+            eprintln!("  Use: pruneguard scan <paths...>   for partial-scope analysis");
+            eprintln!("  Use: pruneguard                   to review your repo");
+            eprintln!();
+            eprintln!("Run pruneguard --help for all commands.");
+            Ok(ExitCode::from(2))
+        }
         cli::Command::Review { strict_trust } => {
             // Try daemon-backed review first.
             if let Some(exit) = try_daemon_review(&cwd, effective_daemon, &options.global)? {
@@ -135,7 +146,11 @@ fn run(options: cli::Options) -> miette::Result<ExitCode> {
                     strict_trust,
                 },
             )?;
-            print_report(&report, options.global.format)?;
+            if matches!(options.global.format, cli::OutputFormat::Text) {
+                print_review_text(&report);
+            } else {
+                print_report(&report, options.global.format)?;
+            }
             let exit = if report.blocking_findings.is_empty() {
                 ExitCode::SUCCESS
             } else {
@@ -1230,6 +1245,105 @@ fn print_text_report<T: serde::Serialize>(report: &T) -> miette::Result<()> {
         _ => println!("{}", serde_json::to_string_pretty(report).expect("serialize report")),
     }
     Ok(())
+}
+
+fn print_review_text(report: &ReviewReport) {
+    // --- Status line ---
+    if report.blocking_findings.is_empty() {
+        println!("Pruneguard: no blockers");
+    } else {
+        println!("Pruneguard: blockers found");
+    }
+    println!();
+
+    // --- Blockers / advisories summary ---
+    let blocking = report.blocking_findings.len();
+    let advisory = report.advisory_findings.len();
+    if blocking > 0 {
+        println!("{blocking} blocking finding{}", if blocking == 1 { "" } else { "s" });
+    }
+    if advisory > 0 {
+        println!("{advisory} advisory finding{}", if advisory == 1 { "" } else { "s" });
+    }
+    if blocking == 0 && advisory == 0 {
+        println!("No findings.");
+    }
+
+    // --- Trust summary ---
+    println!();
+    println!("Trust");
+    println!("  scope: {}", if report.trust.full_scope { "full" } else { "partial" });
+    let cc = &report.trust.confidence_counts;
+    println!("  confidence: {} high, {} medium, {} low", cc.high, cc.medium, cc.low);
+    let pressure_label = if report.trust.unresolved_pressure > 0.15 {
+        "high"
+    } else if report.trust.unresolved_pressure > 0.05 {
+        "medium"
+    } else {
+        "low"
+    };
+    println!("  unresolved pressure: {pressure_label}");
+    println!("  baseline: {}", if report.trust.baseline_applied { "on" } else { "off" });
+    if let Some(mode) = &report.trust.execution_mode {
+        let mode_str = match mode {
+            pruneguard_report::ExecutionMode::Daemon => "daemon",
+            pruneguard_report::ExecutionMode::Oneshot => "one-shot",
+        };
+        println!("  mode: {mode_str}");
+    }
+
+    // --- Top blockers ---
+    if !report.blocking_findings.is_empty() {
+        println!();
+        println!("Top blockers");
+        for finding in report.blocking_findings.iter().take(10) {
+            println!("  {}: {}", finding.code, finding.subject);
+        }
+        if blocking > 10 {
+            println!("  ... and {} more", blocking - 10);
+        }
+    }
+
+    // --- Advisories ---
+    if !report.advisory_findings.is_empty() {
+        println!();
+        println!("Advisories");
+        for finding in report.advisory_findings.iter().take(5) {
+            println!("  {}: {}", finding.code, finding.subject);
+        }
+        if advisory > 5 {
+            println!("  ... and {} more", advisory - 5);
+        }
+    }
+
+    // --- Recommended next steps ---
+    if !report.recommendations.is_empty() {
+        println!();
+        println!("Recommended next steps");
+        for rec in &report.recommendations {
+            println!("  {rec}");
+        }
+    } else if !report.blocking_findings.is_empty() {
+        println!();
+        println!("Recommended next steps");
+        // Suggest concrete commands based on blocking findings.
+        for finding in report.blocking_findings.iter().take(3) {
+            if finding.code == "unused-file" {
+                println!("  Run: pruneguard safe-delete {}", finding.subject);
+            } else {
+                println!("  Run: pruneguard explain {}", finding.id);
+            }
+        }
+        if report.blocking_findings.is_empty() {
+            println!("  Run: pruneguard scan   for detailed findings");
+        }
+    }
+
+    // --- Latency ---
+    if let Some(ms) = report.latency_ms {
+        println!();
+        println!("{ms}ms");
+    }
 }
 
 fn print_impact_text(report: &pruneguard_report::ImpactReport, focus: Option<&str>) {

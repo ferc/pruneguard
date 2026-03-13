@@ -1,14 +1,21 @@
 # Configuration
 
+Most repos can run Pruneguard without a config file. The tool auto-detects
+frameworks, discovers workspaces, and applies sensible defaults. Only create a
+config file when you need custom rules, ownership settings, or framework
+overrides.
+
 ## Config file resolution
 
-pruneguard reads JSON config in this order:
+No config file is required. When one is present, pruneguard reads JSON config
+in this order:
 
 1. Explicit `--config <path>` flag
 2. `pruneguard.json` in the project root
 3. `.pruneguardrc.json` in the project root
 
-Run `pruneguard init` to generate a starter `pruneguard.json`.
+Run `pruneguard init` to generate a minimal `pruneguard.json` containing only
+the `$schema` field. You can add sections as needed.
 
 Run `pruneguard print-config` to see the fully resolved configuration.
 

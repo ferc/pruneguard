@@ -8,24 +8,73 @@ npm install pruneguard
 ```
 
 ```js
-import {
-  scan,
-  review,
-  safeDelete,
-  fixPlan,
-  impact,
-  explain,
-  suggestRules,
-  compatibilityReport,
-  debugFrameworks,
-  loadConfig,
-  schemaPath,
-  binaryPath,
-  run,
-  scanDot,
-  migrateKnip,
-  migrateDepcruise,
-} from "pruneguard";
+import { review, scan, safeDelete, fixPlan, impact, explain, binaryPath, run } from "pruneguard";
+```
+
+The primary functions for daily use are `review`, `scan`, `safeDelete`, and `fixPlan`. Advanced functions like `suggestRules`, `compatibilityReport`, `debugFrameworks`, and migration helpers are documented below.
+
+---
+
+## review
+
+Branch review gate. Classifies findings as blocking (high-confidence
+errors/warnings) or advisory. Exit code 0 means safe to merge.
+
+```ts
+function review(options?: ReviewOptions): Promise<ReviewReport>
+```
+
+### ReviewOptions
+
+| Field        | Type      | Default         | Description |
+|--------------|-----------|-----------------|-------------|
+| `cwd`        | `string`  | `process.cwd()` | Working directory |
+| `config`     | `string`  |                 | Config file path |
+| `profile`    | `Profile` |                 | Analysis profile |
+| `baseRef`    | `string`  |                 | Git ref for changed-since filtering |
+| `noCache`    | `boolean` | `false`         | Disable incremental cache |
+| `noBaseline` | `boolean` | `false`         | Disable baseline suppression |
+
+### ReviewReport
+
+```ts
+{
+  baseRef?: string;
+  changedFiles: string[];
+  newFindings: Array<Finding>;
+  blockingFindings: Array<Finding>;
+  advisoryFindings: Array<Finding>;
+  trust: {
+    fullScope: boolean;
+    baselineApplied: boolean;
+    unresolvedPressure: number;
+    confidenceCounts: { high: number; medium: number; low: number };
+  };
+  recommendations: string[];
+  proposedActions?: Array<Action>;
+  executionMode?: "oneshot" | "daemon";
+  latencyMs?: number;
+}
+```
+
+### Example
+
+```js
+import { review } from "pruneguard";
+
+const result = await review({
+  baseRef: "origin/main",
+  noCache: true,
+});
+
+if (result.blockingFindings.length > 0) {
+  for (const f of result.blockingFindings) {
+    console.error(`[${f.confidence}] ${f.code}: ${f.message}`);
+  }
+  process.exit(1);
+}
+
+console.log("Branch is clean. Safe to merge.");
 ```
 
 ---
@@ -98,70 +147,6 @@ console.log(report.summary.totalFindings);
 for (const f of report.findings) {
   console.log(`[${f.severity}] [${f.confidence}] ${f.code}: ${f.message}`);
 }
-```
-
----
-
-## review
-
-Branch review gate. Classifies findings as blocking (high-confidence
-errors/warnings) or advisory. Exit code 0 means safe to merge.
-
-```ts
-function review(options?: ReviewOptions): Promise<ReviewReport>
-```
-
-### ReviewOptions
-
-| Field        | Type      | Default         | Description |
-|--------------|-----------|-----------------|-------------|
-| `cwd`        | `string`  | `process.cwd()` | Working directory |
-| `config`     | `string`  |                 | Config file path |
-| `profile`    | `Profile` |                 | Analysis profile |
-| `baseRef`    | `string`  |                 | Git ref for changed-since filtering |
-| `noCache`    | `boolean` | `false`         | Disable incremental cache |
-| `noBaseline` | `boolean` | `false`         | Disable baseline suppression |
-
-### ReviewReport
-
-```ts
-{
-  baseRef?: string;
-  changedFiles: string[];
-  newFindings: Array<Finding>;
-  blockingFindings: Array<Finding>;
-  advisoryFindings: Array<Finding>;
-  trust: {
-    fullScope: boolean;
-    baselineApplied: boolean;
-    unresolvedPressure: number;
-    confidenceCounts: { high: number; medium: number; low: number };
-  };
-  recommendations: string[];
-  proposedActions?: Array<Action>;
-  executionMode?: "oneshot" | "daemon";
-  latencyMs?: number;
-}
-```
-
-### Example
-
-```js
-import { review } from "pruneguard";
-
-const result = await review({
-  baseRef: "origin/main",
-  noCache: true,
-});
-
-if (result.blockingFindings.length > 0) {
-  for (const f of result.blockingFindings) {
-    console.error(`[${f.confidence}] ${f.code}: ${f.message}`);
-  }
-  process.exit(1);
-}
-
-console.log("Branch is clean. Safe to merge.");
 ```
 
 ---

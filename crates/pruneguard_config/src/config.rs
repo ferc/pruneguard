@@ -396,22 +396,13 @@ impl PruneguardConfig {
         Err(ConfigError::NotFound)
     }
 
-    /// Generate a default config file in the current directory.
+    /// Generate a minimal config file in the current directory.
+    ///
+    /// Most repos work well with zero configuration. This generates a minimal
+    /// `pruneguard.json` with just the `$schema` field for editor autocomplete.
     pub fn init() -> Result<(), ConfigError> {
         let config = Self {
             schema: Some("./node_modules/pruneguard/configuration_schema.json".to_string()),
-            workspaces: Some(WorkspacesConfig {
-                package_manager: PackageManager::Auto,
-                roots: vec!["apps/*".to_string(), "packages/*".to_string()],
-                ..Default::default()
-            }),
-            entrypoints: EntrypointsConfig { auto: true, ..Default::default() },
-            analysis: AnalysisConfig {
-                unused_exports: AnalysisSeverity::Warn,
-                unused_files: AnalysisSeverity::Warn,
-                unused_dependencies: AnalysisSeverity::Warn,
-                ..Default::default()
-            },
             ..Default::default()
         };
         let json = serde_json::to_string_pretty(&config).expect("failed to serialize");

@@ -1,7 +1,8 @@
 # Agent Usage
 
 This document describes how to consume pruneguard from an AI coding agent or
-automated pipeline. The primary command is **`review`** -- it classifies
+automated pipeline. The primary command is **`review`** -- running
+`pruneguard` with no subcommand is equivalent to `pruneguard review`. It classifies
 findings as blocking vs advisory and provides a trust summary that an agent
 can use to decide whether to block a branch, flag for human review, or proceed.
 

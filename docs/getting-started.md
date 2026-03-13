@@ -20,15 +20,21 @@ musl), Windows (x64, ARM64).
 
 ## Review your branch
 
-The fastest way to see what pruneguard can do is to run `review` on your
-current branch. This is the primary command for CI and agent workflows:
+The bare `pruneguard` command is all you need. No config file required. It
+runs a review of your current branch, classifying findings as **blocking**
+(high-confidence errors/warnings) or **advisory**. This is the primary
+command for CI and agent workflows:
 
 ```sh
-npx pruneguard --changed-since origin/main review
+npx pruneguard
 ```
 
-This analyzes only the files changed since `origin/main` and classifies
-findings as **blocking** (high-confidence errors/warnings) or **advisory**.
+By default this detects your base branch automatically. To be explicit:
+
+```sh
+npx pruneguard --changed-since origin/main
+```
+
 Exit code 0 means safe to merge. Exit code 1 means blocking findings exist.
 
 Example output:
@@ -49,7 +55,7 @@ Trust: fullScope=true, unresolvedPressure=0.01, baseline=applied
 For JSON output (recommended for CI and agents):
 
 ```sh
-npx pruneguard --changed-since origin/main --format json review
+npx pruneguard --format json
 ```
 
 ## Full-repo scan
@@ -79,26 +85,18 @@ warn [medium] unused-file packages/legacy/src/widget.ts
 
 ## Generate a config
 
+Most repos work without a config file. If you need custom rules, ownership,
+or framework overrides, run `pruneguard init` to generate a minimal config:
+
 ```sh
 npx pruneguard init
 ```
 
-This creates a `pruneguard.json` with sensible defaults. Add the `$schema`
-field to get editor autocomplete:
+This creates a `pruneguard.json` with just the schema reference:
 
 ```json
 {
-  "$schema": "./node_modules/pruneguard/configuration_schema.json",
-  "workspaces": {
-    "packageManager": "pnpm",
-    "roots": ["apps/*", "packages/*"]
-  },
-  "analysis": {
-    "unusedExports": "error",
-    "unusedFiles": "warn",
-    "unusedDependencies": "error",
-    "cycles": "warn"
-  }
+  "$schema": "./node_modules/pruneguard/configuration_schema.json"
 }
 ```
 
@@ -130,17 +128,17 @@ npx pruneguard --severity error scan
 Only report findings related to files changed since a base branch:
 
 ```sh
-npx pruneguard --changed-since origin/main scan
+npx pruneguard --changed-since origin/main
 ```
 
 ## Branch review gate
 
-The `review` command is built for CI and agent workflows. It classifies
-findings as blocking (high-confidence errors/warnings) or advisory, and exits
-0 when there are no blockers:
+The bare `pruneguard` command is built for CI and agent workflows. It
+classifies findings as blocking (high-confidence errors/warnings) or
+advisory, and exits 0 when there are no blockers:
 
 ```sh
-npx pruneguard --changed-since origin/main review
+npx pruneguard
 ```
 
 Exit code 0 = safe to merge. Exit code 1 = blocking findings exist.
@@ -172,8 +170,8 @@ instructions.
 Every command supports `--format json` for machine-readable output:
 
 ```sh
+npx pruneguard --format json
 npx pruneguard --format json scan
-npx pruneguard --format json review
 npx pruneguard --format json safe-delete src/old.ts
 ```
 

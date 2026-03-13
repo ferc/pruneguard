@@ -60,12 +60,24 @@ pub struct Options {
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    Scan { paths: Vec<PathBuf> },
-    Impact { target: String },
-    Explain { query: String },
-    Review { strict_trust: bool },
-    SafeDelete { targets: Vec<String> },
-    FixPlan { targets: Vec<String> },
+    Scan {
+        paths: Vec<PathBuf>,
+    },
+    Impact {
+        target: String,
+    },
+    Explain {
+        query: String,
+    },
+    Review {
+        strict_trust: bool,
+    },
+    SafeDelete {
+        targets: Vec<String>,
+    },
+    FixPlan {
+        targets: Vec<String>,
+    },
     SuggestRules,
     Init,
     PrintConfig,
@@ -73,6 +85,10 @@ pub enum Command {
     Debug(DebugCommand),
     Migrate(MigrateCommand),
     Daemon(DaemonCommand),
+    /// Bare positional paths without explicit subcommand — rejected with guidance.
+    BarePathsError {
+        paths: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -336,63 +352,87 @@ fn daemon_command() -> impl Parser<Command> {
     construct!([start, stop, restart, status]).map(Command::Daemon)
 }
 
+/// Catch bare positional paths (no subcommand) and return a helpful error.
+fn bare_paths_catcher() -> impl Parser<Command> {
+    let paths = positional::<String>("PATH")
+        .many()
+        .guard(|p: &Vec<String>| !p.is_empty(), "expected at least one path");
+    paths.map(|paths| Command::BarePathsError { paths })
+}
+
 fn command_parser() -> impl Parser<Command> {
-    let scan = scan_command().to_options().descr("Analyze the repository").command("scan");
-    let impact =
-        impact_command().to_options().descr("Compute blast radius for a target").command("impact");
-    let explain =
-        explain_command().to_options().descr("Explain a finding or path").command("explain");
+    // --- Daily use ---
     let review =
-        review_command().to_options().descr("Review branch for CI/agent gating").command("review");
+        review_command().to_options().descr("Review your repo or branch").command("review");
+    let scan =
+        scan_command().to_options().descr("Full repo scan with detailed findings").command("scan");
     let safe_delete = safe_delete_command()
         .to_options()
-        .descr("Evaluate targets for safe deletion")
+        .descr("Check if files or exports are safe to remove")
         .command("safe-delete");
-    let fix_plan = fix_plan_command()
+    let fix_plan =
+        fix_plan_command().to_options().descr("Generate a remediation plan").command("fix-plan");
+
+    // --- Investigation ---
+    let impact =
+        impact_command().to_options().descr("Analyze blast radius for a target").command("impact");
+    let explain = explain_command()
         .to_options()
-        .descr("Generate remediation plan for findings")
-        .command("fix-plan");
+        .descr("Explain a finding with proof chain")
+        .command("explain");
+
+    // --- Policy and governance ---
     let suggest_rules = suggest_rules_command()
         .to_options()
-        .descr("Suggest governance rules from graph analysis")
+        .descr("Auto-suggest governance rules")
         .command("suggest-rules");
+    let compatibility_report = compatibility_report_command()
+        .to_options()
+        .descr("Report framework compatibility")
+        .command("compatibility-report");
+
+    // --- Setup ---
     let init =
-        init_command().to_options().descr("Generate an pruneguard.json config").command("init");
+        init_command().to_options().descr("Generate a minimal pruneguard.json").command("init");
     let print_config = print_config_command()
         .to_options()
         .descr("Print resolved configuration")
         .command("print-config");
-    let compatibility_report = compatibility_report_command()
-        .to_options()
-        .descr("Report framework compatibility and unsupported signals")
-        .command("compatibility-report");
+
+    // --- Debugging and migration ---
     let debug = debug_command()
         .to_options()
-        .descr("Debug tools for resolution and entrypoints")
+        .descr("Debug resolution, entrypoints, and frameworks")
         .command("debug");
-    let migrate =
-        migrate_command().to_options().descr("Migrate from other tools").command("migrate");
+    let migrate = migrate_command()
+        .to_options()
+        .descr("Migrate from knip or dependency-cruiser")
+        .command("migrate");
     let daemon =
-        daemon_command().to_options().descr("Manage the pruneguard daemon").command("daemon");
+        daemon_command().to_options().descr("Manage the background daemon").command("daemon");
 
-    // Default to scan when no subcommand is given
-    let default_scan = scan_command();
+    // Catch bare positional paths and give a helpful error message.
+    let bare_paths = bare_paths_catcher();
+
+    // Default to review when no subcommand is given.
+    let default_review = review_command();
 
     construct!([
-        scan,
-        impact,
-        explain,
         review,
+        scan,
         safe_delete,
         fix_plan,
+        impact,
+        explain,
         suggest_rules,
+        compatibility_report,
         init,
         print_config,
-        compatibility_report,
         debug,
         migrate,
         daemon,
-        default_scan
+        bare_paths,
+        default_review
     ])
 }
 
@@ -407,6 +447,6 @@ pub fn options() -> OptionParser<Options> {
 
     construct!(Options { config, global, command })
         .to_options()
-        .descr("pruneguard - Repo truth engine for JS/TS monorepos")
+        .descr("pruneguard - Find unused code, boundary violations, and architecture issues in JS/TS repos")
         .version(env!("CARGO_PKG_VERSION"))
 }

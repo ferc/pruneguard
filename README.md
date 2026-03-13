@@ -1,61 +1,53 @@
 # pruneguard
 
-Repo truth engine for JS/TS monorepos.
+Pruneguard reviews a JS/TS repo and tells you what is unused, what violates
+architecture rules, what is safe to delete, and what changed in your branch.
 
-Build one accurate repo graph, then answer many high-value questions cheaply:
-unused exports, unused files, unused dependencies, cycles, boundary violations,
-ownership visibility, blast-radius analysis, and CI/agent-safe refactor checks.
-
-## Why pruneguard
-
-- **Rust native binary** -- fast full-repo graph builds
-- Unused exports, files, and dependencies detection
-- Cycle detection and boundary rules
-- Confidence scoring (high / medium / low)
-- Built-in branch review gate (`review`)
-- Safe-delete evaluation and fix-plan remediation
-- Blast-radius analysis (`impact`) and proof chains (`explain`)
-- SARIF output and deterministic ordering
+It ships as a compiled Rust binary with a thin JS wrapper. No Rust toolchain,
+no compilation, no native addons -- just `npm install` and go.
 
 ## Quick start
 
 ```sh
-# Install (auto-selects the correct native binary for your platform)
 npm install pruneguard
+```
 
-# Review your branch (the main command for daily use)
-npx pruneguard review
+Add scripts to your `package.json`:
 
-# Review with change detection
-npx pruneguard --changed-since origin/main review
+```json
+{
+  "scripts": {
+    "review": "pruneguard",
+    "scan": "pruneguard scan",
+    "prune:delete": "pruneguard safe-delete"
+  }
+}
+```
 
-# Full repository scan
+Run it:
+
+```sh
+# Review your repo (the default command)
+npx pruneguard
+
+# Review only what changed on your branch
+npx pruneguard --changed-since origin/main
+
+# Full detailed scan
 npx pruneguard scan
 
-# Check if files are safe to delete
+# Check if a file is safe to delete
 npx pruneguard safe-delete src/legacy/old-widget.ts
 
 # Get a remediation plan
 npx pruneguard fix-plan src/legacy/old-widget.ts
-
-# Generate a config file with editor autocomplete
-npx pruneguard init
 ```
 
-No Rust toolchain, no compilation, no native addons -- just `npm install`
-and go. Requires Node.js >= 18. Supported: macOS (ARM64, x64), Linux
+Requires Node.js >= 18. Supported platforms: macOS (ARM64, x64), Linux
 (x64/ARM64, glibc and musl), Windows (x64, ARM64).
 
 See [docs/getting-started.md](docs/getting-started.md) for a full
 install-to-first-result walkthrough.
-
-## Daily workflow
-
-`pruneguard review` is the one command most developers and CI systems should use:
-- Full-scope analysis with trust summary
-- Blocking vs advisory finding split
-- Machine-readable proposed actions for AI agents
-- Exit 0 (no blockers) or exit 1 (blockers present)
 
 ## How it works
 
@@ -73,43 +65,55 @@ npm install pruneguard
        v
 pruneguard (JS wrapper)     <-- spawns the binary, parses JSON output
        |
-       +-- CLI: npx pruneguard scan
-       +-- JS API: import { scan } from "pruneguard"
+       +-- CLI: npx pruneguard
+       +-- JS API: import { review } from "pruneguard"
 ```
 
-**Default execution mode:**
-
-| Context         | Mode    | Why                                      |
-|-----------------|---------|------------------------------------------|
-| Local terminal  | daemon  | Warm graph, instant `review` and `impact`|
-| CI / `--daemon off` | one-shot | Deterministic, no lingering process  |
+| Context             | Mode     | Why                                       |
+|---------------------|----------|-------------------------------------------|
+| Local terminal      | daemon   | Warm graph, instant `review` and `impact` |
+| CI / `--daemon off` | one-shot | Deterministic, no lingering process       |
 
 ## CLI
 
 ### Commands
 
+#### Daily use
+
 ```sh
-# Analysis
-pruneguard scan [paths...]               # Full or partial-scope scan
-pruneguard impact <target>               # Blast-radius analysis
-pruneguard explain <query>               # Proof chain for a finding or path
-pruneguard review                        # Branch review gate (blocking vs advisory)
-pruneguard safe-delete <targets...>      # Evaluate targets for safe deletion
-pruneguard fix-plan <targets...>         # Structured remediation plan
-pruneguard suggest-rules                 # Auto-suggest governance rules
+pruneguard                          # Review your repo or branch (default command)
+pruneguard scan [paths...]          # Full repo scan with detailed findings
+pruneguard safe-delete <targets...> # Check if files or exports are safe to remove
+pruneguard fix-plan <targets...>    # Generate a remediation plan
+```
 
-# Configuration
-pruneguard init                          # Generate pruneguard.json
-pruneguard print-config                  # Print resolved config
+#### Investigation
 
-# Debugging
+```sh
+pruneguard impact <target>          # Analyze blast radius for a target
+pruneguard explain <query>          # Explain a finding with proof chain
+```
+
+#### Policy and governance
+
+```sh
+pruneguard suggest-rules            # Auto-suggest governance rules from graph analysis
+```
+
+#### Setup
+
+```sh
+pruneguard init                     # Generate pruneguard.json with schema reference
+pruneguard print-config             # Print resolved config
+```
+
+#### Debugging and migration
+
+```sh
 pruneguard debug resolve <spec> --from <file>  # Trace module resolution
 pruneguard debug entrypoints                    # List detected entrypoints
 pruneguard debug runtime                        # Print binary/platform info
-
-# Daemon
-pruneguard daemon start|stop|status      # Manage the background daemon
-
+pruneguard daemon start|stop|status             # Manage the background daemon
 ```
 
 ### Global flags
@@ -131,38 +135,20 @@ pruneguard daemon start|stop|status      # Manage the background daemon
 ### Common CLI workflows
 
 ```sh
-# Full scan
-pruneguard scan
+# Review your branch (the everyday command)
+pruneguard --changed-since origin/main
+
+# Full scan without baseline influence (deterministic CI)
+pruneguard --no-baseline --no-cache scan
 
 # Focus to a slice of the repo (full analysis, filtered output)
 pruneguard --focus "src/**" scan
 
-# Changed-since review for CI/agents
-pruneguard --changed-since origin/main scan
-
-# Deterministic CI without baseline influence
-pruneguard --no-baseline --no-cache scan
-
-# Fail advisory dead-code scans in automation
+# Fail if the scan would be partial-scope
 pruneguard --require-full-scope scan
 
-# Partial-scope scan (dead-code findings are advisory)
-pruneguard scan src/components/Button.tsx src/lib/utils.ts
-
-# Blast radius
-pruneguard impact src/utils/helpers.ts
-
-# Explain a finding
-pruneguard explain unused-export:packages/core:src/old.ts#deprecatedFn
-
-# Branch review (CI/agent gate)
-pruneguard --changed-since origin/main review
-
-# Safe-delete check
-pruneguard safe-delete src/utils/old-helper.ts src/legacy/widget.ts
-
-# JSON for CI
-pruneguard --no-baseline --no-cache --format json scan
+# JSON output for CI pipelines
+pruneguard --format json
 
 # SARIF for GitHub Code Scanning
 pruneguard --format sarif scan > results.sarif
@@ -170,40 +156,23 @@ pruneguard --format sarif scan > results.sarif
 # Graphviz DOT output
 pruneguard --format dot scan | dot -Tsvg -o graph.svg
 
-# Generate config
-pruneguard init
+# Blast radius for a file
+pruneguard impact src/utils/helpers.ts
 
-# Debug resolution
+# Explain a specific finding
+pruneguard explain unused-export:packages/core:src/old.ts#deprecatedFn
+
+# Check if files are safe to delete
+pruneguard safe-delete src/utils/old-helper.ts src/legacy/widget.ts
+
+# Debug module resolution
 pruneguard debug resolve ./utils --from src/index.ts
-
-# Debug runtime/install info
-pruneguard debug runtime
 ```
 
 ## JS API
 
 Every function spawns the native binary and returns parsed, typed results.
 See [docs/js-api.md](docs/js-api.md) for the complete API reference.
-
-### scan
-
-```js
-import { scan } from "pruneguard";
-
-const report = await scan({
-  cwd: "/path/to/repo",       // optional, defaults to process.cwd()
-  profile: "production",       // optional: "production" | "development" | "all"
-  changedSince: "origin/main", // optional
-  focus: "packages/core/**",   // optional
-  noCache: true,               // optional
-  noBaseline: true,            // optional
-  requireFullScope: true,      // optional
-  paths: ["src/lib"],          // optional, partial-scope scan
-});
-
-console.log(report.summary.totalFindings);
-console.log(report.findings[0].id, report.findings[0].confidence);
-```
 
 ### review
 
@@ -225,6 +194,26 @@ if (result.blockingFindings.length > 0) {
   }
   process.exit(1);
 }
+```
+
+### scan
+
+```js
+import { scan } from "pruneguard";
+
+const report = await scan({
+  cwd: "/path/to/repo",       // optional, defaults to process.cwd()
+  profile: "production",       // optional: "production" | "development" | "all"
+  changedSince: "origin/main", // optional
+  focus: "packages/core/**",   // optional
+  noCache: true,               // optional
+  noBaseline: true,            // optional
+  requireFullScope: true,      // optional
+  paths: ["src/lib"],          // optional, partial-scope scan
+});
+
+console.log(report.summary.totalFindings);
+console.log(report.findings[0].id, report.findings[0].confidence);
 ```
 
 ### safeDelete
@@ -325,12 +314,12 @@ console.log(info.source, info.platform);
 
 | Function | Signature | Description |
 |---|---|---|
-| `scan` | `(options?) => Promise<AnalysisReport>` | Full or partial-scope repo scan |
-| `impact` | `(options) => Promise<ImpactReport>` | Blast-radius analysis for a target |
-| `explain` | `(options) => Promise<ExplainReport>` | Proof chain for a finding or path |
-| `review` | `(options?) => Promise<ReviewReport>` | Branch review gate |
-| `safeDelete` | `(options) => Promise<SafeDeleteReport>` | Evaluate targets for safe deletion |
-| `fixPlan` | `(options) => Promise<FixPlanReport>` | Structured remediation plan |
+| `review` | `(options?) => Promise<ReviewReport>` | Review your repo or branch |
+| `scan` | `(options?) => Promise<AnalysisReport>` | Full repo scan with detailed findings |
+| `safeDelete` | `(options) => Promise<SafeDeleteReport>` | Check if files or exports are safe to remove |
+| `fixPlan` | `(options) => Promise<FixPlanReport>` | Generate a remediation plan |
+| `impact` | `(options) => Promise<ImpactReport>` | Analyze blast radius for a target |
+| `explain` | `(options) => Promise<ExplainReport>` | Explain a finding with proof chain |
 | `suggestRules` | `(options?) => Promise<SuggestRulesReport>` | Auto-suggest governance rules |
 | `loadConfig` | `(options?) => Promise<PruneguardConfig>` | Load resolved config |
 | `schemaPath` | `() => string` | Path to bundled configuration JSON schema |
@@ -390,7 +379,7 @@ jobs:
       - run: npm install pruneguard
 
       - name: Branch review
-        run: npx pruneguard --changed-since origin/main --format json review
+        run: npx pruneguard --changed-since origin/main --format json
 ```
 
 Exit code 0 means no blocking findings; exit code 1 means blocking findings
@@ -517,8 +506,10 @@ jobs:
 
 ## Configuration
 
-Create `pruneguard.json` (or `.pruneguardrc.json`). Run `pruneguard init` to
-generate a starter config.
+Most repos work without a config file. Run `pruneguard init` to generate a
+minimal config with just the `$schema` reference for editor autocomplete.
+
+For repos that need customization:
 
 ```json
 {
