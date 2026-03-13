@@ -10,8 +10,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use pruneguard_semantic_protocol::{
-    ErrorMessage, HandshakeRequest, MessageType, QueryBatch, ReadyMessage, ResponseBatch,
-    HEADER_SIZE, MAX_PAYLOAD_SIZE, PROTOCOL_VERSION, decode_header, encode_message,
+    ErrorMessage, HEADER_SIZE, HandshakeRequest, MAX_PAYLOAD_SIZE, MessageType, PROTOCOL_VERSION,
+    QueryBatch, ReadyMessage, ResponseBatch, decode_header, encode_message,
 };
 use thiserror::Error;
 use tracing::{debug, info};
@@ -141,7 +141,9 @@ impl SemanticClient {
             }
         }
 
-        HelperDiscovery::NotFound("pruneguard-tsgo not found in PRUNEGUARD_TSGO_PATH, node_modules, or PATH".to_string())
+        HelperDiscovery::NotFound(
+            "pruneguard-tsgo not found in PRUNEGUARD_TSGO_PATH, node_modules, or PATH".to_string(),
+        )
     }
 
     /// Spawn the helper and perform the handshake.
@@ -220,16 +222,20 @@ impl SemanticClient {
         let payload = serde_json::to_vec(&batch)?;
         let msg = encode_message(MessageType::Query, &payload);
 
-        let stdin = self.child.stdin.as_mut().ok_or_else(|| {
-            SemanticClientError::ProtocolError("stdin closed".to_string())
-        })?;
+        let stdin = self
+            .child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| SemanticClientError::ProtocolError("stdin closed".to_string()))?;
         stdin.write_all(&msg)?;
         stdin.flush()?;
 
         let timeout = Duration::from_millis(self.config.query_timeout_ms);
-        let stdout = self.child.stdout.as_mut().ok_or_else(|| {
-            SemanticClientError::ProtocolError("stdout closed".to_string())
-        })?;
+        let stdout = self
+            .child
+            .stdout
+            .as_mut()
+            .ok_or_else(|| SemanticClientError::ProtocolError("stdout closed".to_string()))?;
 
         let (msg_type, payload) = read_message(stdout, Some(timeout))?;
         match msg_type {
@@ -318,17 +324,14 @@ fn read_message(
     })?;
 
     if size > MAX_PAYLOAD_SIZE {
-        return Err(SemanticClientError::PayloadTooLarge {
-            size,
-            max: MAX_PAYLOAD_SIZE,
-        });
+        return Err(SemanticClientError::PayloadTooLarge { size, max: MAX_PAYLOAD_SIZE });
     }
 
     // Read payload
     let mut payload = vec![0u8; size as usize];
-    reader.read_exact(&mut payload).map_err(|e| {
-        SemanticClientError::ProtocolError(format!("failed to read payload: {e}"))
-    })?;
+    reader
+        .read_exact(&mut payload)
+        .map_err(|e| SemanticClientError::ProtocolError(format!("failed to read payload: {e}")))?;
 
     Ok((msg_type, payload))
 }

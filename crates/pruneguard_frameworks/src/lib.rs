@@ -3182,12 +3182,8 @@ impl FrameworkPack for RollupPack {
         workspace_root: &Path,
         manifest: &PackageManifest,
     ) -> Option<FrameworkDetection> {
-        let (has_dep, has_config, signals) = build_detection_signals(
-            workspace_root,
-            manifest,
-            &["rollup"],
-            &["rollup.config"],
-        );
+        let (has_dep, has_config, signals) =
+            build_detection_signals(workspace_root, manifest, &["rollup"], &["rollup.config"]);
 
         if !has_dep && !has_config {
             return None;
@@ -3286,12 +3282,8 @@ impl FrameworkPack for GatsbyPack {
         workspace_root: &Path,
         manifest: &PackageManifest,
     ) -> Option<FrameworkDetection> {
-        let (has_dep, has_config, signals) = build_detection_signals(
-            workspace_root,
-            manifest,
-            &["gatsby"],
-            &["gatsby-config"],
-        );
+        let (has_dep, has_config, signals) =
+            build_detection_signals(workspace_root, manifest, &["gatsby"], &["gatsby-config"]);
 
         if !has_dep && !has_config {
             return None;

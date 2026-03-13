@@ -433,9 +433,7 @@ impl SourceAdapter for VueAdapter {
                             specifier: comp_name.clone(),
                             names: vec![CompactString::new(comp_name)],
                             line: 0,
-                            reason: format!(
-                                "Options API components registration: '{comp_name}'"
-                            ),
+                            reason: format!("Options API components registration: '{comp_name}'"),
                         });
                     }
                     if !registered.is_empty() {
@@ -553,9 +551,8 @@ impl SourceAdapter for SvelteAdapter {
             if has_slots {
                 diagnostics.push(AdapterDiagnostic {
                     level: DiagnosticLevel::Info,
-                    message:
-                        "detected <slot> usage; component may expose content insertion points"
-                            .into(),
+                    message: "detected <slot> usage; component may expose content insertion points"
+                        .into(),
                     line: None,
                 });
             }
@@ -2310,11 +2307,8 @@ fn detect_vue_setup_component_refs(
         }
 
         // Determine the PascalCase form of the tag.
-        let pascal = if tag_name.contains('-') {
-            kebab_to_pascal(tag_name)
-        } else {
-            tag_name.clone()
-        };
+        let pascal =
+            if tag_name.contains('-') { kebab_to_pascal(tag_name) } else { tag_name.clone() };
 
         if seen.contains(&pascal) {
             continue;
@@ -2385,10 +2379,7 @@ fn detect_vue_dynamic_components(template: &str) -> Vec<(String, u32)> {
                     && !seen.contains(value)
                 {
                     let line = 1 + count_newlines(&bytes[..i]);
-                    refs.push((
-                        value.to_string(),
-                        u32::try_from(line).unwrap_or(u32::MAX),
-                    ));
+                    refs.push((value.to_string(), u32::try_from(line).unwrap_or(u32::MAX)));
                     seen.insert(value.to_string());
                 }
             }
@@ -2431,10 +2422,7 @@ fn detect_options_api_components(script_content: &str) -> Vec<String> {
         // Skip whitespace/colon to find the opening brace.
         let mut j = after_kw;
         while j < bytes.len()
-            && (bytes[j] == b' '
-                || bytes[j] == b'\t'
-                || bytes[j] == b'\n'
-                || bytes[j] == b'\r')
+            && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r')
         {
             j += 1;
         }
@@ -2443,10 +2431,7 @@ fn detect_options_api_components(script_content: &str) -> Vec<String> {
             j += 1;
             // Skip whitespace after the colon.
             while j < bytes.len()
-                && (bytes[j] == b' '
-                    || bytes[j] == b'\t'
-                    || bytes[j] == b'\n'
-                    || bytes[j] == b'\r')
+                && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r')
             {
                 j += 1;
             }
@@ -2547,10 +2532,7 @@ fn detect_astro_client_directives(template: &str) -> Vec<(String, String, u32)> 
 
     while i < bytes.len() {
         // Look for `<` followed by an uppercase letter (component tag).
-        if bytes[i] == b'<'
-            && i + 1 < bytes.len()
-            && bytes[i + 1].is_ascii_uppercase()
-        {
+        if bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_uppercase() {
             let tag_open = i;
             let name_start = i + 1;
             let mut name_end = name_start;
@@ -2580,8 +2562,7 @@ fn detect_astro_client_directives(template: &str) -> Vec<(String, String, u32)> 
                     if let Some(directive) = extract_client_directive(tag_content) {
                         let key = format!("{tag_name}:{directive}");
                         if !seen.contains(&key) {
-                            let line =
-                                1 + count_newlines(&bytes[..tag_open]);
+                            let line = 1 + count_newlines(&bytes[..tag_open]);
                             results.push((
                                 tag_name.to_string(),
                                 directive,
@@ -2618,11 +2599,7 @@ fn extract_client_directive(attrs: &str) -> Option<String> {
     {
         end += 1;
     }
-    if end > 7 {
-        Some(after[..end].to_string())
-    } else {
-        None
-    }
+    if end > 7 { Some(after[..end].to_string()) } else { None }
 }
 
 // ---------------------------------------------------------------------------

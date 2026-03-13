@@ -87,14 +87,8 @@ impl std::fmt::Display for SkipReason {
             Self::BatchTooLarge { count, limit } => {
                 write!(f, "candidate batch ({count} files) exceeds limit ({limit})")
             }
-            Self::OverheadExceeded {
-                predicted_ms,
-                budget_ms,
-            } => {
-                write!(
-                    f,
-                    "predicted overhead ({predicted_ms}ms) exceeds budget ({budget_ms}ms)"
-                )
+            Self::OverheadExceeded { predicted_ms, budget_ms } => {
+                write!(f, "predicted overhead ({predicted_ms}ms) exceeds budget ({budget_ms}ms)")
             }
             Self::TooManyProjects { count, limit } => {
                 write!(f, "project count ({count}) exceeds limit ({limit})")
@@ -118,25 +112,19 @@ pub fn evaluate_semantic_decision(
 
     // Check mode
     if config.mode == SemanticMode::Off {
-        return SemanticDecision::Skip {
-            reason: SkipReason::ModeOff,
-        };
+        return SemanticDecision::Skip { reason: SkipReason::ModeOff };
     }
 
     // Check for TypeScript files
     let has_ts_files = has_typescript_files(project_root);
     if !has_ts_files {
-        return SemanticDecision::Skip {
-            reason: SkipReason::NoTypeScriptFiles,
-        };
+        return SemanticDecision::Skip { reason: SkipReason::NoTypeScriptFiles };
     }
 
     // Find tsconfig files
     let tsconfig_paths = find_tsconfig_paths(project_root);
     if tsconfig_paths.is_empty() {
-        return SemanticDecision::Skip {
-            reason: SkipReason::NoTsconfig,
-        };
+        return SemanticDecision::Skip { reason: SkipReason::NoTsconfig };
     }
 
     // Check project reference count
@@ -159,9 +147,7 @@ pub fn evaluate_semantic_decision(
         .collect();
 
     if candidates.is_empty() {
-        return SemanticDecision::Skip {
-            reason: SkipReason::NoCandidates,
-        };
+        return SemanticDecision::Skip { reason: SkipReason::NoCandidates };
     }
 
     // Check batch size
@@ -190,27 +176,17 @@ pub fn evaluate_semantic_decision(
         };
     }
 
-    SemanticDecision::Invoke {
-        candidates,
-        tsconfig_paths,
-        estimated_overhead_ms,
-    }
+    SemanticDecision::Invoke { candidates, tsconfig_paths, estimated_overhead_ms }
 }
 
 /// Check if a finding is in a semantic-sensitive category.
 fn is_semantic_sensitive(finding: &Finding) -> bool {
-    SEMANTIC_SENSITIVE_CODES
-        .iter()
-        .any(|code| finding.code == *code)
+    SEMANTIC_SENSITIVE_CODES.iter().any(|code| finding.code == *code)
 }
 
 /// Score a candidate finding for uncertainty. Returns `Some` if the score
 /// meets the minimum threshold.
-fn score_candidate(
-    index: usize,
-    finding: &Finding,
-    min_score: u8,
-) -> Option<SemanticCandidate> {
+fn score_candidate(index: usize, finding: &Finding, min_score: u8) -> Option<SemanticCandidate> {
     let mut score: u8 = 0;
 
     // Medium confidence findings benefit most from refinement
@@ -241,21 +217,12 @@ fn score_candidate(
 
     // Extract file path and names from the finding subject
     let file_path = PathBuf::from(&finding.subject);
-    let export_name = finding
-        .evidence
-        .iter()
-        .find(|e| e.kind == "export-name")
-        .map(|e| e.description.clone());
-    let parent_name = finding
-        .evidence
-        .iter()
-        .find(|e| e.kind == "parent-name")
-        .map(|e| e.description.clone());
-    let member_name = finding
-        .evidence
-        .iter()
-        .find(|e| e.kind == "member-name")
-        .map(|e| e.description.clone());
+    let export_name =
+        finding.evidence.iter().find(|e| e.kind == "export-name").map(|e| e.description.clone());
+    let parent_name =
+        finding.evidence.iter().find(|e| e.kind == "parent-name").map(|e| e.description.clone());
+    let member_name =
+        finding.evidence.iter().find(|e| e.kind == "member-name").map(|e| e.description.clone());
 
     Some(SemanticCandidate {
         finding_index: index,

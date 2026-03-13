@@ -221,6 +221,68 @@ impl AnalysisCache {
             .map_err(|err| CacheError::SerializeError(err.to_string()))
     }
 
+    /// Write all file facts, resolutions, and path index entries in a single
+    /// transaction to avoid per-entry fsync overhead.
+    pub fn put_extraction_batch(
+        &self,
+        facts: &[CachedFileFacts],
+        resolutions: &[CachedResolutions],
+        path_entries: &[PathIndexEntry],
+        manifests: &[CachedManifest],
+    ) -> Result<(), CacheError> {
+        let write_txn =
+            self.db.begin_write().map_err(|err| CacheError::WriteError(err.to_string()))?;
+        {
+            let mut table = write_txn
+                .open_table(FILES_TABLE)
+                .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            for entry in facts {
+                let bytes = serde_json::to_vec(entry)
+                    .map_err(|err| CacheError::SerializeError(err.to_string()))?;
+                table
+                    .insert(entry.path.as_str(), bytes.as_slice())
+                    .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            }
+        }
+        {
+            let mut table = write_txn
+                .open_table(RESOLUTIONS_TABLE)
+                .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            for entry in resolutions {
+                let bytes = serde_json::to_vec(entry)
+                    .map_err(|err| CacheError::SerializeError(err.to_string()))?;
+                table
+                    .insert(entry.path.as_str(), bytes.as_slice())
+                    .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            }
+        }
+        {
+            let mut table = write_txn
+                .open_table(PATH_INDEX_TABLE)
+                .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            for entry in path_entries {
+                let bytes = serde_json::to_vec(entry)
+                    .map_err(|err| CacheError::SerializeError(err.to_string()))?;
+                table
+                    .insert(entry.relative_path.as_str(), bytes.as_slice())
+                    .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            }
+        }
+        {
+            let mut table = write_txn
+                .open_table(MANIFESTS_TABLE)
+                .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            for entry in manifests {
+                let bytes = serde_json::to_vec(entry)
+                    .map_err(|err| CacheError::SerializeError(err.to_string()))?;
+                table
+                    .insert(entry.workspace.as_str(), bytes.as_slice())
+                    .map_err(|err| CacheError::WriteError(err.to_string()))?;
+            }
+        }
+        write_txn.commit().map_err(|err| CacheError::WriteError(err.to_string()))
+    }
+
     fn put_json<T: Serialize>(
         &self,
         table_def: TableDefinition<&str, &[u8]>,

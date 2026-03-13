@@ -95,12 +95,7 @@ pub struct ReplacementWeights {
 
 impl Default for ReplacementWeights {
     fn default() -> Self {
-        Self {
-            parity_corpus: 0.50,
-            canary_repos: 0.30,
-            false_positive: 0.10,
-            performance: 0.10,
-        }
+        Self { parity_corpus: 0.50, canary_repos: 0.30, false_positive: 0.10, performance: 0.10 }
     }
 }
 
@@ -124,10 +119,7 @@ pub struct ReplacementInputs {
 ///
 /// Each input is expected to be in the range `[0.0, 1.0]`. The final score is
 /// clamped to `[0.0, 100.0]`.
-pub fn compute_replacement_score(
-    inputs: &ReplacementInputs,
-    weights: &ReplacementWeights,
-) -> f64 {
+pub fn compute_replacement_score(inputs: &ReplacementInputs, weights: &ReplacementWeights) -> f64 {
     let raw = inputs.parity_score * weights.parity_corpus
         + inputs.canary_score * weights.canary_repos
         + inputs.false_positive_score * weights.false_positive
@@ -154,8 +146,8 @@ pub enum FamilyTier {
 /// frameworks whose parity is required for a credible replacement claim.
 pub fn family_tier(family: &str) -> FamilyTier {
     match family {
-        "vite" | "vitest" | "webpack" | "jest" | "storybook" | "next" | "nuxt"
-        | "astro" | "sveltekit" | "remix" | "angular" | "nx" | "playwright" => FamilyTier::Tier1,
+        "vite" | "vitest" | "webpack" | "jest" | "storybook" | "next" | "nuxt" | "astro"
+        | "sveltekit" | "remix" | "angular" | "nx" | "playwright" => FamilyTier::Tier1,
         _ => FamilyTier::Tier2,
     }
 }
@@ -198,36 +190,26 @@ pub fn check_release_gates(
     let mut tier1_below = Vec::new();
 
     if replacement_score < 99.0 {
-        failures.push(format!(
-            "replacement score {replacement_score:.1}% < 99% threshold"
-        ));
+        failures.push(format!("replacement score {replacement_score:.1}% < 99% threshold"));
     }
 
     for (family, score, tier) in family_scores {
         if *tier == FamilyTier::Tier1 && *score < 97.0 {
             tier1_below.push(family.clone());
-            failures.push(format!(
-                "Tier-1 family '{family}' at {score:.1}% < 97% threshold"
-            ));
+            failures.push(format!("Tier-1 family '{family}' at {score:.1}% < 97% threshold"));
         }
     }
 
     if false_positive_delta > 2.0 {
-        failures.push(format!(
-            "false-positive delta {false_positive_delta:.1}% > 2% threshold"
-        ));
+        failures.push(format!("false-positive delta {false_positive_delta:.1}% > 2% threshold"));
     }
 
     if cold_scan_slowdown_pct > 20.0 {
-        failures.push(format!(
-            "cold-scan slowdown {cold_scan_slowdown_pct:.1}% > 20% threshold"
-        ));
+        failures.push(format!("cold-scan slowdown {cold_scan_slowdown_pct:.1}% > 20% threshold"));
     }
 
     if speed_ratio_vs_knip < 3.0 {
-        failures.push(format!(
-            "speed ratio vs knip {speed_ratio_vs_knip:.1}x < 3x threshold"
-        ));
+        failures.push(format!("speed ratio vs knip {speed_ratio_vs_knip:.1}x < 3x threshold"));
     }
 
     ReleaseGateResult {

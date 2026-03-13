@@ -356,11 +356,21 @@ pub struct SemanticConfig {
     pub min_uncertainty_score: u8,
 }
 
-const fn default_max_cold_overhead_pct() -> u8 { 20 }
-const fn default_max_files_per_query_batch() -> usize { 128 }
-const fn default_max_project_refs() -> usize { 8 }
-const fn default_max_helper_wall_ms() -> u64 { 1200 }
-const fn default_min_uncertainty_score() -> u8 { 60 }
+const fn default_max_cold_overhead_pct() -> u8 {
+    20
+}
+const fn default_max_files_per_query_batch() -> usize {
+    128
+}
+const fn default_max_project_refs() -> usize {
+    8
+}
+const fn default_max_helper_wall_ms() -> u64 {
+    1200
+}
+const fn default_min_uncertainty_score() -> u8 {
+    60
+}
 
 impl Default for SemanticConfig {
     fn default() -> Self {

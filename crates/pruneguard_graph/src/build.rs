@@ -217,37 +217,6 @@ pub fn build_graph_with_options(
     let repo_files =
         extracted_files.iter().map(|file| file.file.path.clone()).collect::<FxHashSet<_>>();
 
-    if let Some(cache) = options.cache {
-        for (workspace_name, workspace) in &discovery.workspaces {
-            let _ = cache.put_manifest(&CachedManifest {
-                workspace: workspace_name.clone(),
-                manifest_hash: *manifest_hashes.get(workspace_name).unwrap_or(&0),
-                package_name: workspace.manifest.name.clone(),
-                scripts_json: serde_json::to_vec(&workspace.manifest.scripts).unwrap_or_default(),
-            });
-        }
-    }
-
-    // Phase 1: Record path index entries (sequential)
-    if let Some(cache) = options.cache {
-        for extracted_file in &extracted_files {
-            let manifest_hash = extracted_file
-                .file
-                .workspace
-                .as_ref()
-                .and_then(|workspace| manifest_hashes.get(workspace))
-                .copied()
-                .unwrap_or(0);
-            let _ = cache.record_path_index(&PathIndexEntry {
-                relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
-                absolute_path: extracted_file.file.path.to_string_lossy().to_string(),
-                workspace: extracted_file.file.workspace.clone(),
-                package: extracted_file.file.package.clone(),
-                manifest_hash,
-            });
-        }
-    }
-
     // Phase 2a: Sequential cache hydration — read cached facts for files whose
     // hash hasn't changed. Track which files need fresh extraction.
     let mut cache_counters = CacheCounters::default();
@@ -299,8 +268,11 @@ pub fn build_graph_with_options(
         return Err(first_error);
     }
 
-    // Phase 2c: Sequential cache persist for newly extracted files
+    // Phase 2c: Batch cache persist — collect all entries and write in a single
+    // transaction to avoid per-entry fsync overhead.
     if let Some(cache) = options.cache {
+        let mut batch_facts = Vec::new();
+        let mut batch_resolutions = Vec::new();
         for (i, extracted_file) in extracted_files.iter().enumerate() {
             if !needs_extract[i] || !is_tracked_source(&extracted_file.file.path) {
                 continue;
@@ -315,14 +287,61 @@ pub fn build_graph_with_options(
                     .unwrap_or(0),
                 ..base_hashes
             };
-            let _ = persist_to_cache(
-                extracted_file,
-                cache,
-                &mut cache_counters,
-                per_file_hash[i],
-                hashes,
-            );
+            let file_hash = per_file_hash[i];
+            batch_facts.push(CachedFileFacts {
+                path: extracted_file.file.path.to_string_lossy().to_string(),
+                relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
+                file_hash,
+                config_hash: hashes.config,
+                resolver_hash: hashes.resolver,
+                manifest_hash: hashes.manifest,
+                tsconfig_hash: hashes.tsconfig,
+                facts_json: serde_json::to_vec(&extracted_file.facts).unwrap_or_default(),
+                parse_diagnostics: extracted_file.parse_diagnostics.clone(),
+                external_dependencies: extracted_file.external_dependencies.clone(),
+            });
+            batch_resolutions.push(CachedResolutions {
+                path: extracted_file.file.path.to_string_lossy().to_string(),
+                resolved_imports_json: serde_json::to_vec(&extracted_file.resolved_imports)
+                    .unwrap_or_default(),
+                resolved_reexports_json: serde_json::to_vec(&extracted_file.resolved_reexports)
+                    .unwrap_or_default(),
+            });
+            cache_counters.entries_written += 2;
+            cache_counters.misses += 1;
         }
+        let path_entries: Vec<PathIndexEntry> = extracted_files
+            .iter()
+            .map(|f| PathIndexEntry {
+                relative_path: f.file.relative_path.to_string_lossy().to_string(),
+                absolute_path: f.file.path.to_string_lossy().to_string(),
+                workspace: f.file.workspace.clone(),
+                package: f.file.package.clone(),
+                manifest_hash: f
+                    .file
+                    .workspace
+                    .as_ref()
+                    .and_then(|ws| manifest_hashes.get(ws))
+                    .copied()
+                    .unwrap_or(0),
+            })
+            .collect();
+        let manifest_entries: Vec<CachedManifest> = discovery
+            .workspaces
+            .iter()
+            .map(|(name, workspace)| CachedManifest {
+                workspace: name.clone(),
+                manifest_hash: *manifest_hashes.get(name).unwrap_or(&0),
+                package_name: workspace.manifest.name.clone(),
+                scripts_json: serde_json::to_vec(&workspace.manifest.scripts).unwrap_or_default(),
+            })
+            .collect();
+        let _ = cache.put_extraction_batch(
+            &batch_facts,
+            &batch_resolutions,
+            &path_entries,
+            &manifest_entries,
+        );
     }
 
     let packs = built_in_packs();
@@ -980,43 +999,6 @@ fn hydrate_from_cache(
             .map_err(|err| miette::miette!("{err}"))?;
     counters.hits += 1;
     Ok(true)
-}
-
-fn persist_to_cache(
-    extracted_file: &ExtractedFile,
-    cache: &AnalysisCache,
-    counters: &mut CacheCounters,
-    file_hash: u64,
-    hashes: CacheHashes,
-) -> Result<()> {
-    cache
-        .put_file_facts(&CachedFileFacts {
-            path: extracted_file.file.path.to_string_lossy().to_string(),
-            relative_path: extracted_file.file.relative_path.to_string_lossy().to_string(),
-            file_hash,
-            config_hash: hashes.config,
-            resolver_hash: hashes.resolver,
-            manifest_hash: hashes.manifest,
-            tsconfig_hash: hashes.tsconfig,
-            facts_json: serde_json::to_vec(&extracted_file.facts)
-                .map_err(|err| miette::miette!("{err}"))?,
-            parse_diagnostics: extracted_file.parse_diagnostics.clone(),
-            external_dependencies: extracted_file.external_dependencies.clone(),
-        })
-        .map_err(|err| miette::miette!("{err}"))?;
-    counters.entries_written += 1;
-    cache
-        .put_resolutions(&CachedResolutions {
-            path: extracted_file.file.path.to_string_lossy().to_string(),
-            resolved_imports_json: serde_json::to_vec(&extracted_file.resolved_imports)
-                .map_err(|err| miette::miette!("{err}"))?,
-            resolved_reexports_json: serde_json::to_vec(&extracted_file.resolved_reexports)
-                .map_err(|err| miette::miette!("{err}"))?,
-        })
-        .map_err(|err| miette::miette!("{err}"))?;
-    counters.entries_written += 1;
-    counters.misses += 1;
-    Ok(())
 }
 
 fn detect_all_entrypoints(

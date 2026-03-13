@@ -106,14 +106,8 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub enum BenchCommand {
     Replacement { corpus: Option<PathBuf> },
-    Performance {
-        corpus: Option<PathBuf>,
-        iterations: Option<usize>,
-    },
-    Compare {
-        tool: String,
-        corpus: Option<PathBuf>,
-    },
+    Performance { corpus: Option<PathBuf>, iterations: Option<usize> },
+    Compare { tool: String, corpus: Option<PathBuf> },
 }
 
 #[derive(Debug, Clone)]
@@ -386,9 +380,7 @@ fn bench_performance_subcommand() -> impl Parser<BenchCommand> {
 }
 
 fn bench_compare_subcommand() -> impl Parser<BenchCommand> {
-    let tool = long("tool")
-        .help("Tool to compare against (e.g. knip)")
-        .argument::<String>("TOOL");
+    let tool = long("tool").help("Tool to compare against (e.g. knip)").argument::<String>("TOOL");
     let corpus =
         positional::<PathBuf>("CORPUS").help("Path to benchmark corpus directory").optional();
     // Named flags must come before positionals in construct! for bpaf

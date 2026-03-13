@@ -12,8 +12,8 @@
 use std::io::{Read, Write};
 
 use pruneguard_semantic_protocol::{
-    ErrorMessage, HandshakeRequest, MessageType, QueryBatch, QueryResult, ReadyMessage,
-    ResponseBatch, HEADER_SIZE, PROTOCOL_VERSION, decode_header, encode_message,
+    ErrorMessage, HEADER_SIZE, HandshakeRequest, MessageType, PROTOCOL_VERSION, QueryBatch,
+    QueryResult, ReadyMessage, ResponseBatch, decode_header, encode_message,
 };
 
 fn main() {
@@ -158,15 +158,9 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .collect();
 
-                let response = ResponseBatch {
-                    results,
-                    batch_ms: batch_started.elapsed().as_millis() as u64,
-                };
-                send_message(
-                    &mut stdout,
-                    MessageType::Response,
-                    &serde_json::to_vec(&response)?,
-                )?;
+                let response =
+                    ResponseBatch { results, batch_ms: batch_started.elapsed().as_millis() as u64 };
+                send_message(&mut stdout, MessageType::Response, &serde_json::to_vec(&response)?)?;
             }
             _ => {
                 let err = ErrorMessage {
@@ -181,12 +175,14 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn read_message(reader: &mut impl Read) -> Result<(MessageType, Vec<u8>), Box<dyn std::error::Error>> {
+fn read_message(
+    reader: &mut impl Read,
+) -> Result<(MessageType, Vec<u8>), Box<dyn std::error::Error>> {
     let mut header = [0u8; HEADER_SIZE];
     reader.read_exact(&mut header)?;
 
-    let (size, msg_type) = decode_header(&header)
-        .ok_or_else(|| format!("invalid header: {:?}", header))?;
+    let (size, msg_type) =
+        decode_header(&header).ok_or_else(|| format!("invalid header: {:?}", header))?;
 
     let mut payload = vec![0u8; size as usize];
     reader.read_exact(&mut payload)?;
