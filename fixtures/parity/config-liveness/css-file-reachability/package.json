@@ -1,0 +1,7 @@
+{
+  "name": "parity-css-file-reachability",
+  "private": true,
+  "devDependencies": {
+    "sass": "^1.70.0"
+  }
+}

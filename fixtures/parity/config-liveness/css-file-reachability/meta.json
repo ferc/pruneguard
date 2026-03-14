@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "css-file-reachability",
+  "reference_tool": "knip",
+  "description": "CSS/SCSS files imported by reachable JS/TS files should be considered reachable and not flagged as unused"
+}

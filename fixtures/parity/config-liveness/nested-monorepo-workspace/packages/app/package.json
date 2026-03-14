@@ -1,0 +1,7 @@
+{
+  "name": "@nested/app",
+  "private": true,
+  "dependencies": {
+    "@nested/lib": "workspace:*"
+  }
+}

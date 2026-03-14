@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "nested-monorepo-workspace",
+  "reference_tool": "knip",
+  "description": "Packages in nested monorepos (monorepo-within-monorepo) should be recognized as workspace packages and not flagged as unlisted"
+}

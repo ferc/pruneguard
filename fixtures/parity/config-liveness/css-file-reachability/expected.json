@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/main.ts"],
+  "unreachable_files": ["./src/unused.scss"],
+  "expected_findings": ["unused-file:./src/unused.scss"],
+  "expected_no_findings": ["unused-file:./src/styles.scss"]
+}

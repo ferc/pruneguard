@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "dynamic-webpack-alias",
+  "reference_tool": "knip",
+  "description": "Webpack aliases using path.resolve(__dirname, ...) should be extracted and not flagged as unlisted dependencies"
+}
