@@ -1,0 +1,6 @@
+@use "sass:math";
+@import "bootstrap/scss/bootstrap";
+
+.container {
+  width: math.div(960px, 2);
+}

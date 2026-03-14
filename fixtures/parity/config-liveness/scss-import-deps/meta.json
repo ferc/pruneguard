@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "scss-import-deps",
+  "reference_tool": "knip",
+  "description": "SCSS @import/@use of npm packages counts as dependency usage and sass:math is not flagged as unlisted"
+}

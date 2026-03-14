@@ -236,6 +236,12 @@ pub fn analyze(
             if is_build_tool_dependency(dep_str) {
                 continue;
             }
+            // Skip specifiers that match a configured path alias prefix.
+            // E.g., if vite.config has `@shared → ./src/shared`, then
+            // `@shared/utils` is a local file, not an npm package.
+            if matches_configured_alias(dep_str, &build.config_alias_prefixes) {
+                continue;
+            }
             // Skip non-package specifiers that leaked through dependency_name():
             // relative paths, asset imports, query-parameterized imports, subpath
             // imports (#foo), single-word specifiers that look like local files.
@@ -332,6 +338,12 @@ fn is_workspace_package(dep: &str, discovery: &pruneguard_discovery::DiscoveryRe
     discovery.workspaces.values().any(|ws| ws.manifest.name.as_deref() == Some(dep))
 }
 
+/// Check if a dependency specifier matches one of the configured path alias
+/// prefixes extracted from framework configs (vite, webpack, tsconfig, etc.).
+fn matches_configured_alias(dep: &str, alias_prefixes: &[String]) -> bool {
+    alias_prefixes.iter().any(|prefix| dep == prefix || dep.starts_with(&format!("{prefix}/")))
+}
+
 /// Test fixture and mock files contain synthetic imports for testing purposes.
 fn is_test_fixture_path(path: &std::path::Path) -> bool {
     let s = path.to_string_lossy();
@@ -382,6 +394,10 @@ fn looks_like_npm_package(dep: &str) -> bool {
     if dep.contains('!') {
         return false;
     }
+    // CSS module imports (e.g., `colors.module`, `typography.module`).
+    if dep.ends_with(".module") {
+        return false;
+    }
     // Asset extensions are not packages.
     let asset_exts = [
         ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".avif", ".css", ".scss",
@@ -404,50 +420,90 @@ fn looks_like_npm_package(dep: &str) -> bool {
     if dep.starts_with('@') && !dep.contains('/') {
         return false;
     }
-    // Scoped packages with uppercase scope names are path aliases, not real npm
-    // packages (npm scopes are always lowercase).
-    // E.g., @API/endpoint, @Components/Button, @DS/tokens.
-    if dep.starts_with('@')
-        && let Some(scope) = dep.strip_prefix('@').and_then(|s| s.split('/').next())
-    {
-        // Uppercase scope = alias (npm scopes are always lowercase).
-        if scope.chars().any(|c| c.is_ascii_uppercase()) {
-            return false;
-        }
-        // Common alias-like scope names that are not real npm organizations.
-        if matches!(
-            scope,
-            "app"
-                | "lib"
-                | "src"
-                | "root"
-                | "server"
-                | "client"
-                | "components"
-                | "utils"
-                | "hooks"
-                | "features"
-                | "modules"
-                | "assets"
-                | "styles"
-                | "images"
-                | "config"
-                | "constants"
-                | "services"
-                | "store"
-                | "api"
-                | "pages"
-                | "layouts"
-                | "shared"
-                | "common"
-                | "core"
-                | "ui"
-                | "design-system"
-        ) {
-            return false;
-        }
+    // Scoped packages with alias-like scope names are path aliases, not real
+    // npm packages.
+    if dep.starts_with('@') && is_alias_like_scope(dep) {
+        return false;
     }
     true
+}
+
+/// Check if a scoped package name looks like a path alias rather than a real
+/// npm organization.  Uppercase scope names are never real npm scopes, and
+/// many common single-word scope names map to project-internal aliases.
+fn is_alias_like_scope(dep: &str) -> bool {
+    let Some(scope) = dep.strip_prefix('@').and_then(|s| s.split('/').next()) else {
+        return false;
+    };
+    // Uppercase scope = alias (npm scopes are always lowercase).
+    if scope.chars().any(|c| c.is_ascii_uppercase()) {
+        return true;
+    }
+    // Common alias-like scope names that are not real npm organizations.
+    matches!(
+        scope,
+        "app"
+            | "lib"
+            | "src"
+            | "root"
+            | "server"
+            | "client"
+            | "components"
+            | "utils"
+            | "hooks"
+            | "features"
+            | "modules"
+            | "assets"
+            | "styles"
+            | "images"
+            | "config"
+            | "constants"
+            | "services"
+            | "store"
+            | "api"
+            | "pages"
+            | "layouts"
+            | "shared"
+            | "common"
+            | "core"
+            | "ui"
+            | "design-system"
+            | "routes"
+            | "auth"
+            | "views"
+            | "helpers"
+            | "types"
+            | "models"
+            | "middleware"
+            | "plugins"
+            | "test"
+            | "tests"
+            | "e2e"
+            | "fixtures"
+            | "mocks"
+            | "vendor"
+            | "public"
+            | "static"
+            | "theme"
+            | "i18n"
+            | "locales"
+            | "state"
+            | "actions"
+            | "reducers"
+            | "selectors"
+            | "contexts"
+            | "providers"
+            | "schemas"
+            | "dto"
+            | "entities"
+            | "repositories"
+            | "controllers"
+            | "guards"
+            | "interceptors"
+            | "pipes"
+            | "decorators"
+            | "directives"
+    )
 }
 
 fn workspace_unresolved_specifiers(build: &GraphBuildResult, workspace_name: &str) -> usize {

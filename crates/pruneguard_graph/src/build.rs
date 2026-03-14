@@ -103,6 +103,10 @@ pub struct GraphBuildResult {
     /// Findings for exports in these files should use demoted confidence
     /// since their liveness depends on heuristic pattern matching.
     pub glob_expanded_targets: FxHashSet<PathBuf>,
+    /// Alias prefixes extracted from framework configs (vite, webpack, tsconfig
+    /// paths, etc.).  Used by the unused-dependency analyzer to filter unlisted
+    /// dependency false positives from project-specific path aliases.
+    pub config_alias_prefixes: Vec<String>,
     /// Fast path-to-file-index lookup for `find_file`.
     file_path_index: FxHashMap<String, usize>,
 }
@@ -813,6 +817,21 @@ pub fn build_graph_with_options(
     }
 
     // Collect files that were pulled in via glob/context expansion for confidence demotion.
+    // Collect alias prefixes for the unused-dependency analyzer.
+    // Strip trailing /* or * to get the prefix that can be matched against
+    // specifiers (e.g., "@shared/*" → "@shared", "~/src/*" → "~/src").
+    let config_alias_prefixes: Vec<String> = config_inputs
+        .aliases
+        .iter()
+        .map(|a| {
+            a.pattern
+                .strip_suffix("/*")
+                .or_else(|| a.pattern.strip_suffix('*'))
+                .unwrap_or(&a.pattern)
+                .to_string()
+        })
+        .collect();
+
     let glob_expanded_targets: FxHashSet<PathBuf> = extracted_files
         .iter()
         .flat_map(|f| f.resolved_imports.iter())
@@ -832,6 +851,7 @@ pub fn build_graph_with_options(
         files: extracted_files,
         stats,
         glob_expanded_targets,
+        config_alias_prefixes,
         file_path_index,
     })
 }

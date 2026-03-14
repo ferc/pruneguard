@@ -1,0 +1,6 @@
+{
+  "family": "webpack",
+  "name": "loader-deps",
+  "reference_tool": "knip",
+  "description": "Webpack loaders (babel-loader, ts-loader) referenced in config are recognized as used devDependencies via the -loader suffix pattern"
+}

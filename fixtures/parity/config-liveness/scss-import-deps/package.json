@@ -1,0 +1,10 @@
+{
+  "name": "parity-scss-import-deps",
+  "private": true,
+  "dependencies": {
+    "bootstrap": "^5.3.0"
+  },
+  "devDependencies": {
+    "sass": "^1.70.0"
+  }
+}

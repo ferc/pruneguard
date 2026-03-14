@@ -1,0 +1,10 @@
+{
+  "name": "parity-webpack-loader-deps",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0",
+    "babel-loader": "^9.0.0",
+    "ts-loader": "^9.0.0",
+    "css-loader": "^6.0.0"
+  }
+}
