@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -91,9 +97,9 @@ dependencies = [
 
 [[package]]
 name = "bpaf"
-version = "0.9.23"
+version = "0.9.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a59e5c2bac9ccb280150ef4b58e07e4169d8c5c6ce0f70170e3c0b7c7b6124"
+checksum = "b2435ff2f08be8436bdcd06a3de2bd7696fd10e45eb630ecfc09af7fbfa3e69a"
 dependencies = [
  "bpaf_derive",
  "owo-colors",
@@ -311,6 +317,15 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fast-glob"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9e81515b0279bf618200fd15d132e7195d2048fb46eed6f0f3c10cbc068266"
+dependencies = [
+ "arrayvec",
 ]
 
 [[package]]
@@ -795,9 +810,9 @@ dependencies = [
 
 [[package]]
 name = "napi-build"
-version = "2.2.4"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ae82775d1b06f3f07efd0666e59bbc175da8383bc372051031d7a447e94fbea"
+checksum = "d376940fd5b723c6893cd1ee3f33abbfd86acb1cd1ec079f3ab04a2a3bc4d3b1"
 
 [[package]]
 name = "napi-derive"
@@ -836,6 +851,12 @@ checksum = "427802e8ec3a734331fec1035594a210ce1ff4dc5bc1950530920ab717964ea3"
 dependencies = [
  "libloading",
 ]
+
+[[package]]
+name = "nodejs-built-in-modules"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5eb86a92577833b75522336f210c49d9ebd7dd55a44d80a92e68c668a75f27c"
 
 [[package]]
 name = "nonmax"
@@ -930,9 +951,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.3"
+version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "owo-colors"
@@ -1109,13 +1130,16 @@ dependencies = [
 
 [[package]]
 name = "oxc_resolver"
-version = "11.13.1"
+version = "11.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ab3f270c313ac7f814ce73a64f4bdf36a183dcae4593b2f96c6e6afea8c99d0"
+checksum = "5632fcd47d4fdaf7ef5ee150c7001fa8ed814ce38d1a073536a366dbfc239aad"
 dependencies = [
  "cfg-if",
+ "compact_str 0.9.0",
+ "fast-glob",
  "indexmap",
  "json-strip-comments",
+ "nodejs-built-in-modules",
  "once_cell",
  "papaya",
  "rustc-hash",
@@ -1346,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "bpaf",
  "globset",
@@ -1403,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_analyzers"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "compact_str 0.8.1",
  "globset",
@@ -1428,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_cache"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "redb",
  "serde",
@@ -1439,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_compat"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "pruneguard_frameworks",
  "pruneguard_manifest",
@@ -1450,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_config"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "globset",
  "insta",
@@ -1464,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_config_readers"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -1480,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_daemon"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "miette",
  "notify",
@@ -1507,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_discovery"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "glob",
  "globset",
@@ -1524,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_entrypoints"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "glob",
  "globset",
@@ -1538,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_extract"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "compact_str 0.8.1",
  "oxc_allocator",
@@ -1558,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_frameworks"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "globset",
  "pruneguard_config",
@@ -1570,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_fs"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "globset",
  "ignore",
@@ -1581,7 +1605,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_git"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "miette",
  "serde",
@@ -1590,7 +1614,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_graph"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "compact_str 0.8.1",
  "globset",
@@ -1620,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_manifest"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "compact_str 0.8.1",
  "rustc-hash",
@@ -1631,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_report"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "compact_str 0.8.1",
  "insta",
@@ -1642,7 +1666,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_resolver"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "miette",
  "oxc_resolver",
@@ -1656,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "pruneguard_rules"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "globset",
  "miette",
@@ -2239,9 +2263,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.22"
+version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
  "matchers",
  "nu-ansi-term",
@@ -2375,11 +2399,11 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
- "wit-bindgen 0.46.0",
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -2388,7 +2412,7 @@ version = "0.4.0+wasi-0.3.0-rc-2026-01-06"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5428f8bf88ea5ddc08faddef2ac4a67e390b88186c703ce6dbd955e1c145aca5"
 dependencies = [
- "wit-bindgen 0.51.0",
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -2699,12 +2723,6 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
-
-[[package]]
-name = "wit-bindgen"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "wit-bindgen"

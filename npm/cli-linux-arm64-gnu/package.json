@@ -1,6 +1,6 @@
 {
   "name": "@pruneguard/cli-linux-arm64-gnu",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "pruneguard platform binary for Linux ARM64 (glibc)",
   "license": "MIT",
   "os": [

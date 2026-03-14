@@ -1,6 +1,6 @@
 {
   "name": "pruneguard",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Repo truth engine for JS/TS monorepos",
   "keywords": [
     "javascript",
