@@ -3706,6 +3706,279 @@ impl ConfigAdapter for PrismaAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// MochaAdapter
+// ---------------------------------------------------------------------------
+
+pub struct MochaAdapter;
+
+impl ConfigAdapter for MochaAdapter {
+    fn framework_name(&self) -> &'static str {
+        "mocha"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, ".mocharc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // spec → test patterns
+        if let Some(kind) = find_value(values, "spec") {
+            match kind {
+                ConfigValueKind::String(s) => inputs.test_patterns.push(s.clone()),
+                ConfigValueKind::Array(_) => inputs.test_patterns.extend(strings_from_array(kind)),
+                _ => {}
+            }
+        }
+
+        // require → setup files / externals
+        if let Some(kind) = find_value(values, "require") {
+            for s in strings_from_array(kind) {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.setup_files.push(PathBuf::from(&s));
+                } else {
+                    inputs.externals.push(s);
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KarmaAdapter
+// ---------------------------------------------------------------------------
+
+pub struct KarmaAdapter;
+
+impl ConfigAdapter for KarmaAdapter {
+    fn framework_name(&self) -> &'static str {
+        "karma"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "karma.conf")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // files → test patterns
+        if let Some(kind) = find_value(values, "files") {
+            inputs.test_patterns.extend(strings_from_array(kind));
+        }
+
+        // frameworks → externals (e.g. "jasmine", "mocha")
+        if let Some(kind) = find_value(values, "frameworks") {
+            for s in strings_from_array(kind) {
+                inputs.externals.push(format!("karma-{s}"));
+            }
+        }
+
+        // plugins → externals
+        if let Some(kind) = find_value(values, "plugins") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // preprocessors keys → test patterns
+        for entry in find_values_with_prefix(values, "preprocessors.") {
+            let pattern = entry.key.strip_prefix("preprocessors.").unwrap_or(&entry.key);
+            if !pattern.is_empty() {
+                inputs.test_patterns.push(pattern.to_string());
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AVAAdapter
+// ---------------------------------------------------------------------------
+
+pub struct AVAAdapter;
+
+impl ConfigAdapter for AVAAdapter {
+    fn framework_name(&self) -> &'static str {
+        "ava"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // AVA config lives in package.json "ava" key, but standalone
+        // ava.config.{js,cjs,mjs} files also exist.
+        filename_starts_with(&config.path, "ava.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // files → test patterns
+        if let Some(kind) = find_value(values, "files") {
+            inputs.test_patterns.extend(strings_from_array(kind));
+        }
+
+        // require → setup files / externals
+        if let Some(kind) = find_value(values, "require") {
+            for s in strings_from_array(kind) {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.setup_files.push(PathBuf::from(&s));
+                } else {
+                    inputs.externals.push(s);
+                }
+            }
+        }
+
+        // extensions → ignored (informational only)
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VanillaExtractAdapter
+// ---------------------------------------------------------------------------
+
+pub struct VanillaExtractAdapter;
+
+impl ConfigAdapter for VanillaExtractAdapter {
+    fn framework_name(&self) -> &'static str {
+        "vanilla-extract"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "vanilla-extract.config")
+    }
+
+    fn extract(&self, _config: &ConfigReadResult) -> ConfigInputs {
+        // vanilla-extract config typically just specifies CSS compilation
+        // options. The main signal is that *.css.ts files are entrypoints.
+        ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            test_patterns: vec!["**/*.css.ts".to_string(), "**/*.css.tsx".to_string()],
+            ..Default::default()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LernaAdapter
+// ---------------------------------------------------------------------------
+
+pub struct LernaAdapter;
+
+impl ConfigAdapter for LernaAdapter {
+    fn framework_name(&self) -> &'static str {
+        "lerna"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "lerna.json")
+            || filename_starts_with(&config.path, "lerna.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // packages → source roots (workspace packages)
+        if let Some(kind) = find_value(values, "packages") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ChangesetAdapter
+// ---------------------------------------------------------------------------
+
+pub struct ChangesetAdapter;
+
+impl ConfigAdapter for ChangesetAdapter {
+    fn framework_name(&self) -> &'static str {
+        "changesets"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // .changeset/config.json
+        path_contains_dir(&config.path, ".changeset")
+            && filename_starts_with(&config.path, "config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // ignore → patterns to exclude from versioning (workspace names)
+        if let Some(kind) = find_value(values, "ignore") {
+            inputs.ignore_patterns.extend(strings_from_array(kind));
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExpressAdapter
+// ---------------------------------------------------------------------------
+
+pub struct ExpressAdapter;
+
+impl ConfigAdapter for ExpressAdapter {
+    fn framework_name(&self) -> &'static str {
+        "express"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // Express doesn't have a dedicated config file, but app.js/server.js
+        // are conventional entrypoints. We match on common names.
+        let name = config.path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        matches!(name, "app.js" | "app.ts" | "server.js" | "server.ts")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // The config file itself is a runtime entrypoint.
+        inputs.runtime_entrypoints.push(config.path.clone());
+
+        // views → source root for template files
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "views") {
+            inputs.source_roots.push(PathBuf::from(s));
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate extraction
 // ---------------------------------------------------------------------------
 
@@ -3761,6 +4034,14 @@ pub fn extract_all_inputs(configs: &[ConfigReadResult]) -> ConfigInputs {
         Box::new(SWCAdapter),
         Box::new(DrizzleAdapter),
         Box::new(PrismaAdapter),
+        // Tier D – additional ecosystem adapters
+        Box::new(MochaAdapter),
+        Box::new(KarmaAdapter),
+        Box::new(AVAAdapter),
+        Box::new(VanillaExtractAdapter),
+        Box::new(LernaAdapter),
+        Box::new(ChangesetAdapter),
+        Box::new(ExpressAdapter),
     ];
 
     let mut merged = ConfigInputs::default();

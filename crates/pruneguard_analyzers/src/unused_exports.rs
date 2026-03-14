@@ -28,7 +28,23 @@ pub fn analyze(
     // When `include_entry_exports` is true, do NOT blanket-mark all entrypoint
     // exports as live.  Instead, let each export's liveness be determined solely
     // by actual import/re-export demand across the graph.
-    if !include_entry_exports {
+    //
+    // Exception: PackageExports entrypoints (files referenced in package.json
+    // "exports") are the public API contract and must remain live even in this
+    // mode — consumers depend on them.
+    if include_entry_exports {
+        // Only keep PackageExports entrypoints live — these are the public API
+        // contract (files referenced in package.json "exports").
+        for seed in &build.entrypoint_seeds {
+            if seed.kind == pruneguard_entrypoints::EntrypointKind::PackageExports {
+                let normalized: std::path::PathBuf = seed.path.components().collect();
+                if let Some(fid) = build.module_graph.file_id(&normalized.to_string_lossy()) {
+                    live.mark_all(fid, false);
+                    live.mark_all(fid, true);
+                }
+            }
+        }
+    } else {
         for file_id in active_entrypoints {
             live.mark_all(file_id, false);
             live.mark_all(file_id, true);

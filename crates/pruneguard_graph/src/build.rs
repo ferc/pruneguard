@@ -1097,6 +1097,18 @@ fn extract_file(
                 .resolved_imports
                 .iter()
                 .chain(&extracted_file.resolved_reexports)
+                .filter(|edge| {
+                    !matches!(
+                        edge.alias_origin,
+                        Some(
+                            pruneguard_resolver::AliasOrigin::Vite
+                                | pruneguard_resolver::AliasOrigin::Webpack
+                                | pruneguard_resolver::AliasOrigin::Babel
+                                | pruneguard_resolver::AliasOrigin::TsconfigPaths
+                                | pruneguard_resolver::AliasOrigin::FrameworkGenerated
+                        )
+                    )
+                })
                 .filter_map(|edge| edge.to_dependency.clone())
                 .collect::<FxHashSet<_>>()
                 .into_iter()

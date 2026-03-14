@@ -312,6 +312,12 @@ fn read_js_ts_static(
     let mut warnings = Vec::new();
     let mut found_export = false;
 
+    // Build a map of top-level const/let/var declarations so we can resolve
+    // `export default <identifier>` patterns like:
+    //   const config = { entry: './src/index.ts' };
+    //   export default config;
+    let top_level_decls = collect_top_level_declarations(program);
+
     for stmt in &program.body {
         // 1. export default <expr>
         if let Statement::ExportDefaultDeclaration(export) = stmt {
@@ -330,11 +336,23 @@ fn read_js_ts_static(
                         "Default export is a function; cannot extract statically".to_string(),
                     );
                 }
-                ExportDefaultDeclarationKind::Identifier(_) => {
-                    warnings.push(
-                        "Default export is an identifier reference; cannot resolve statically"
-                            .to_string(),
-                    );
+                ExportDefaultDeclarationKind::Identifier(ident) => {
+                    // Try to resolve the identifier to its top-level declaration
+                    let name = ident.name.as_str();
+                    if let Some(idx) = top_level_decls.get(name) {
+                        let init_stmt = &program.body[*idx];
+                        extract_from_declaration_initializer(
+                            init_stmt,
+                            name,
+                            &mut values,
+                            &mut warnings,
+                        );
+                    } else {
+                        warnings.push(
+                            "Default export is an identifier reference; cannot resolve statically"
+                                .to_string(),
+                        );
+                    }
                 }
                 ExportDefaultDeclarationKind::TSAsExpression(ts_as) => {
                     // export default { ... } as const  /  export default { ... } satisfies Config
@@ -388,6 +406,52 @@ fn is_module_exports_target(target: &oxc_ast::ast::AssignmentTarget<'_>) -> bool
     false
 }
 
+/// Collect a map from identifier name → statement index for top-level
+/// `const/let/var` declarations that have initializers.
+fn collect_top_level_declarations<'a>(
+    program: &'a oxc_ast::ast::Program<'a>,
+) -> rustc_hash::FxHashMap<&'a str, usize> {
+    use oxc_ast::ast::Statement;
+
+    let mut map = rustc_hash::FxHashMap::default();
+    for (idx, stmt) in program.body.iter().enumerate() {
+        if let Statement::VariableDeclaration(decl) = stmt {
+            for declarator in &decl.declarations {
+                if declarator.init.is_some()
+                    && let oxc_ast::ast::BindingPattern::BindingIdentifier(id) = &declarator.id
+                {
+                    map.insert(id.name.as_str(), idx);
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Extract config values from the initializer of a top-level variable declaration
+/// that matches the given identifier name.
+fn extract_from_declaration_initializer(
+    stmt: &oxc_ast::ast::Statement<'_>,
+    name: &str,
+    values: &mut Vec<ConfigValue>,
+    warnings: &mut Vec<String>,
+) {
+    use oxc_ast::ast::Statement;
+
+    if let Statement::VariableDeclaration(decl) = stmt {
+        for declarator in &decl.declarations {
+            if let oxc_ast::ast::BindingPattern::BindingIdentifier(id) = &declarator.id
+                && id.name.as_str() == name
+                && let Some(init) = &declarator.init
+            {
+                extract_from_expression(init, values, warnings);
+                return;
+            }
+        }
+    }
+    warnings.push(format!("Could not resolve identifier `{name}` to a static initializer"));
+}
+
 /// Extract config values from an arbitrary expression (dispatches to the
 /// appropriate handler based on expression kind).
 fn extract_from_expression(
@@ -413,6 +477,18 @@ fn extract_from_expression(
 }
 
 /// Extract the object argument from a wrapper call like `defineConfig({...})`.
+/// Known config wrapper functions that pass through their object argument
+/// unchanged — no warning needed for these.
+const KNOWN_CONFIG_WRAPPERS: &[&str] = &[
+    "defineConfig",
+    "defineNuxtConfig",
+    "defineVitestConfig",
+    "defineWorkspace",
+    "defineAppConfig",
+    "withNx",
+    "withPWA",
+];
+
 fn extract_from_call_expression(
     call: &oxc_ast::ast::CallExpression<'_>,
     values: &mut Vec<ConfigValue>,
@@ -424,26 +500,92 @@ fn extract_from_call_expression(
         _ => None,
     };
 
-    if let Some(name) = &callee_name {
-        warnings.push(format!(
-            "Config uses `{name}()` wrapper; only static literal properties can be extracted"
-        ));
-    } else {
-        warnings.push(
-            "Config uses a function call wrapper; only static literal properties can be extracted"
-                .to_string(),
-        );
+    let is_known = callee_name.as_deref().is_some_and(|n| KNOWN_CONFIG_WRAPPERS.contains(&n));
+
+    if !is_known {
+        if let Some(name) = &callee_name {
+            warnings.push(format!(
+                "Config uses `{name}()` wrapper; only static literal properties can be extracted"
+            ));
+        } else {
+            warnings.push(
+                "Config uses a function call wrapper; only static literal properties can be extracted"
+                    .to_string(),
+            );
+        }
     }
 
-    // Look for the first object argument
+    // Look for the first object argument, or unwrap function/arrow arguments.
     for arg in &call.arguments {
         if let oxc_ast::ast::Argument::ObjectExpression(obj) = arg {
+            extract_object_expression("", obj, values, warnings);
+            return;
+        }
+        if let Some(obj) = try_unwrap_argument_to_object(arg) {
             extract_object_expression("", obj, values, warnings);
             return;
         }
     }
 
     warnings.push("Could not find an object literal argument in the wrapper call".to_string());
+}
+
+/// Try to unwrap a function/arrow argument to find the returned `ObjectExpression`.
+///
+/// Handles:
+/// - Arrow with expression body: `() => ({...})`
+/// - Arrow with block body: `() => { return {...}; }`
+/// - Function expression: `function() { return {...}; }`
+fn try_unwrap_argument_to_object<'a>(
+    arg: &'a oxc_ast::ast::Argument<'a>,
+) -> Option<&'a oxc_ast::ast::ObjectExpression<'a>> {
+    use oxc_ast::ast::{Argument, Expression, Statement};
+
+    match arg {
+        Argument::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                // () => ({...})
+                if let Some(Statement::ExpressionStatement(expr_stmt)) =
+                    arrow.body.statements.first()
+                    && let Expression::ObjectExpression(obj) = &expr_stmt.expression
+                {
+                    return Some(obj);
+                }
+            } else {
+                // () => { return {...}; }
+                return find_returned_object(&arrow.body.statements);
+            }
+        }
+        Argument::FunctionExpression(func) => {
+            // function() { return {...}; }
+            if let Some(body) = &func.body {
+                return find_returned_object(&body.statements);
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// Find the first `return <ObjectExpression>` in a statement list.
+fn find_returned_object<'a>(
+    stmts: &'a [oxc_ast::ast::Statement<'a>],
+) -> Option<&'a oxc_ast::ast::ObjectExpression<'a>> {
+    use oxc_ast::ast::{Expression, Statement};
+
+    for stmt in stmts {
+        if let Statement::ReturnStatement(ret) = stmt {
+            if let Some(Expression::ObjectExpression(obj)) = &ret.argument {
+                return Some(obj);
+            }
+            if let Some(Expression::ParenthesizedExpression(paren)) = &ret.argument
+                && let Expression::ObjectExpression(obj) = &paren.expression
+            {
+                return Some(obj);
+            }
+        }
+    }
+    None
 }
 
 /// Recursively extract properties from an object expression.
@@ -557,11 +699,60 @@ fn expression_to_config_value(
                 "undefined" => Ok(ConfigValueKind::String("undefined".to_string())),
                 "Infinity" => Ok(ConfigValueKind::Number(f64::INFINITY)),
                 "NaN" => Ok(ConfigValueKind::Number(f64::NAN)),
+                "__dirname" => Ok(ConfigValueKind::String("<__dirname>".to_string())),
                 _ => Err(format!("identifier `{name}`")),
             }
         }
+        Expression::CallExpression(call) => try_evaluate_call(call),
         _ => Err("dynamic expression".to_string()),
     }
+}
+
+/// Try to statically evaluate well-known call expressions:
+/// - `path.join(a, b)` / `path.resolve(a, b)` with string literal args
+/// - `require.resolve('pkg')` → string value
+fn try_evaluate_call(call: &oxc_ast::ast::CallExpression<'_>) -> Result<ConfigValueKind, String> {
+    use oxc_ast::ast::Expression;
+
+    if let Expression::StaticMemberExpression(member) = &call.callee {
+        let method = member.property.name.as_str();
+
+        // path.join(...) / path.resolve(...)
+        if let Expression::Identifier(obj) = &member.object {
+            if obj.name.as_str() == "path" && (method == "join" || method == "resolve") {
+                let mut segments = Vec::new();
+                for arg in &call.arguments {
+                    match arg {
+                        oxc_ast::ast::Argument::StringLiteral(lit) => {
+                            segments.push(lit.value.to_string());
+                        }
+                        oxc_ast::ast::Argument::Identifier(ident)
+                            if ident.name.as_str() == "__dirname" =>
+                        {
+                            segments.push("<__dirname>".to_string());
+                        }
+                        _ => {
+                            return Err(format!("path.{method}() with dynamic argument"));
+                        }
+                    }
+                }
+                return Ok(ConfigValueKind::String(segments.join("/")));
+            }
+
+            // require.resolve('pkg')
+            if obj.name.as_str() == "require"
+                && method == "resolve"
+                && let Some(oxc_ast::ast::Argument::StringLiteral(lit)) = call.arguments.first()
+            {
+                return Ok(ConfigValueKind::String(lit.value.to_string()));
+            }
+            if obj.name.as_str() == "require" && method == "resolve" {
+                return Err("require.resolve() with dynamic argument".to_string());
+            }
+        }
+    }
+
+    Err("unknown call expression".to_string())
 }
 
 /// Try to convert an `ArrayExpressionElement` (which inherits `Expression` variants)

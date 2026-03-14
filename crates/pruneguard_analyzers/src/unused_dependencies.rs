@@ -322,6 +322,10 @@ fn looks_like_npm_package(dep: &str) -> bool {
     if dep.starts_with('#') {
         return false;
     }
+    // Path aliases (@/components, ~/utils) are local file references.
+    if dep.starts_with("@/") || dep.starts_with("~/") {
+        return false;
+    }
     // Relative paths are not packages.
     if dep.starts_with('.') || dep.starts_with('/') {
         return false;

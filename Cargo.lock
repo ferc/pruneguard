@@ -1471,6 +1471,7 @@ dependencies = [
  "oxc_parser",
  "oxc_span",
  "pruneguard_resolver",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_yaml",
