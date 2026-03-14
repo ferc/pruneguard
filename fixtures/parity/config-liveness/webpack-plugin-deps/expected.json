@@ -1,0 +1,11 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": [
+    "unused-dependency:html-webpack-plugin",
+    "unused-dependency:mini-css-extract-plugin",
+    "unused-dependency:crypto-browserify",
+    "unused-dependency:stream-browserify"
+  ]
+}

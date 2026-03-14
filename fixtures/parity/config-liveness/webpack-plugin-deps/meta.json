@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "webpack-plugin-deps",
+  "reference_tool": "knip",
+  "description": "Webpack plugins (html-webpack-plugin, mini-css-extract-plugin) and Node polyfills (crypto-browserify) referenced in config should not be flagged as unused dependencies"
+}

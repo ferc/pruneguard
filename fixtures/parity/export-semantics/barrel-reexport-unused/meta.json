@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "barrel-reexport-unused",
+  "reference_tool": "knip",
+  "description": "When an export is unused, its re-export from a barrel index file should also be flagged as unused"
+}

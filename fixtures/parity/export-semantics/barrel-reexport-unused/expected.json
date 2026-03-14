@@ -1,0 +1,12 @@
+{
+  "reachable_files": ["./src/index.ts", "./src/used.ts", "./src/unused.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-export:src/unused.ts#unusedFn",
+    "unused-export:src/index.ts#unusedFn"
+  ],
+  "expected_no_findings": [
+    "unused-export:src/used.ts#usedFn",
+    "unused-export:src/index.ts#usedFn"
+  ]
+}

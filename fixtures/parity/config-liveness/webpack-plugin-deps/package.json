@@ -1,0 +1,11 @@
+{
+  "name": "parity-webpack-plugin-deps",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0",
+    "html-webpack-plugin": "^5.0.0",
+    "mini-css-extract-plugin": "^2.0.0",
+    "crypto-browserify": "^3.0.0",
+    "stream-browserify": "^3.0.0"
+  }
+}
