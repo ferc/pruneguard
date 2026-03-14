@@ -1,0 +1,7 @@
+{
+  "name": "parity-jest-module-name-mapper",
+  "private": true,
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}

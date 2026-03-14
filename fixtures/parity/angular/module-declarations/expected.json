@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/app/app.module.ts", "./src/app/pipes/date.pipe.ts", "./src/app/directives/highlight.directive.ts"],
+  "unreachable_files": ["./src/app/pipes/unused.pipe.ts"],
+  "expected_findings": ["unused-file:./src/app/pipes/unused.pipe.ts"],
+  "expected_no_findings": ["unused-file:./src/app/pipes/date.pipe.ts", "unused-file:./src/app/directives/highlight.directive.ts"]
+}

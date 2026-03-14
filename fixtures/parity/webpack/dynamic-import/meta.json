@@ -1,0 +1,6 @@
+{
+  "family": "webpack",
+  "name": "dynamic-import",
+  "reference_tool": "dependency-cruiser",
+  "description": "Webpack magic comments (webpackChunkName, webpackMode) in dynamic imports should still resolve the imported module"
+}

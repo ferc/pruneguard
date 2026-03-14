@@ -1,0 +1,7 @@
+{
+  "name": "parity-astro-content-config",
+  "private": true,
+  "dependencies": {
+    "astro": "^4.0.0"
+  }
+}

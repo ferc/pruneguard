@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/entry-server.ts", "./src/render.ts"],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": ["unused-file:./src/orphan.ts"],
+  "expected_no_findings": ["unused-file:./src/entry-server.ts", "unused-file:./src/render.ts"]
+}

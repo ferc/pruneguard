@@ -1,0 +1,6 @@
+{
+  "family": "playwright",
+  "name": "global-setup",
+  "reference_tool": "knip",
+  "description": "Playwright globalSetup and globalTeardown files are entrypoints"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "next",
+  "name": "api-routes",
+  "reference_tool": "knip",
+  "description": "Next.js API route handlers in pages/api/ and app/api/ are entrypoints"
+}

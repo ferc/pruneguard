@@ -1,0 +1,6 @@
+{
+  "family": "vite",
+  "name": "plugin-entry",
+  "reference_tool": "knip",
+  "description": "Vite plugins referenced in vite.config.ts are entrypoints even when not directly imported by application code"
+}

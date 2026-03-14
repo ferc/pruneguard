@@ -1,0 +1,9 @@
+{
+  "name": "parity-nx-generator-files",
+  "private": true,
+  "devDependencies": {
+    "nx": "^17.0.0",
+    "@nx/devkit": "^17.0.0"
+  },
+  "generators": "./generators.json"
+}

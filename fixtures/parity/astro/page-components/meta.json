@@ -1,0 +1,6 @@
+{
+  "family": "astro",
+  "name": "page-components",
+  "reference_tool": "knip",
+  "description": "Astro pages/ directory files (.astro, .md) are entrypoints by convention"
+}

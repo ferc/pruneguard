@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/app/app.component.ts", "./src/app/app.component.html", "./src/app/header/header.component.ts"],
+  "unreachable_files": ["./src/app/orphan/orphan.component.ts"],
+  "expected_findings": ["unused-file:./src/app/orphan/orphan.component.ts"],
+  "expected_no_findings": ["unused-file:./src/app/app.component.ts", "unused-file:./src/app/app.component.html"]
+}

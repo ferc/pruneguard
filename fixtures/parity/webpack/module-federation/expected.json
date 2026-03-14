@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/Button.tsx", "./src/Header.tsx"],
+  "unreachable_files": ["./src/InternalWidget.tsx"],
+  "expected_findings": ["unused-file:./src/InternalWidget.tsx"],
+  "expected_no_findings": ["unused-file:./src/Button.tsx", "unused-file:./src/Header.tsx"]
+}

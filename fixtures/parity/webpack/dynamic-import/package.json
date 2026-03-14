@@ -1,0 +1,7 @@
+{
+  "name": "parity-webpack-dynamic-import",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0"
+  }
+}

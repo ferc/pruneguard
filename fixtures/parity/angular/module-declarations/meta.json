@@ -1,0 +1,6 @@
+{
+  "family": "angular",
+  "name": "module-declarations",
+  "reference_tool": "knip",
+  "description": "Angular NgModule declarations are entrypoints that should not be flagged as unused"
+}

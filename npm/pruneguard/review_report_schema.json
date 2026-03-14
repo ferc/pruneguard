@@ -216,6 +216,13 @@
             }
           ]
         },
+        "confidenceReason": {
+          "description": "Human-readable reason for the confidence level assigned to this finding.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "evidence": {
           "description": "Evidence supporting the finding.",
           "type": "array",
@@ -246,6 +253,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "precisionSource": {
+          "description": "Source of precision for this finding's evidence.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PrecisionSource"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "primaryActionKind": {
@@ -305,16 +323,34 @@
       }
     },
     "FindingCategory": {
-      "type": "string",
-      "enum": [
-        "unused-export",
-        "unused-file",
-        "unused-package",
-        "unused-dependency",
-        "cycle",
-        "boundary-violation",
-        "ownership-violation",
-        "impact"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unused-export",
+            "unused-file",
+            "unused-package",
+            "unused-dependency",
+            "cycle",
+            "boundary-violation",
+            "ownership-violation",
+            "impact"
+          ]
+        },
+        {
+          "description": "An exported class member, enum variant, or namespace member is unused.",
+          "type": "string",
+          "enum": [
+            "unused-member"
+          ]
+        },
+        {
+          "description": "The same symbol is exported from multiple paths (barrel re-export collision).",
+          "type": "string",
+          "enum": [
+            "duplicate-export"
+          ]
+        }
       ]
     },
     "FindingConfidence": {
@@ -331,6 +367,39 @@
         "error",
         "warn",
         "info"
+      ]
+    },
+    "PrecisionSource": {
+      "description": "Source of the precision for a finding's evidence.",
+      "oneOf": [
+        {
+          "description": "Rust static analysis only.",
+          "type": "string",
+          "enum": [
+            "rust-static"
+          ]
+        },
+        {
+          "description": "Derived from framework-generated source maps or .d.ts files.",
+          "type": "string",
+          "enum": [
+            "generated-map"
+          ]
+        },
+        {
+          "description": "Derived from framework config file extraction.",
+          "type": "string",
+          "enum": [
+            "config-derived"
+          ]
+        },
+        {
+          "description": "Refined by the semantic helper binary.",
+          "type": "string",
+          "enum": [
+            "semantic-helper"
+          ]
+        }
       ]
     },
     "RecommendedAction": {

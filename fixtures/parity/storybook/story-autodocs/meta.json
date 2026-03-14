@@ -1,0 +1,6 @@
+{
+  "family": "storybook",
+  "name": "story-autodocs",
+  "reference_tool": "knip",
+  "description": "Storybook story files with autodocs tag and their referenced components are entrypoints"
+}

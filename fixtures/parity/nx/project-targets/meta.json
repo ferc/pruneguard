@@ -1,0 +1,6 @@
+{
+  "family": "nx",
+  "name": "project-targets",
+  "reference_tool": "knip",
+  "description": "Nx project.json targets reference entrypoints that should be considered reachable"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "nx",
+  "name": "generator-files",
+  "reference_tool": "knip",
+  "description": "Nx generator index.ts files under generators/ are entrypoints"
+}

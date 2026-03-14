@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./composables/useAuth.ts", "./composables/useFetch.ts"],
+  "unreachable_files": ["./src/orphan-util.ts"],
+  "expected_findings": ["unused-file:./src/orphan-util.ts"],
+  "expected_no_findings": ["unused-file:./composables/useAuth.ts", "unused-file:./composables/useFetch.ts"]
+}

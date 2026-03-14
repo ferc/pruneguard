@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./server/api/users.get.ts", "./server/routes/health.ts", "./server/utils/db.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./server/api/users.get.ts", "unused-file:./server/routes/health.ts"]
+}

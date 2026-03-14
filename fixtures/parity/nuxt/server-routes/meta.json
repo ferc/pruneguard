@@ -1,0 +1,6 @@
+{
+  "family": "nuxt",
+  "name": "server-routes",
+  "reference_tool": "knip",
+  "description": "Nuxt server/api/ and server/routes/ convention files are entrypoints"
+}

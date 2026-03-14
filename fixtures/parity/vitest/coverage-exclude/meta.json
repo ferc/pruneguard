@@ -1,0 +1,6 @@
+{
+  "family": "vitest",
+  "name": "coverage-exclude",
+  "reference_tool": "knip",
+  "description": "Files matching Vitest coverage.exclude patterns should not trigger unused-file warnings"
+}

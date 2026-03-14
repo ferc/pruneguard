@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/transforms/svg-transform.js"],
+  "unreachable_files": ["./src/transforms/unused-transform.js"],
+  "expected_findings": ["unused-file:./src/transforms/unused-transform.js"],
+  "expected_no_findings": ["unused-file:./src/transforms/svg-transform.js"]
+}

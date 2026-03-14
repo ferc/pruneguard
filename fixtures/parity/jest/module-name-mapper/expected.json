@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/mocks/api-client.ts", "./src/api-client.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/mocks/api-client.ts", "unused-file:./src/api-client.ts"]
+}

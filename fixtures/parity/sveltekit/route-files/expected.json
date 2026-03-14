@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/routes/+page.svelte", "./src/routes/+layout.svelte", "./src/routes/api/data/+server.ts", "./src/lib/utils.ts"],
+  "unreachable_files": ["./src/lib/orphan.ts"],
+  "expected_findings": ["unused-file:./src/lib/orphan.ts"],
+  "expected_no_findings": ["unused-file:./src/routes/+page.svelte", "unused-file:./src/routes/+layout.svelte", "unused-file:./src/routes/api/data/+server.ts"]
+}

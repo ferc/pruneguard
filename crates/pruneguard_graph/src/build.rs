@@ -31,6 +31,8 @@ use pruneguard_resolver::{
     ModuleResolver, RESOLVER_LOGIC_VERSION, ResolutionOutcome, ResolvedEdge, ResolvedEdgeKind,
     dependency_name,
 };
+use pruneguard_semantic_client::{HelperDiscovery, SemanticClient, SemanticClientConfig};
+use pruneguard_semantic_protocol::{QueryBatch, QueryKind, SemanticQuery};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{MemberAccessKind, MemberNodeKind, ModuleEdge, ModuleGraph, SymbolGraph};
@@ -222,6 +224,16 @@ pub fn build_graph_with_options(
                 ));
             }
         }
+    }
+
+    // Wire generated aliases (e.g. Nuxt auto-imported composables) as resolver
+    // aliases so that usages of framework-generated symbols create real edges.
+    for ga in &config_inputs.generated_aliases {
+        all_aliases.push((
+            ga.alias.clone(),
+            ga.target.clone(),
+            pruneguard_resolver::AliasOrigin::FrameworkGenerated,
+        ));
     }
 
     if !all_aliases.is_empty() {
@@ -529,6 +541,166 @@ pub fn build_graph_with_options(
     // member references, and same-file references).
     symbol_graph.propagate_liveness();
 
+    // --- Semantic refinement phase ---
+    // Try to discover and spawn the semantic helper to refine dead-code findings.
+    let mut semantic_used = false;
+    let mut semantic_wall_ms: Option<u64> = None;
+    let mut semantic_projects: Option<usize> = None;
+    let mut semantic_files: Option<usize> = None;
+    let mut semantic_queries_count: Option<usize> = None;
+    let mut semantic_skipped_reason: Option<String> = None;
+    let mut semantic_mode: Option<String> = None;
+
+    let semantic_started = Instant::now();
+    match SemanticClient::discover_binary(&discovery.project_root) {
+        HelperDiscovery::Found(binary_path) => {
+            // Collect tsconfig paths: prefer explicit config, fall back to auto-discovery.
+            let tsconfig_paths: Vec<String> = if config.resolver.tsconfig.is_empty() {
+                // Auto-discover tsconfig.json files from the project root.
+                let mut paths = Vec::new();
+                let root_tsconfig = discovery.project_root.join("tsconfig.json");
+                if root_tsconfig.exists() {
+                    paths.push(root_tsconfig.to_string_lossy().to_string());
+                }
+                for workspace in discovery.workspaces.values() {
+                    let ws_tsconfig = workspace.root.join("tsconfig.json");
+                    if ws_tsconfig.exists() && ws_tsconfig != root_tsconfig {
+                        paths.push(ws_tsconfig.to_string_lossy().to_string());
+                    }
+                }
+                paths
+            } else {
+                config
+                    .resolver
+                    .tsconfig
+                    .iter()
+                    .map(|p| {
+                        let path = Path::new(p);
+                        if path.is_absolute() {
+                            p.clone()
+                        } else {
+                            discovery.project_root.join(p).to_string_lossy().to_string()
+                        }
+                    })
+                    .collect()
+            };
+
+            match SemanticClient::spawn(
+                &binary_path,
+                &discovery.project_root.to_string_lossy(),
+                tsconfig_paths.clone(),
+                SemanticClientConfig::default(),
+            ) {
+                Ok(mut client) => {
+                    semantic_mode = Some("auto".to_string());
+                    let ready = client.ready_info();
+                    semantic_projects = Some(ready.projects_loaded);
+                    semantic_files = Some(ready.files_indexed);
+
+                    if ready.projects_loaded > 0 {
+                        semantic_used = true;
+
+                        // Build reverse map: FileId -> absolute path string.
+                        let file_id_to_path: FxHashMap<crate::ids::FileId, String> = file_nodes
+                            .iter()
+                            .map(|(path, (file_id, _))| {
+                                (*file_id, path.to_string_lossy().to_string())
+                            })
+                            .collect();
+
+                        // Query the semantic helper for exports that are not live.
+                        // Walk the symbol graph to find exports with is_live == false,
+                        // then ask the semantic helper to verify they're truly unreferenced.
+                        let mut query_id = 0u64;
+                        let mut queries = Vec::new();
+
+                        for ((file_id, name), export) in &symbol_graph.exports {
+                            if !export.is_live
+                                && let Some(file_path) = file_id_to_path.get(file_id)
+                            {
+                                queries.push(SemanticQuery {
+                                    id: query_id,
+                                    kind: QueryKind::FindExportReferences,
+                                    file_path: file_path.clone(),
+                                    export_name: Some(name.to_string()),
+                                    parent_name: None,
+                                    member_name: None,
+                                });
+                                query_id += 1;
+                            }
+                        }
+
+                        tracing::debug!(
+                            queries = queries.len(),
+                            "sending semantic refinement queries"
+                        );
+
+                        // Build a lookup so we can map query IDs back to their
+                        // (FileId, export name) for marking exports live.
+                        let query_index: Vec<(crate::ids::FileId, CompactString)> = queries
+                            .iter()
+                            .filter_map(|q| {
+                                let name = q.export_name.as_ref()?;
+                                let fid =
+                                    file_nodes.get(Path::new(&q.file_path)).map(|(fid, _)| *fid)?;
+                                Some((fid, CompactString::new(name)))
+                            })
+                            .collect();
+
+                        // Send queries in batches.
+                        let batch_size = client.ready_info().files_indexed.clamp(1, 128);
+                        for chunk in queries.chunks(batch_size) {
+                            let batch = QueryBatch {
+                                queries: chunk.to_vec(),
+                                tsconfig_path: tsconfig_paths.first().cloned().unwrap_or_default(),
+                            };
+                            match client.query(&batch) {
+                                Ok(response) => {
+                                    for result in &response.results {
+                                        if result.success && result.total_references > 0 {
+                                            // This export has references the syntactic
+                                            // analysis missed — mark it as live.
+                                            #[allow(clippy::cast_possible_truncation)]
+                                            let idx = result.id as usize;
+                                            if let Some((fid, export_name)) = query_index.get(idx) {
+                                                symbol_graph.mark_live(*fid, export_name);
+                                                tracing::debug!(
+                                                    export = %export_name,
+                                                    refs = result.total_references,
+                                                    "semantic helper found references, marking live"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("semantic query batch failed: {e}");
+                                    break;
+                                }
+                            }
+                        }
+
+                        semantic_queries_count = Some(client.total_queries());
+                        #[allow(clippy::cast_possible_truncation)]
+                        {
+                            semantic_wall_ms = Some(semantic_started.elapsed().as_millis() as u64);
+                        }
+                    } else {
+                        semantic_skipped_reason = Some("no TypeScript projects loaded".to_string());
+                    }
+
+                    let _ = client.shutdown();
+                }
+                Err(e) => {
+                    semantic_skipped_reason = Some(format!("spawn failed: {e}"));
+                }
+            }
+        }
+        HelperDiscovery::NotFound(reason) => {
+            semantic_skipped_reason = Some(reason);
+        }
+    }
+
     let mut files_resolved = 0;
     let mut unresolved_specifiers = 0;
     let mut resolved_via_exports = 0;
@@ -622,13 +794,13 @@ pub fn build_graph_with_options(
         unsupported_frameworks: Vec::new(),
         external_parity_pct: None,
         external_parity: None,
-        semantic_mode: None,
-        semantic_used: false,
-        semantic_wall_ms: None,
-        semantic_projects: None,
-        semantic_files: None,
-        semantic_queries: None,
-        semantic_skipped_reason: None,
+        semantic_mode,
+        semantic_used,
+        semantic_wall_ms,
+        semantic_projects,
+        semantic_files,
+        semantic_queries: semantic_queries_count,
+        semantic_skipped_reason,
         replacement_score: None,
         replacement_family_scores: Vec::new(),
     };

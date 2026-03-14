@@ -1,0 +1,7 @@
+{
+  "name": "parity-nx-project-targets",
+  "private": true,
+  "devDependencies": {
+    "nx": "^17.0.0"
+  }
+}

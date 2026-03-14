@@ -1,0 +1,6 @@
+{
+  "family": "remix",
+  "name": "root-file",
+  "reference_tool": "knip",
+  "description": "Remix app/root.tsx is the root entrypoint and its imports are reachable"
+}

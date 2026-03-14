@@ -1,0 +1,7 @@
+{
+  "name": "parity-nuxt-server-routes",
+  "private": true,
+  "dependencies": {
+    "nuxt": "^3.0.0"
+  }
+}

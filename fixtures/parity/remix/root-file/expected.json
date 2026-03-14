@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./app/root.tsx", "./app/components/Layout.tsx"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./app/root.tsx", "unused-file:./app/components/Layout.tsx"]
+}

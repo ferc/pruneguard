@@ -1,0 +1,6 @@
+{
+  "family": "vite",
+  "name": "ssr-entry",
+  "reference_tool": "knip",
+  "description": "Vite SSR entry point configured via build.ssr is an entrypoint even without direct imports"
+}

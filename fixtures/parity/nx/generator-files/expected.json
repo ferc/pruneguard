@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./generators/component/index.ts", "./generators/component/schema.ts"],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": ["unused-file:./src/orphan.ts"],
+  "expected_no_findings": ["unused-file:./generators/component/index.ts", "unused-file:./generators/component/schema.ts"]
+}

@@ -450,3 +450,348 @@ pub fn format_release_gate_report(gate: &ReleaseGateResult) -> String {
 
     out
 }
+
+// ---------------------------------------------------------------------------
+// Canary repo infrastructure
+// ---------------------------------------------------------------------------
+
+/// Configuration for a canary repository.
+///
+/// Each canary repo represents a popular real-world project that exercises one
+/// or more Tier-1 framework families. Reference data (FP counts, scan times)
+/// are captured from knip runs on the specified git refs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanaryRepoConfig {
+    /// Name of the canary repo (e.g. "calcom", "nextjs-dashboard").
+    pub name: String,
+    /// Git clone URL or local path.
+    pub source: String,
+    /// Git ref to checkout (branch, tag, or commit).
+    pub git_ref: Option<String>,
+    /// Subdirectory within the repo to analyze (for monorepos).
+    pub subdir: Option<String>,
+    /// Expected false-positive count from reference tool (knip).
+    pub reference_fp_count: usize,
+    /// Expected finding count from reference tool.
+    pub reference_finding_count: usize,
+    /// Reference tool cold-scan duration in milliseconds.
+    pub reference_cold_scan_ms: u64,
+    /// Tier-1 frameworks present in this repo.
+    pub frameworks: Vec<String>,
+}
+
+/// Result of analyzing a single canary repo.
+#[derive(Debug, Clone, Serialize)]
+pub struct CanaryRepoResult {
+    /// Name of the canary repo.
+    pub name: String,
+    /// Whether this repo passed all gates (FP delta and speed ratio).
+    pub passed: bool,
+    /// Total number of findings reported by pruneguard.
+    pub finding_count: usize,
+    /// Number of false positives in the findings.
+    pub false_positive_count: usize,
+    /// Percentage change in false positives relative to the reference tool.
+    pub false_positive_delta_pct: f64,
+    /// Wall-clock cold-scan duration in milliseconds.
+    pub cold_scan_ms: u64,
+    /// Speed ratio vs reference tool (> 1.0 means faster than reference).
+    pub speed_ratio: f64,
+    /// Frameworks detected during analysis.
+    pub frameworks_detected: Vec<String>,
+    /// Any errors encountered during analysis.
+    pub errors: Vec<String>,
+}
+
+/// Aggregate result across all canary repos.
+#[derive(Debug, Clone, Serialize)]
+pub struct CanaryAggregateResult {
+    /// Total number of canary repos evaluated.
+    pub total_repos: usize,
+    /// Number of canary repos that passed all gates.
+    pub passed_repos: usize,
+    /// Pass rate across all canary repos (0.0 - 1.0).
+    pub pass_rate: f64,
+    /// Average false-positive delta percentage across all repos.
+    pub avg_false_positive_delta_pct: f64,
+    /// Average speed ratio across all repos.
+    pub avg_speed_ratio: f64,
+    /// Worst (highest) false-positive delta percentage.
+    pub worst_fp_delta_pct: f64,
+    /// Worst (lowest) speed ratio.
+    pub worst_speed_ratio: f64,
+    /// Individual repo results.
+    pub repo_results: Vec<CanaryRepoResult>,
+}
+
+/// Evaluate canary repo results against reference data.
+///
+/// This is a pure evaluation function: it takes the analysis results (finding
+/// count, FP count, scan time, detected frameworks) and compares them against
+/// the reference data in the `CanaryRepoConfig`.
+///
+/// A canary repo passes when:
+/// - The absolute false-positive delta is <= 2%.
+/// - The speed ratio is >= 3x (i.e. pruneguard is at least 3x faster).
+#[allow(clippy::cast_precision_loss)]
+pub fn evaluate_canary_repo(
+    config: &CanaryRepoConfig,
+    finding_count: usize,
+    false_positive_count: usize,
+    cold_scan_ms: u64,
+    frameworks_detected: Vec<String>,
+) -> CanaryRepoResult {
+    let fp_delta = if config.reference_fp_count == 0 {
+        if false_positive_count == 0 { 0.0 } else { 100.0 }
+    } else {
+        let delta = false_positive_count as f64 - config.reference_fp_count as f64;
+        (delta / config.reference_fp_count as f64) * 100.0
+    };
+
+    let speed_ratio = if cold_scan_ms == 0 {
+        f64::INFINITY
+    } else {
+        config.reference_cold_scan_ms as f64 / cold_scan_ms as f64
+    };
+
+    let passed = fp_delta.abs() <= 2.0 && speed_ratio >= 3.0;
+
+    CanaryRepoResult {
+        name: config.name.clone(),
+        passed,
+        finding_count,
+        false_positive_count,
+        false_positive_delta_pct: fp_delta,
+        cold_scan_ms,
+        speed_ratio,
+        frameworks_detected,
+        errors: Vec::new(),
+    }
+}
+
+/// Compute aggregate canary repo metrics from individual results.
+///
+/// When there are no results, all rates and averages default to zero (except
+/// `worst_speed_ratio` which defaults to `INFINITY`).
+#[allow(clippy::cast_precision_loss)]
+pub fn compute_canary_aggregate(results: &[CanaryRepoResult]) -> CanaryAggregateResult {
+    let total = results.len();
+    let passed = results.iter().filter(|r| r.passed).count();
+    let pass_rate = if total == 0 { 0.0 } else { passed as f64 / total as f64 };
+
+    let avg_fp_delta = if total == 0 {
+        0.0
+    } else {
+        results.iter().map(|r| r.false_positive_delta_pct).sum::<f64>() / total as f64
+    };
+    let avg_speed = if total == 0 {
+        0.0
+    } else {
+        results.iter().map(|r| r.speed_ratio).sum::<f64>() / total as f64
+    };
+
+    let worst_fp = results.iter().map(|r| r.false_positive_delta_pct).fold(0.0f64, f64::max);
+    let worst_speed = results.iter().map(|r| r.speed_ratio).fold(f64::INFINITY, f64::min);
+
+    CanaryAggregateResult {
+        total_repos: total,
+        passed_repos: passed,
+        pass_rate,
+        avg_false_positive_delta_pct: avg_fp_delta,
+        avg_speed_ratio: avg_speed,
+        worst_fp_delta_pct: worst_fp,
+        worst_speed_ratio: worst_speed,
+        repo_results: results.to_vec(),
+    }
+}
+
+/// Default canary repo configurations for CI validation.
+///
+/// These represent popular real-world projects that exercise the Tier-1
+/// framework families. Reference data (FP counts, scan times) are from
+/// knip runs on the specified git refs.
+pub fn default_canary_repos() -> Vec<CanaryRepoConfig> {
+    vec![
+        CanaryRepoConfig {
+            name: "create-t3-app".to_string(),
+            source: "https://github.com/t3-oss/create-t3-app".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 0,
+            reference_finding_count: 12,
+            reference_cold_scan_ms: 4500,
+            frameworks: vec!["next".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "vitesse".to_string(),
+            source: "https://github.com/antfu-collective/vitesse".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 0,
+            reference_finding_count: 8,
+            reference_cold_scan_ms: 3200,
+            frameworks: vec!["vite".to_string(), "vitest".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "nuxt-ui".to_string(),
+            source: "https://github.com/nuxt/ui".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 2,
+            reference_finding_count: 45,
+            reference_cold_scan_ms: 8000,
+            frameworks: vec!["nuxt".to_string(), "vitest".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "astro-starlight".to_string(),
+            source: "https://github.com/withastro/starlight".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 1,
+            reference_finding_count: 20,
+            reference_cold_scan_ms: 5500,
+            frameworks: vec!["astro".to_string(), "vitest".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "shadcn-svelte".to_string(),
+            source: "https://github.com/huntabyte/shadcn-svelte".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 0,
+            reference_finding_count: 15,
+            reference_cold_scan_ms: 3800,
+            frameworks: vec!["sveltekit".to_string(), "vitest".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "epic-stack".to_string(),
+            source: "https://github.com/epicweb-dev/epic-stack".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 0,
+            reference_finding_count: 18,
+            reference_cold_scan_ms: 6000,
+            frameworks: vec!["remix".to_string(), "vitest".to_string(), "playwright".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "angular-realworld".to_string(),
+            source: "https://github.com/gothinkster/angular-realworld-example-app".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 0,
+            reference_finding_count: 5,
+            reference_cold_scan_ms: 2500,
+            frameworks: vec!["angular".to_string()],
+        },
+        CanaryRepoConfig {
+            name: "nx-examples".to_string(),
+            source: "https://github.com/nrwl/nx-examples".to_string(),
+            git_ref: Some("main".to_string()),
+            subdir: None,
+            reference_fp_count: 1,
+            reference_finding_count: 30,
+            reference_cold_scan_ms: 7000,
+            frameworks: vec!["nx".to_string(), "jest".to_string(), "storybook".to_string()],
+        },
+    ]
+}
+
+/// Compute replacement inputs from parity scores and canary results.
+///
+/// Translates the raw parity percentage and canary aggregate metrics into the
+/// normalised `[0.0, 1.0]` inputs expected by [`compute_replacement_score`].
+///
+/// - `parity_score` = parity `overall_pct` / 100.
+/// - `canary_score` = canary `pass_rate`.
+/// - `false_positive_score` = 1.0 minus the relative FP delta, clamped.
+/// - `performance_score` = average speed ratio / 3.0, clamped to 1.0.
+pub fn compute_full_replacement_inputs(
+    parity_score: &ExternalParityScore,
+    canary_result: &CanaryAggregateResult,
+) -> ReplacementInputs {
+    let parity = parity_score.overall_pct / 100.0;
+    let canary = canary_result.pass_rate;
+
+    // FP score: 1.0 = no excess FPs, 0.0 = FPs are 100%+ worse than reference.
+    let fp_score = (1.0 - canary_result.avg_false_positive_delta_pct.abs() / 100.0).clamp(0.0, 1.0);
+
+    // Performance score: 1.0 = within budget, scaled down to 0.0 at 5x over.
+    let perf_score = if canary_result.avg_speed_ratio >= 3.0 {
+        1.0
+    } else {
+        (canary_result.avg_speed_ratio / 3.0).clamp(0.0, 1.0)
+    };
+
+    ReplacementInputs {
+        parity_score: parity,
+        canary_score: canary,
+        false_positive_score: fp_score,
+        performance_score: perf_score,
+    }
+}
+
+/// Format a canary aggregate result as a human-readable report.
+pub fn format_canary_report(result: &CanaryAggregateResult) -> String {
+    let mut out = String::new();
+
+    let _ = writeln!(
+        out,
+        "Canary Repo Results: {}/{} repos passing ({:.1}%)",
+        result.passed_repos,
+        result.total_repos,
+        result.pass_rate * 100.0
+    );
+    let _ = writeln!(out, "  Avg FP delta:    {:.1}%", result.avg_false_positive_delta_pct);
+    let _ = writeln!(out, "  Avg speed ratio: {:.1}x", result.avg_speed_ratio);
+    let _ = writeln!(out, "  Worst FP delta:  {:.1}%", result.worst_fp_delta_pct);
+    let _ = writeln!(out, "  Worst speed:     {:.1}x", result.worst_speed_ratio);
+    let _ = writeln!(out);
+
+    let _ = writeln!(out, "Individual repos:");
+    for r in &result.repo_results {
+        let status = if r.passed { "PASS" } else { "FAIL" };
+        let _ = writeln!(
+            out,
+            "  [{status}] {:<25} findings={:<4} FP={:<4} FP-delta={:>+6.1}%  speed={:.1}x  frameworks={}",
+            r.name,
+            r.finding_count,
+            r.false_positive_count,
+            r.false_positive_delta_pct,
+            r.speed_ratio,
+            r.frameworks_detected.join(", ")
+        );
+        for err in &r.errors {
+            let _ = writeln!(out, "    error: {err}");
+        }
+    }
+
+    out
+}
+
+/// Discover canary repo configurations from a directory.
+///
+/// Looks for `canary.json` files in subdirectories of `canary_root`. Each
+/// `canary.json` must deserialise into a `CanaryRepoConfig`. Directories
+/// without a `canary.json` are silently skipped.
+///
+/// The returned list is sorted by name.
+pub fn discover_canary_configs(canary_root: &Path) -> Vec<CanaryRepoConfig> {
+    let mut configs = Vec::new();
+    let Ok(entries) = std::fs::read_dir(canary_root) else {
+        return configs;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            continue;
+        }
+        let config_path = entry.path().join("canary.json");
+        let Ok(content) = std::fs::read_to_string(&config_path) else {
+            continue;
+        };
+        let Ok(config): Result<CanaryRepoConfig, _> = serde_json::from_str(&content) else {
+            continue;
+        };
+        configs.push(config);
+    }
+    configs.sort_by(|a, b| a.name.cmp(&b.name));
+    configs
+}

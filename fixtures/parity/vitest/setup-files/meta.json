@@ -1,0 +1,6 @@
+{
+  "family": "vitest",
+  "name": "setup-files",
+  "reference_tool": "knip",
+  "description": "Vitest setupFiles entries in vitest.config.ts are entrypoints that should not be flagged as unused"
+}

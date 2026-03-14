@@ -27,6 +27,8 @@ pruneguard_report = { workspace = true }
 pruneguard_resolver = { workspace = true }
 pruneguard_cache = { workspace = true }
 pruneguard_config_readers = { workspace = true }
+pruneguard_semantic_client = { workspace = true }
+pruneguard_semantic_protocol = { workspace = true }
 
 rayon = { workspace = true }
 globset = { workspace = true }

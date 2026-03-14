@@ -1,0 +1,8 @@
+{
+  "name": "parity-angular-component-template",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "^17.0.0",
+    "@angular/platform-browser": "^17.0.0"
+  }
+}

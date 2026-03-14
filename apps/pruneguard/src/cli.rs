@@ -106,7 +106,7 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub enum BenchCommand {
     Replacement { corpus: Option<PathBuf> },
-    Performance { corpus: Option<PathBuf>, iterations: Option<usize> },
+    Performance { iterations: Option<usize>, corpus: Option<PathBuf> },
     Compare { tool: String, corpus: Option<PathBuf> },
 }
 
@@ -370,13 +370,13 @@ fn bench_replacement_subcommand() -> impl Parser<BenchCommand> {
 }
 
 fn bench_performance_subcommand() -> impl Parser<BenchCommand> {
-    let corpus =
-        positional::<PathBuf>("CORPUS").help("Path to benchmark corpus directory").optional();
     let iterations = long("iterations")
         .help("Number of iterations for statistical accuracy")
         .argument::<usize>("N")
         .optional();
-    construct!(BenchCommand::Performance { corpus, iterations })
+    let corpus =
+        positional::<PathBuf>("CORPUS").help("Path to benchmark corpus directory").optional();
+    construct!(BenchCommand::Performance { iterations, corpus })
 }
 
 fn bench_compare_subcommand() -> impl Parser<BenchCommand> {

@@ -1,0 +1,6 @@
+{
+  "family": "next",
+  "name": "app-router",
+  "reference_tool": "knip",
+  "description": "Next.js App Router convention files (page.tsx, layout.tsx, loading.tsx) in app/ are entrypoints"
+}

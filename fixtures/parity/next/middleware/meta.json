@@ -1,0 +1,6 @@
+{
+  "family": "next",
+  "name": "middleware",
+  "reference_tool": "knip",
+  "description": "Next.js middleware.ts at project root is an entrypoint"
+}

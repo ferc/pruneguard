@@ -1,0 +1,8 @@
+{
+  "generators": {
+    "component": {
+      "factory": "./generators/component/index",
+      "schema": "./generators/component/schema.json"
+    }
+  }
+}

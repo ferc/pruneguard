@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/pages/index.astro", "./src/pages/about.astro", "./src/components/Header.astro"],
+  "unreachable_files": ["./src/components/Unused.astro"],
+  "expected_findings": ["unused-file:./src/components/Unused.astro"],
+  "expected_no_findings": ["unused-file:./src/pages/index.astro", "unused-file:./src/pages/about.astro"]
+}

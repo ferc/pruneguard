@@ -1,0 +1,6 @@
+{
+  "family": "nuxt",
+  "name": "auto-imports",
+  "reference_tool": "knip",
+  "description": "Nuxt composables/ directory files are auto-imported and should not be flagged as unused"
+}

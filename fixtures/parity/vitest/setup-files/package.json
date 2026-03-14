@@ -1,0 +1,7 @@
+{
+  "name": "parity-vitest-setup-files",
+  "private": true,
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  }
+}

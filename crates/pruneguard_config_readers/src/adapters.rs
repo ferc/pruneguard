@@ -2798,6 +2798,864 @@ impl ConfigAdapter for PlaywrightCtAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// EslintAdapter
+// ---------------------------------------------------------------------------
+
+pub struct EslintAdapter;
+
+impl ConfigAdapter for EslintAdapter {
+    fn framework_name(&self) -> &'static str {
+        "eslint"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "eslint.config")
+            || filename_starts_with(&config.path, ".eslintrc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // plugins → externals (package names)
+        if let Some(kind) = find_value(values, "plugins") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // extends → externals (shared config packages)
+        if let Some(kind) = find_value(values, "extends") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // overrides → extract file patterns as test patterns
+        let override_entries = find_values_with_prefix(values, "overrides.");
+        for entry in &override_entries {
+            if std::path::Path::new(&entry.key)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("files"))
+            {
+                match &entry.value {
+                    ConfigValueKind::String(s) => {
+                        inputs.test_patterns.push(s.clone());
+                    }
+                    ConfigValueKind::Array(_) => {
+                        inputs.test_patterns.extend(strings_from_array(&entry.value));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // rules with custom file paths (e.g. local rule plugins)
+        let rule_entries = find_values_with_prefix(values, "rules.");
+        for entry in &rule_entries {
+            if let ConfigValueKind::String(s) = &entry.value
+                && (s.starts_with("./") || s.starts_with("../"))
+            {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // settings."import/resolver".alias → aliases
+        if let Some(ConfigValueKind::Object(pairs)) =
+            find_value(values, "settings.import/resolver.alias.map")
+        {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrettierAdapter
+// ---------------------------------------------------------------------------
+
+pub struct PrettierAdapter;
+
+impl ConfigAdapter for PrettierAdapter {
+    fn framework_name(&self) -> &'static str {
+        "prettier"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, ".prettierrc")
+            || filename_starts_with(&config.path, "prettier.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // plugins → externals (package names or local paths)
+        if let Some(kind) = find_value(values, "plugins") {
+            for s in strings_from_array(kind) {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.entrypoints.push(PathBuf::from(&s));
+                } else {
+                    inputs.externals.push(s);
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TailwindAdapter
+// ---------------------------------------------------------------------------
+
+pub struct TailwindAdapter;
+
+impl ConfigAdapter for TailwindAdapter {
+    fn framework_name(&self) -> &'static str {
+        "tailwindcss"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "tailwind.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // content → source roots (array of glob strings)
+        if let Some(kind) = find_value(values, "content") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        // content.files → source roots (v3 format)
+        if let Some(kind) = find_value(values, "content.files") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        // plugins → externals (package names or local paths)
+        if let Some(kind) = find_value(values, "plugins") {
+            for s in strings_from_array(kind) {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.entrypoints.push(PathBuf::from(&s));
+                } else {
+                    inputs.externals.push(s);
+                }
+            }
+        }
+
+        // presets → externals
+        if let Some(kind) = find_value(values, "presets") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PostcssAdapter
+// ---------------------------------------------------------------------------
+
+pub struct PostcssAdapter;
+
+impl ConfigAdapter for PostcssAdapter {
+    fn framework_name(&self) -> &'static str {
+        "postcss"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "postcss.config")
+            || filename_starts_with(&config.path, ".postcssrc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // plugins → externals (when keys of an object or array entries)
+        if let Some(kind) = find_value(values, "plugins") {
+            match kind {
+                ConfigValueKind::Object(pairs) => {
+                    for (name, _) in pairs {
+                        inputs.externals.push(name.clone());
+                    }
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.externals.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // Flat keys: plugins.<name> → externals
+        let plugin_entries = find_values_with_prefix(values, "plugins.");
+        for entry in plugin_entries {
+            let plugin_name = entry.key.strip_prefix("plugins.").unwrap_or(&entry.key);
+            // Only top-level plugin keys, not nested config
+            if !plugin_name.contains('.') {
+                inputs.externals.push(plugin_name.to_string());
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TsupAdapter
+// ---------------------------------------------------------------------------
+
+pub struct TsupAdapter;
+
+impl ConfigAdapter for TsupAdapter {
+    fn framework_name(&self) -> &'static str {
+        "tsup"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "tsup.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // entry → entrypoints (string or array or object)
+        if let Some(kind) = find_value(values, "entry") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+                ConfigValueKind::Array(_) => {
+                    for s in strings_from_array(kind) {
+                        inputs.entrypoints.push(PathBuf::from(s));
+                    }
+                }
+                ConfigValueKind::Object(pairs) => {
+                    for (_, v) in pairs {
+                        if let ConfigValueKind::String(s) = v {
+                            inputs.entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let entry_entries = find_values_with_prefix(values, "entry.");
+        for entry in entry_entries {
+            if let ConfigValueKind::String(s) = &entry.value {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // external → externals
+        if let Some(kind) = find_value(values, "external") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // noExternal → skip (inverse of external, not useful here)
+
+        // outDir → ignore_patterns
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "outDir") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EsbuildAdapter
+// ---------------------------------------------------------------------------
+
+pub struct EsbuildAdapter;
+
+impl ConfigAdapter for EsbuildAdapter {
+    fn framework_name(&self) -> &'static str {
+        "esbuild"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "esbuild.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // entryPoints → entrypoints (array of strings or object)
+        if let Some(kind) = find_value(values, "entryPoints") {
+            match kind {
+                ConfigValueKind::Array(_) => {
+                    for s in strings_from_array(kind) {
+                        inputs.entrypoints.push(PathBuf::from(s));
+                    }
+                }
+                ConfigValueKind::Object(pairs) => {
+                    for (_, v) in pairs {
+                        if let ConfigValueKind::String(s) = v {
+                            inputs.entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // external → externals
+        if let Some(kind) = find_value(values, "external") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // alias → aliases
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "alias") {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::String(target) = value {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        let alias_entries = find_values_with_prefix(values, "alias.");
+        for entry in alias_entries {
+            let alias_key = entry.key.strip_prefix("alias.").unwrap_or(&entry.key);
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.aliases.push(AliasEntry {
+                    pattern: alias_key.to_string(),
+                    target: target.clone(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // outdir → ignore_patterns
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "outdir") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "outfile") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CommitlintAdapter
+// ---------------------------------------------------------------------------
+
+pub struct CommitlintAdapter;
+
+impl ConfigAdapter for CommitlintAdapter {
+    fn framework_name(&self) -> &'static str {
+        "commitlint"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "commitlint.config")
+            || filename_starts_with(&config.path, ".commitlintrc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // extends → externals (shared config packages)
+        if let Some(kind) = find_value(values, "extends") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // plugins → externals (or local paths)
+        if let Some(kind) = find_value(values, "plugins") {
+            for s in strings_from_array(kind) {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.entrypoints.push(PathBuf::from(&s));
+                } else {
+                    inputs.externals.push(s);
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LintStagedAdapter
+// ---------------------------------------------------------------------------
+
+pub struct LintStagedAdapter;
+
+impl ConfigAdapter for LintStagedAdapter {
+    fn framework_name(&self) -> &'static str {
+        "lint-staged"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "lint-staged.config")
+            || filename_starts_with(&config.path, ".lintstagedrc")
+    }
+
+    fn extract(&self, _config: &ConfigReadResult) -> ConfigInputs {
+        // lint-staged config doesn't expose useful path information for
+        // dead-code analysis — the config file itself is the entrypoint.
+        ConfigInputs { framework: Some(self.framework_name().to_string()), ..Default::default() }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HuskyAdapter
+// ---------------------------------------------------------------------------
+
+pub struct HuskyAdapter;
+
+impl ConfigAdapter for HuskyAdapter {
+    fn framework_name(&self) -> &'static str {
+        "husky"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        path_contains_dir(&config.path, ".husky")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // The hook scripts themselves are entrypoints.
+        inputs.entrypoints.push(config.path.clone());
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CypressAdapter
+// ---------------------------------------------------------------------------
+
+pub struct CypressAdapter;
+
+impl ConfigAdapter for CypressAdapter {
+    fn framework_name(&self) -> &'static str {
+        "cypress"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "cypress.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // e2e.specPattern → test patterns
+        if let Some(kind) = find_value(values, "e2e.specPattern") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.test_patterns.push(s.clone());
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.test_patterns.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // component.specPattern → test patterns
+        if let Some(kind) = find_value(values, "component.specPattern") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.test_patterns.push(s.clone());
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.test_patterns.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // e2e.supportFile → entrypoint
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "e2e.supportFile") {
+            inputs.setup_files.push(PathBuf::from(s));
+        }
+
+        // component.supportFile → entrypoint
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "component.supportFile") {
+            inputs.setup_files.push(PathBuf::from(s));
+        }
+
+        // e2e.excludeSpecPattern → ignore patterns
+        if let Some(kind) = find_value(values, "e2e.excludeSpecPattern") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.ignore_patterns.push(s.clone());
+                }
+                ConfigValueKind::Array(_) => {
+                    inputs.ignore_patterns.extend(strings_from_array(kind));
+                }
+                _ => {}
+            }
+        }
+
+        // fixturesFolder → source_roots
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "fixturesFolder") {
+            inputs.source_roots.push(PathBuf::from(s));
+        }
+
+        // screenshotsFolder, videosFolder → ignore_patterns
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "screenshotsFolder") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "videosFolder") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ElectronAdapter
+// ---------------------------------------------------------------------------
+
+pub struct ElectronAdapter;
+
+impl ConfigAdapter for ElectronAdapter {
+    fn framework_name(&self) -> &'static str {
+        "electron"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // Electron configs are typically in package.json (with "main" pointing
+        // to electron entry) or electron-builder/forge config files.
+        filename_starts_with(&config.path, "electron.")
+            || filename_starts_with(&config.path, "electron-builder")
+            || filename_starts_with(&config.path, "forge.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // main → runtime entrypoint (main process entry)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "main") {
+            inputs.runtime_entrypoints.push(PathBuf::from(s));
+        }
+
+        // build.files → source patterns
+        if let Some(kind) = find_value(values, "build.files") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        // build.extraResources → source roots
+        if let Some(kind) = find_value(values, "build.extraResources") {
+            for s in strings_from_array(kind) {
+                inputs.source_roots.push(PathBuf::from(s));
+            }
+        }
+
+        // config.forge.packagerConfig → skip (not path-relevant)
+
+        // entryPoints → entrypoints (electron-forge)
+        let ep_entries = find_values_with_prefix(values, "config.forge.plugins.");
+        for entry in &ep_entries {
+            if entry.key.ends_with(".entryPoints")
+                || std::path::Path::new(&entry.key)
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("entry"))
+            {
+                match &entry.value {
+                    ConfigValueKind::String(s) => {
+                        inputs.entrypoints.push(PathBuf::from(s));
+                    }
+                    ConfigValueKind::Array(_) => {
+                        for s in strings_from_array(&entry.value) {
+                            inputs.entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypedocAdapter
+// ---------------------------------------------------------------------------
+
+pub struct TypedocAdapter;
+
+impl ConfigAdapter for TypedocAdapter {
+    fn framework_name(&self) -> &'static str {
+        "typedoc"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "typedoc.json")
+            || filename_starts_with(&config.path, "typedoc.config")
+            || filename_starts_with(&config.path, ".typedoc")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // entryPoints → entrypoints
+        if let Some(kind) = find_value(values, "entryPoints") {
+            for s in strings_from_array(kind) {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // out → ignore_patterns (output directory)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "out") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        // exclude → ignore_patterns
+        if let Some(kind) = find_value(values, "exclude") {
+            inputs.ignore_patterns.extend(strings_from_array(kind));
+        }
+
+        // plugin → externals
+        if let Some(kind) = find_value(values, "plugin") {
+            inputs.externals.extend(strings_from_array(kind));
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SWCAdapter
+// ---------------------------------------------------------------------------
+
+pub struct SWCAdapter;
+
+impl ConfigAdapter for SWCAdapter {
+    fn framework_name(&self) -> &'static str {
+        "swc"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, ".swcrc")
+            || filename_starts_with(&config.path, "swc.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // jsc.experimental.plugins → externals (plugin package names or paths)
+        if let Some(ConfigValueKind::Array(items)) = find_value(values, "jsc.experimental.plugins")
+        {
+            for item in items {
+                match item {
+                    ConfigValueKind::String(s) => {
+                        if s.starts_with("./") || s.starts_with("../") {
+                            inputs.entrypoints.push(PathBuf::from(s));
+                        } else {
+                            inputs.externals.push(s.clone());
+                        }
+                    }
+                    ConfigValueKind::Array(tuple) => {
+                        if let Some(ConfigValueKind::String(s)) = tuple.first() {
+                            if s.starts_with("./") || s.starts_with("../") {
+                                inputs.entrypoints.push(PathBuf::from(s));
+                            } else {
+                                inputs.externals.push(s.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // jsc.paths → aliases (similar to tsconfig paths)
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "jsc.paths") {
+            for (pattern, value) in pairs {
+                if let ConfigValueKind::Array(targets) = value
+                    && let Some(ConfigValueKind::String(target)) = targets.first()
+                {
+                    inputs.aliases.push(AliasEntry {
+                        pattern: pattern.clone(),
+                        target: target.clone(),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DrizzleAdapter
+// ---------------------------------------------------------------------------
+
+pub struct DrizzleAdapter;
+
+impl ConfigAdapter for DrizzleAdapter {
+    fn framework_name(&self) -> &'static str {
+        "drizzle"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        filename_starts_with(&config.path, "drizzle.config")
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // schema → entrypoints (string or array of paths to schema files)
+        if let Some(kind) = find_value(values, "schema") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+                ConfigValueKind::Array(_) => {
+                    for s in strings_from_array(kind) {
+                        inputs.entrypoints.push(PathBuf::from(s));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // out → ignore_patterns (migration output directory)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "out") {
+            inputs.ignore_patterns.push(s.clone());
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrismaAdapter
+// ---------------------------------------------------------------------------
+
+pub struct PrismaAdapter;
+
+impl ConfigAdapter for PrismaAdapter {
+    fn framework_name(&self) -> &'static str {
+        "prisma"
+    }
+
+    fn matches(&self, config: &ConfigReadResult) -> bool {
+        // Prisma config is typically in prisma/schema.prisma but there's
+        // also a prisma section in package.json or a prisma.config.ts file.
+        filename_starts_with(&config.path, "prisma.config")
+            || (filename_starts_with(&config.path, "package.json")
+                && find_value(&config.values, "prisma").is_some())
+    }
+
+    fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
+        let values = &config.values;
+        let mut inputs = ConfigInputs {
+            framework: Some(self.framework_name().to_string()),
+            ..Default::default()
+        };
+
+        // prisma.schema → entrypoints (schema file path)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "prisma.schema") {
+            inputs.entrypoints.push(PathBuf::from(s));
+        }
+
+        // prisma.seed → entrypoints (seed script)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "prisma.seed") {
+            inputs.entrypoints.push(PathBuf::from(s));
+        }
+
+        // schema → entrypoints (top-level in prisma.config.ts)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "schema") {
+            inputs.entrypoints.push(PathBuf::from(s));
+        }
+
+        // seed → entrypoints (top-level in prisma.config.ts)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "seed") {
+            inputs.entrypoints.push(PathBuf::from(s));
+        }
+
+        // generator → externals (generator package names)
+        let gen_entries = find_values_with_prefix(values, "generator.");
+        for entry in &gen_entries {
+            if entry.key.ends_with(".provider")
+                && let ConfigValueKind::String(s) = &entry.value
+            {
+                if s.starts_with("./") || s.starts_with("../") {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                } else {
+                    inputs.externals.push(s.clone());
+                }
+            }
+        }
+
+        inputs
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate extraction
 // ---------------------------------------------------------------------------
 
@@ -2837,6 +3695,22 @@ pub fn extract_all_inputs(configs: &[ConfigReadResult]) -> ConfigInputs {
         Box::new(TanStackRouterAdapter),
         Box::new(VikeAdapter),
         Box::new(RslibAdapter),
+        // Tier C – long-tail ecosystem adapters
+        Box::new(EslintAdapter),
+        Box::new(PrettierAdapter),
+        Box::new(TailwindAdapter),
+        Box::new(PostcssAdapter),
+        Box::new(TsupAdapter),
+        Box::new(EsbuildAdapter),
+        Box::new(CommitlintAdapter),
+        Box::new(LintStagedAdapter),
+        Box::new(HuskyAdapter),
+        Box::new(CypressAdapter),
+        Box::new(ElectronAdapter),
+        Box::new(TypedocAdapter),
+        Box::new(SWCAdapter),
+        Box::new(DrizzleAdapter),
+        Box::new(PrismaAdapter),
     ];
 
     let mut merged = ConfigInputs::default();

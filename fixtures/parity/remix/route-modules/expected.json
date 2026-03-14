@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./app/routes/_index.tsx", "./app/routes/dashboard.tsx", "./app/utils/session.ts"],
+  "unreachable_files": ["./app/utils/unused.ts"],
+  "expected_findings": ["unused-file:./app/utils/unused.ts"],
+  "expected_no_findings": ["unused-file:./app/routes/_index.tsx", "unused-file:./app/routes/dashboard.tsx"]
+}

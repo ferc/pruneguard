@@ -1,0 +1,6 @@
+{
+  "family": "angular",
+  "name": "component-template",
+  "reference_tool": "knip",
+  "description": "Angular component templateUrl references make the template file reachable"
+}

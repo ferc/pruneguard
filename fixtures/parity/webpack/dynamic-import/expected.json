@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/app.ts", "./src/lazy-dashboard.ts", "./src/lazy-settings.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/lazy-dashboard.ts", "unused-file:./src/lazy-settings.ts"]
+}

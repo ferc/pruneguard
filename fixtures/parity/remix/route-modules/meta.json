@@ -1,0 +1,6 @@
+{
+  "family": "remix",
+  "name": "route-modules",
+  "reference_tool": "knip",
+  "description": "Remix app/routes/ convention files with loader/action/default exports are entrypoints"
+}

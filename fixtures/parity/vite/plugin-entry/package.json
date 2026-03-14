@@ -1,0 +1,7 @@
+{
+  "name": "parity-vite-plugin-entry",
+  "private": true,
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

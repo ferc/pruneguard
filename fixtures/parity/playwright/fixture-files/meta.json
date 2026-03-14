@@ -1,0 +1,6 @@
+{
+  "family": "playwright",
+  "name": "fixture-files",
+  "reference_tool": "knip",
+  "description": "Playwright custom fixture definition files are entrypoints used by test infrastructure"
+}

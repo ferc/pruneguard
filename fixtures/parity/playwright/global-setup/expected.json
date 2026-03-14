@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/global-setup.ts", "./src/global-teardown.ts", "./src/test-db.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/global-setup.ts", "unused-file:./src/global-teardown.ts"]
+}

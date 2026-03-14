@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/app.ts"],
+  "unreachable_files": ["./src/generated/types.ts"],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/generated/types.ts"]
+}

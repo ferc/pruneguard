@@ -1,0 +1,6 @@
+{
+  "family": "jest",
+  "name": "transform-config",
+  "reference_tool": "knip",
+  "description": "Custom Jest transform files referenced in jest.config are entrypoints"
+}

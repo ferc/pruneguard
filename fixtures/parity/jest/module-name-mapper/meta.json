@@ -1,0 +1,6 @@
+{
+  "family": "jest",
+  "name": "module-name-mapper",
+  "reference_tool": "knip",
+  "description": "Jest moduleNameMapper targets are reachable because tests resolve imports through the mapper"
+}

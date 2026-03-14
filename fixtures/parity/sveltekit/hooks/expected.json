@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/hooks.server.ts", "./src/hooks.client.ts", "./src/lib/logger.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/hooks.server.ts", "unused-file:./src/hooks.client.ts"]
+}

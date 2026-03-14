@@ -1,0 +1,19 @@
+{
+  "name": "my-lib",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "main": "src/index.ts",
+        "outputPath": "dist"
+      }
+    },
+    "serve": {
+      "executor": "@nx/js:node",
+      "options": {
+        "buildTarget": "my-lib:build",
+        "main": "src/main.ts"
+      }
+    }
+  }
+}

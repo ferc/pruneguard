@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "app": {
+      "root": "",
+      "sourceRoot": "src",
+      "architect": {
+        "build": {
+          "options": {
+            "main": "src/main.ts"
+          }
+        }
+      }
+    }
+  }
+}

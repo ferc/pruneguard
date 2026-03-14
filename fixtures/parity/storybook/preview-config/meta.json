@@ -1,0 +1,6 @@
+{
+  "family": "storybook",
+  "name": "preview-config",
+  "reference_tool": "knip",
+  "description": ".storybook/preview.ts is an entrypoint and its imports are reachable"
+}

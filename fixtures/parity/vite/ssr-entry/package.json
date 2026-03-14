@@ -1,0 +1,7 @@
+{
+  "name": "parity-vite-ssr-entry",
+  "private": true,
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

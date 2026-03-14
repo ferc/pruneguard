@@ -1,0 +1,6 @@
+{
+  "family": "sveltekit",
+  "name": "route-files",
+  "reference_tool": "knip",
+  "description": "SvelteKit src/routes/ convention files (+page.svelte, +server.ts, +layout.svelte) are entrypoints"
+}

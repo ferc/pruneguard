@@ -1,0 +1,6 @@
+{
+  "family": "sveltekit",
+  "name": "hooks",
+  "reference_tool": "knip",
+  "description": "SvelteKit hooks files (src/hooks.server.ts, src/hooks.client.ts) are entrypoints"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "astro",
+  "name": "content-config",
+  "reference_tool": "knip",
+  "description": "Astro src/content/config.ts is an entrypoint that defines content collections"
+}

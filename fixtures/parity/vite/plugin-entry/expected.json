@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/vite-plugin-icons.ts", "./src/icon-loader.ts"],
+  "unreachable_files": ["./src/unused-plugin.ts"],
+  "expected_findings": ["unused-file:./src/unused-plugin.ts"],
+  "expected_no_findings": ["unused-file:./src/vite-plugin-icons.ts", "unused-file:./src/icon-loader.ts"]
+}

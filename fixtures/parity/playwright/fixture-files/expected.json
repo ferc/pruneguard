@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/fixtures.ts", "./src/auth-fixture.ts"],
+  "unreachable_files": ["./src/unused-fixture.ts"],
+  "expected_findings": ["unused-file:./src/unused-fixture.ts"],
+  "expected_no_findings": ["unused-file:./src/fixtures.ts", "unused-file:./src/auth-fixture.ts"]
+}

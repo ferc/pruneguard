@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./.storybook/preview.ts", "./src/decorators/theme-decorator.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./.storybook/preview.ts", "unused-file:./src/decorators/theme-decorator.ts"]
+}

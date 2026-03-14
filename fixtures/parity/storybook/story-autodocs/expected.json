@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/Button.stories.tsx", "./src/Button.tsx"],
+  "unreachable_files": ["./src/Orphan.tsx"],
+  "expected_findings": ["unused-file:./src/Orphan.tsx"],
+  "expected_no_findings": ["unused-file:./src/Button.stories.tsx", "unused-file:./src/Button.tsx"]
+}

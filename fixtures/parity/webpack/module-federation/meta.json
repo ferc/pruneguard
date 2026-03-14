@@ -1,0 +1,6 @@
+{
+  "family": "webpack",
+  "name": "module-federation",
+  "reference_tool": "knip",
+  "description": "Webpack Module Federation exposes entries are entrypoints consumed by remote containers"
+}

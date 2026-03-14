@@ -1385,10 +1385,20 @@ dependencies = [
 name = "pruneguard-tsgo"
 version = "0.1.0"
 dependencies = [
+ "glob",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_parser",
+ "oxc_resolver",
+ "oxc_semantic",
+ "oxc_span",
  "pruneguard_semantic_protocol",
+ "rayon",
+ "rustc-hash",
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]
@@ -1597,6 +1607,8 @@ dependencies = [
  "pruneguard_manifest",
  "pruneguard_report",
  "pruneguard_resolver",
+ "pruneguard_semantic_client",
+ "pruneguard_semantic_protocol",
  "rayon",
  "regex-lite",
  "rustc-hash",

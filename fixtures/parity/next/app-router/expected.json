@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./app/page.tsx", "./app/layout.tsx", "./app/loading.tsx", "./app/dashboard/page.tsx", "./src/components/Spinner.tsx"],
+  "unreachable_files": ["./src/components/Orphan.tsx"],
+  "expected_findings": ["unused-file:./src/components/Orphan.tsx"],
+  "expected_no_findings": ["unused-file:./app/page.tsx", "unused-file:./app/layout.tsx", "unused-file:./app/loading.tsx", "unused-file:./app/dashboard/page.tsx"]
+}

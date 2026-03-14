@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/content/config.ts", "./src/schemas/blog.ts"],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/content/config.ts", "unused-file:./src/schemas/blog.ts"]
+}
