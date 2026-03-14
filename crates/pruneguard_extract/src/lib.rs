@@ -46,6 +46,9 @@ pub struct MemberAccessInfo {
     pub member_name: String,
     /// Source line number.
     pub line: u32,
+    /// Whether this is a write-only access (assignment target, e.g. `obj.member = value`).
+    #[serde(default)]
+    pub is_write: bool,
 }
 
 /// The kind of an exported declaration.
@@ -952,9 +955,19 @@ fn extract_from_statement(stmt: &oxc_ast::ast::Statement<'_>, facts: &mut FileFa
         }
 
         Statement::ExportAllDeclaration(export) => {
+            // `export * as Name from './mod'` — namespace re-export with alias.
+            let names = if let Some(exported) = &export.exported {
+                let name = exported.name();
+                vec![ReexportedName {
+                    original: CompactString::new("*"),
+                    exported: CompactString::new(name.as_str()),
+                }]
+            } else {
+                Vec::new()
+            };
             facts.reexports.push(ReexportInfo {
                 specifier: CompactString::new(export.source.value.as_str()),
-                names: Vec::new(),
+                names,
                 is_star: true,
                 is_type: export.export_kind.is_type(),
                 line: export.span.start,
@@ -1374,6 +1387,12 @@ fn extract_class_members(
                 });
             }
             ClassElement::PropertyDefinition(prop) => {
+                // Skip private properties — they are internal implementation
+                // details (e.g. backing fields for getters/setters) and should
+                // not be tracked for dead-member analysis.
+                if prop.accessibility.is_some_and(|a| a == oxc_ast::ast::TSAccessibility::Private) {
+                    continue;
+                }
                 let Some(name) = prop.key.static_name() else {
                     continue;
                 };
@@ -2645,10 +2664,15 @@ fn detect_member_accesses(
                     }
                     if member_end > member_start {
                         let member_name = &line[member_start..member_end];
+                        // Check if this is an assignment target (write-only access).
+                        let after_member = line[member_end..].trim_start();
+                        let is_write =
+                            after_member.starts_with('=') && !after_member.starts_with("==");
                         accesses.push(MemberAccessInfo {
                             object_name: name.to_string(),
                             member_name: member_name.to_string(),
                             line: (line_number + 1) as u32,
+                            is_write,
                         });
                     }
                 }
@@ -2724,10 +2748,15 @@ fn detect_instance_member_accesses(
                     }
                     if member_end > member_start {
                         let member_name = &line[member_start..member_end];
+                        // Check if this is an assignment target (write-only access).
+                        let after_member = line[member_end..].trim_start();
+                        let is_write =
+                            after_member.starts_with('=') && !after_member.starts_with("==");
                         accesses.push(MemberAccessInfo {
                             object_name: class_name.to_string(),
                             member_name: member_name.to_string(),
                             line: (line_number + 1) as u32,
+                            is_write,
                         });
                     }
                 }
@@ -2827,8 +2856,7 @@ fn detect_import_meta_glob(source: &str) -> Vec<DependencyPattern> {
             if let Some(patterns) = extract_string_array(&source[after_paren..])
                 && !patterns.is_empty()
             {
-                results
-                    .push(DependencyPattern::ImportMetaGlobArray { patterns, line: line_u32 });
+                results.push(DependencyPattern::ImportMetaGlobArray { patterns, line: line_u32 });
             }
             // Skip past the closing bracket.
             let mut skip = after_paren + 1;

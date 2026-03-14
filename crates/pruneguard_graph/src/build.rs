@@ -35,6 +35,57 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{MemberAccessKind, MemberNodeKind, ModuleEdge, ModuleGraph, SymbolGraph};
 
+/// Index of repo file paths that handles symlink differences transparently.
+///
+/// On macOS, `/tmp` is a symlink to `/private/tmp`, so the resolver may
+/// return `/private/tmp/foo.ts` while the discovery walker reports
+/// `/tmp/foo.ts`.  This struct stores both forms so `contains` and
+/// `resolve_to_original` work regardless of which form is queried.
+struct RepoFileIndex {
+    paths: FxHashSet<PathBuf>,
+    canonical_to_original: FxHashMap<PathBuf, PathBuf>,
+}
+
+impl RepoFileIndex {
+    fn build(extracted_files: &[ExtractedFile]) -> Self {
+        let mut paths = FxHashSet::default();
+        let mut canonical_to_original = FxHashMap::default();
+        for file in extracted_files {
+            paths.insert(file.file.path.clone());
+            if let Ok(canonical) = file.file.path.canonicalize()
+                && canonical != file.file.path
+            {
+                paths.insert(canonical.clone());
+                canonical_to_original.insert(canonical, file.file.path.clone());
+            }
+        }
+        Self { paths, canonical_to_original }
+    }
+
+    /// Resolve a path to the original (non-canonical) form used by `file_nodes`.
+    /// Returns the original form if a canonical→original mapping exists,
+    /// otherwise returns the path as-is.
+    fn to_original(&self, path: &PathBuf) -> PathBuf {
+        self.canonical_to_original.get(path).cloned().unwrap_or_else(|| path.clone())
+    }
+
+    /// Look up a resolved module path, trying the raw form first and then
+    /// the canonicalized form, and return the original repo path if found.
+    fn match_resolved(&self, path: &Path) -> Option<PathBuf> {
+        let pb = path.to_path_buf();
+        if self.paths.contains(&pb) {
+            return Some(self.to_original(&pb));
+        }
+        let canonical = path.canonicalize().ok()?;
+        if self.paths.contains(&canonical) { Some(self.to_original(&canonical)) } else { None }
+    }
+
+    /// Iterate over the original (non-canonical) repo file paths.
+    fn iter_original(&self) -> impl Iterator<Item = &PathBuf> {
+        self.paths.iter().filter(|p| !self.canonical_to_original.contains_key(*p))
+    }
+}
+
 /// Fully built repository graph and its supporting inventories.
 #[derive(Debug)]
 pub struct GraphBuildResult {
@@ -214,8 +265,7 @@ pub fn build_graph_with_options(
         .map(|(name, workspace)| (name.clone(), hash_json(&workspace.manifest)))
         .collect::<FxHashMap<_, _>>();
     let mut extracted_files = files.into_iter().map(ExtractedFile::new).collect::<Vec<_>>();
-    let repo_files =
-        extracted_files.iter().map(|file| file.file.path.clone()).collect::<FxHashSet<_>>();
+    let repo_files = RepoFileIndex::build(&extracted_files);
 
     // Phase 2a: Sequential cache hydration — read cached facts for files whose
     // hash hasn't changed. Track which files need fresh extraction.
@@ -618,7 +668,7 @@ pub fn build_graph_with_options(
 fn extract_file(
     extracted_file: &mut ExtractedFile,
     resolver: &ModuleResolver,
-    repo_files: &FxHashSet<PathBuf>,
+    repo_files: &RepoFileIndex,
 ) -> Result<()> {
     if !is_tracked_source(&extracted_file.file.path) {
         return Ok(());
@@ -896,42 +946,55 @@ fn resolve_edge(
     specifier: &str,
     kind: ResolvedEdgeKind,
     line: u32,
-    repo_files: &FxHashSet<PathBuf>,
+    repo_files: &RepoFileIndex,
 ) -> ResolvedEdge {
     match resolver.resolve(specifier, from) {
-        Ok(module) if repo_files.contains(&module.path) => ResolvedEdge {
-            from: from.to_path_buf(),
-            specifier: specifier.to_string(),
-            to_file: Some(module.path),
-            // When a bare specifier (e.g. `@wordwar/core`) resolves to a file
-            // inside the repo (cross-workspace import), also record the
-            // dependency name so the unused-dependency analyzer knows the
-            // declared package.json dependency is in use.
-            to_dependency: dependency_name(specifier),
-            kind,
-            outcome: ResolutionOutcome::ResolvedToFile,
-            unresolved_reason: None,
-            via_exports: module.via_exports,
-            exports_subpath: module.exports_subpath,
-            exports_condition: module.exports_condition,
-            alias_origin: module.alias_origin,
-            line: Some(line),
-        },
-        Ok(module) => ResolvedEdge {
-            from: from.to_path_buf(),
-            specifier: specifier.to_string(),
-            to_file: None,
-            to_dependency: dependency_name(specifier)
-                .or_else(|| module.path.file_name().map(|name| name.to_string_lossy().to_string())),
-            kind,
-            outcome: ResolutionOutcome::ResolvedToDependency,
-            unresolved_reason: None,
-            via_exports: module.via_exports,
-            exports_subpath: module.exports_subpath,
-            exports_condition: module.exports_condition,
-            alias_origin: module.alias_origin,
-            line: Some(line),
-        },
+        Ok(module) => {
+            // Try to match the resolved path against repo_files.  The resolver
+            // may return a path that differs from the repo_files entry only by
+            // a symlink prefix (e.g. /tmp vs /private/tmp on macOS).
+            // match_resolved handles canonicalization and maps back to the
+            // original form used by file_nodes.
+            if let Some(repo_path) = repo_files.match_resolved(&module.path) {
+                ResolvedEdge {
+                    from: from.to_path_buf(),
+                    specifier: specifier.to_string(),
+                    to_file: Some(repo_path),
+                    // When a bare specifier (e.g. `@wordwar/core`) resolves to a file
+                    // inside the repo (cross-workspace import), also record the
+                    // dependency name so the unused-dependency analyzer knows the
+                    // declared package.json dependency is in use.
+                    to_dependency: dependency_name(specifier),
+                    kind,
+                    outcome: ResolutionOutcome::ResolvedToFile,
+                    unresolved_reason: None,
+                    via_exports: module.via_exports,
+                    exports_subpath: module.exports_subpath,
+                    exports_condition: module.exports_condition,
+                    alias_origin: module.alias_origin,
+                    line: Some(line),
+                }
+            } else {
+                let canonical_path =
+                    module.path.canonicalize().unwrap_or_else(|_| module.path.clone());
+                ResolvedEdge {
+                    from: from.to_path_buf(),
+                    specifier: specifier.to_string(),
+                    to_file: None,
+                    to_dependency: dependency_name(specifier).or_else(|| {
+                        canonical_path.file_name().map(|name| name.to_string_lossy().to_string())
+                    }),
+                    kind,
+                    outcome: ResolutionOutcome::ResolvedToDependency,
+                    unresolved_reason: None,
+                    via_exports: module.via_exports,
+                    exports_subpath: module.exports_subpath,
+                    exports_condition: module.exports_condition,
+                    alias_origin: module.alias_origin,
+                    line: Some(line),
+                }
+            }
+        }
         Err(err) => ResolvedEdge {
             from: from.to_path_buf(),
             specifier: specifier.to_string(),
@@ -1319,14 +1382,33 @@ fn add_symbol_edges(
         };
 
         if reexport.is_star {
-            symbol_graph.add_reexport(
-                importer_id,
-                *source_id,
-                CompactString::new("*"),
-                CompactString::new("*"),
-                true,
-                reexport.is_type,
-            );
+            if reexport.names.is_empty() {
+                // `export * from './mod'` — true star re-export.
+                symbol_graph.add_reexport(
+                    importer_id,
+                    *source_id,
+                    CompactString::new("*"),
+                    CompactString::new("*"),
+                    true,
+                    reexport.is_type,
+                );
+            } else {
+                // `export * as Name from './mod'` — namespace re-export.
+                // The names vec has a single entry: {original: "*", exported: "Name"}.
+                for name in &reexport.names {
+                    symbol_graph.add_reexport(
+                        importer_id,
+                        *source_id,
+                        name.original.clone(),
+                        name.exported.clone(),
+                        true,
+                        reexport.is_type,
+                    );
+                    // Also register the namespace alias as an export of the
+                    // re-exporting file so import demand can flow to it.
+                    symbol_graph.add_export(importer_id, name.exported.clone(), reexport.is_type);
+                }
+            }
             continue;
         }
 
@@ -1389,6 +1471,8 @@ fn add_symbol_edges(
 
     for access in &facts.member_accesses {
         if let Some(&(source_id, export_name)) = import_map.get(access.object_name.as_str()) {
+            let access_kind =
+                if access.is_write { MemberAccessKind::Write } else { MemberAccessKind::Read };
             if export_name == "*" {
                 // Namespace import: `import * as NS from './mod'` + `NS.member`.
                 // Create a direct import edge for the specific member so the
@@ -1407,7 +1491,7 @@ fn add_symbol_edges(
                     CompactString::new(export_name),
                     CompactString::new(&access.member_name),
                     false,
-                    MemberAccessKind::Read,
+                    access_kind,
                 );
             }
         }
@@ -1450,7 +1534,7 @@ fn expand_glob_into_edges(
     negations: &[&str],
     line: u32,
     resolver: &ModuleResolver,
-    repo_files: &FxHashSet<PathBuf>,
+    repo_files: &RepoFileIndex,
 ) {
     // Skip negation patterns — they exclude rather than include.
     if pattern.starts_with('!') {
@@ -1484,7 +1568,7 @@ fn expand_glob_into_edges(
 
     let mut count = 0;
     let mut truncated = false;
-    for file_path in repo_files {
+    for file_path in repo_files.iter_original() {
         if count >= MAX_EXPANDED_EDGES {
             truncated = true;
             break;
@@ -1538,7 +1622,7 @@ fn expand_require_context_into_edges(
     regex_filter: Option<&str>,
     line: u32,
     resolver: &ModuleResolver,
-    repo_files: &FxHashSet<PathBuf>,
+    repo_files: &RepoFileIndex,
 ) {
     let source_dir = extracted_file.file.path.parent().unwrap_or(&extracted_file.file.path);
     let context_dir = if Path::new(directory).is_absolute() {
@@ -1556,7 +1640,7 @@ fn expand_require_context_into_edges(
 
     let mut count = 0;
     let mut truncated = false;
-    for file_path in repo_files {
+    for file_path in repo_files.iter_original() {
         if count >= MAX_EXPANDED_EDGES {
             truncated = true;
             break;

@@ -104,12 +104,7 @@ fn run_headless() -> Result<(), Box<dyn std::error::Error>> {
 
     #[allow(clippy::cast_possible_truncation)]
     let init_ms = started.elapsed().as_millis() as u64;
-    let ready = ReadyMessage {
-        version: PROTOCOL_VERSION,
-        projects_loaded,
-        files_indexed,
-        init_ms,
-    };
+    let ready = ReadyMessage { version: PROTOCOL_VERSION, projects_loaded, files_indexed, init_ms };
     send_message(&mut stdout, MessageType::Ready, &serde_json::to_vec(&ready)?)?;
 
     tracing::info!(

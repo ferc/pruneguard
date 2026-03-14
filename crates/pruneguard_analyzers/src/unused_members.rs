@@ -47,15 +47,17 @@ pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding
     let imported_exports: FxHashSet<(FileId, CompactString)> =
         build.symbol_graph.import_edges.iter().map(|e| (e.source, e.export_name.clone())).collect();
 
-    // Also count which member refs exist per parent to identify partially-used exports.
-    let members_per_export: FxHashMap<(FileId, CompactString), Vec<&CompactString>> = {
-        let mut map: FxHashMap<(FileId, CompactString), Vec<&CompactString>> = FxHashMap::default();
+    // Also count which unique member names exist per parent to identify partially-used exports.
+    // Getter/setter pairs share the same name and should be counted once.
+    let members_per_export: FxHashMap<(FileId, CompactString), Vec<CompactString>> = {
+        let mut map: FxHashMap<(FileId, CompactString), FxHashSet<CompactString>> =
+            FxHashMap::default();
         for member_node in &build.symbol_graph.member_exports {
             map.entry((member_node.file, member_node.parent_export.clone()))
                 .or_default()
-                .push(&member_node.member_name);
+                .insert(member_node.member_name.clone());
         }
-        map
+        map.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
     };
 
     // For each file, look at exports with members.
@@ -100,7 +102,7 @@ pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding
             let mut dead_members = Vec::new();
             let mut live_count = 0;
             for member_name in members {
-                let key = (file_id, export.name.clone(), (*member_name).clone());
+                let key = (file_id, export.name.clone(), member_name.clone());
                 if referenced_members.contains(&key) {
                     live_count += 1;
                 } else {
@@ -108,13 +110,33 @@ pub fn analyze(build: &GraphBuildResult, config: &AnalysisConfig) -> Vec<Finding
                     let is_member_live = build.symbol_graph.member_exports.iter().any(|m| {
                         m.file == file_id
                             && m.parent_export == export.name
-                            && m.member_name == **member_name
+                            && m.member_name == *member_name
                             && m.is_live
                     });
-                    if is_member_live {
+                    // When member_write_only_is_unused is enabled, a member that
+                    // is marked live in the symbol graph but only has Write
+                    // accesses should still be considered dead (the symbol graph's
+                    // is_live flag doesn't distinguish access kinds).
+                    let write_only_override = is_member_live
+                        && config.member_write_only_is_unused
+                        && build.symbol_graph.member_refs.iter().any(|r| {
+                            r.source == file_id
+                                && r.export_name == export.name
+                                && r.member_name == *member_name
+                        })
+                        && !build.symbol_graph.member_refs.iter().any(|r| {
+                            r.source == file_id
+                                && r.export_name == export.name
+                                && r.member_name == *member_name
+                                && matches!(
+                                    r.access_kind,
+                                    MemberAccessKind::Read | MemberAccessKind::ReadWrite
+                                )
+                        });
+                    if is_member_live && !write_only_override {
                         live_count += 1;
                     } else {
-                        dead_members.push((*member_name).clone());
+                        dead_members.push(member_name.clone());
                     }
                 }
             }

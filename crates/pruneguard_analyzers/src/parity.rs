@@ -569,15 +569,14 @@ pub fn stale_delta(corpus_results: &[crate::external_parity::ParityCaseResult]) 
         // Try to find a matching matrix entry by family+name (fuzzy match).
         let matching = matrix.iter().find(|f| {
             f.family == result.family
-                && (f.name == result.name
-                    || {
-                        let normalize = |s: &str| {
-                            let mut out = s.replace('.', "-");
-                            out = out.replace(' ', "-");
-                            out.to_lowercase()
-                        };
-                        normalize(f.name) == normalize(&result.name)
-                    })
+                && (f.name == result.name || {
+                    let normalize = |s: &str| {
+                        let mut out = s.replace('.', "-");
+                        out = out.replace(' ', "-");
+                        out.to_lowercase()
+                    };
+                    normalize(f.name) == normalize(&result.name)
+                })
         });
 
         if let Some(feature) = matching {

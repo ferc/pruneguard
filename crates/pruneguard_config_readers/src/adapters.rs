@@ -244,7 +244,8 @@ fn parse_dts_for_synthetic_mappings(content: &str) -> Vec<SyntheticMapping> {
         let trimmed = line.trim();
 
         // Match: export { foo, bar } from './path'
-        if trimmed.starts_with("export") && trimmed.contains("from")
+        if trimmed.starts_with("export")
+            && trimmed.contains("from")
             && let Some(from_part) = extract_from_specifier(trimmed)
         {
             let names = extract_export_names(trimmed);
@@ -273,7 +274,8 @@ fn parse_dts_for_synthetic_mappings(content: &str) -> Vec<SyntheticMapping> {
         }
 
         // Match: const foo: typeof import('./path')['default']
-        if trimmed.starts_with("const ") && trimmed.contains("typeof import(")
+        if trimmed.starts_with("const ")
+            && trimmed.contains("typeof import(")
             && let Some(name) = trimmed.strip_prefix("const ").and_then(|s| s.split(':').next())
         {
             let name = name.trim().to_string();
@@ -467,7 +469,8 @@ fn parse_tanstack_route_tree(workspace_root: &Path, content: &str) -> Vec<RouteE
     for line in content.lines() {
         let trimmed = line.trim();
 
-        if trimmed.starts_with("import") && trimmed.contains("from")
+        if trimmed.starts_with("import")
+            && trimmed.contains("from")
             && let Some(specifier) = extract_from_specifier(trimmed)
             && (specifier.starts_with("./routes/") || specifier.starts_with("../routes/"))
         {
@@ -618,6 +621,54 @@ pub fn detect_route_entrypoints(workspace_root: &Path) -> ConfigInputs {
 
     if deps.iter().any(|d| d == "@builder.io/qwik-city") {
         inputs.merge(detect_qwik_city_routes(workspace_root));
+    }
+
+    // Standalone Nitro detection: ingest .nitro/types/ generated files when
+    // nitropack is a dependency but Nuxt is not present (Nuxt already handles
+    // this via ingest_nuxt_generated_files in NuxtAdapter::extract).
+    let has_nitro = deps.iter().any(|d| d == "nitropack" || d == "nitro");
+    let has_nuxt = deps.iter().any(|d| d == "nuxt" || d == "nuxt3");
+    if has_nitro && !has_nuxt {
+        inputs.merge(ingest_nitro_standalone(workspace_root));
+    }
+
+    inputs
+}
+
+/// Ingest Nitro generated type files from `.nitro/types/` for standalone
+/// Nitro projects (without Nuxt).  This mirrors the `.nitro/types/` handling
+/// in [`ingest_nuxt_generated_files`] but runs independently of the `NuxtAdapter`.
+fn ingest_nitro_standalone(workspace_root: &Path) -> ConfigInputs {
+    let mut inputs = ConfigInputs::default();
+
+    let nitro_types_dir = workspace_root.join(".nitro/types");
+    if nitro_types_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&nitro_types_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("ts")
+                && path.to_string_lossy().ends_with(".d.ts")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                let mappings = parse_dts_for_synthetic_mappings(&content);
+                if !mappings.is_empty() {
+                    inputs.synthetic_import_maps.push(SyntheticImportMap {
+                        source_file: path.clone(),
+                        mappings,
+                        framework: "nitro".to_string(),
+                    });
+                    inputs.generated_entrypoints.push(GeneratedEntrypoint {
+                        path: path.clone(),
+                        kind: "nitro-types".to_string(),
+                        reason: format!(
+                            "Nitro generated {}",
+                            path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
+                        ),
+                    });
+                }
+            }
+        }
     }
 
     inputs

@@ -348,12 +348,16 @@ impl SymbolGraph {
                 let original_name = self.reexport_edges[i].original_name.clone();
                 let is_star = self.reexport_edges[i].is_star;
 
-                let reexported_is_live =
-                    self.exports.get(&(reexporter, exported_name)).is_some_and(|n| n.is_live);
+                let reexported_is_live = self
+                    .exports
+                    .get(&(reexporter, exported_name.clone()))
+                    .is_some_and(|n| n.is_live);
 
                 if reexported_is_live {
-                    if is_star {
-                        // Star re-export: mark all source exports live.
+                    if is_star && original_name == "*" && exported_name == "*" {
+                        // True star re-export (`export * from`): mark all source exports live.
+                        // Namespace re-exports (`export * as Name from`) are handled
+                        // by step 3b via member refs instead.
                         let source_keys: Vec<CompactString> = self
                             .exports
                             .iter()
@@ -391,6 +395,27 @@ impl SymbolGraph {
             for m in &mut self.member_exports {
                 if m.file == file && m.parent_export == parent && m.member_name == member {
                     m.is_live = true;
+                }
+            }
+        }
+
+        // Step 3b: member refs on namespace re-exports → mark source exports live.
+        // When `MathUtils.add` is accessed and `MathUtils` is `export * as MathUtils from './core'`,
+        // mark `add` as live in core.ts.
+        for member_ref in &self.member_refs {
+            // Find re-export edges where the re-exported name matches the member ref's export_name
+            for reexport in &self.reexport_edges {
+                if reexport.reexporter == member_ref.source
+                    && reexport.exported_name == member_ref.export_name
+                    && reexport.is_star
+                {
+                    // This is a namespace re-export: `export * as Name from './source'`
+                    // The member access `Name.member` should make `member` live in the source.
+                    if let Some(node) =
+                        self.exports.get_mut(&(reexport.source, member_ref.member_name.clone()))
+                    {
+                        node.is_live = true;
+                    }
                 }
             }
         }

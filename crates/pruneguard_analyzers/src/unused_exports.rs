@@ -52,16 +52,54 @@ pub fn analyze(
 
             let is_type = reexport_edge.is_type;
             if reexport_edge.is_star {
-                if live.is_all_live(reexport_edge.reexporter, is_type) {
-                    changed |= live.mark_all(reexport_edge.source, is_type);
-                }
+                // Distinguish true star (`export * from`) where original_name
+                // AND exported_name are both "*", from namespace re-exports
+                // (`export * as Name from`) where original_name is "*" but
+                // exported_name is a named alias.
+                let is_true_star =
+                    reexport_edge.original_name == "*" && reexport_edge.exported_name == "*";
 
-                let demanded_names = live
-                    .live_names(reexport_edge.reexporter, is_type)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                for name in demanded_names {
-                    changed |= live.mark_named(reexport_edge.source, &name, is_type);
+                if is_true_star {
+                    // True star: if the reexporter has all exports live,
+                    // blanket-live every export in the source.
+                    if live.is_all_live(reexport_edge.reexporter, is_type) {
+                        changed |= live.mark_all(reexport_edge.source, is_type);
+                    }
+
+                    // Also propagate individually demanded names from the
+                    // reexporter to the source (the star makes the names
+                    // transparent).
+                    let demanded_names = live
+                        .live_names(reexport_edge.reexporter, is_type)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>();
+                    for name in demanded_names {
+                        changed |= live.mark_named(reexport_edge.source, &name, is_type);
+                    }
+                } else {
+                    // Namespace re-export (`export * as Name from`): do NOT
+                    // blanket-live all source exports. Instead, look at member
+                    // refs on the namespace alias to determine which specific
+                    // source exports are consumed.
+                    if live.is_all_live(reexport_edge.reexporter, is_type)
+                        || live.is_named_live(
+                            reexport_edge.reexporter,
+                            &reexport_edge.exported_name,
+                            is_type,
+                        )
+                    {
+                        for member_ref in &build.symbol_graph.member_refs {
+                            if member_ref.source == reexport_edge.reexporter
+                                && member_ref.export_name == reexport_edge.exported_name
+                            {
+                                changed |= live.mark_named(
+                                    reexport_edge.source,
+                                    &member_ref.member_name,
+                                    is_type,
+                                );
+                            }
+                        }
+                    }
                 }
                 continue;
             }
@@ -297,7 +335,11 @@ fn active_entrypoint_files(
             continue;
         }
 
-        if let Some(file_id) = build.module_graph.file_id(&seed.path.to_string_lossy()) {
+        // Normalize the seed path to remove `.` segments (e.g. `/a/./b` → `/a/b`)
+        // before converting to a string for module graph lookup. PathBuf equality
+        // handles this automatically, but string-based lookup does not.
+        let normalized: std::path::PathBuf = seed.path.components().collect();
+        if let Some(file_id) = build.module_graph.file_id(&normalized.to_string_lossy()) {
             files.insert(file_id);
         }
     }

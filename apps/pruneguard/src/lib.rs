@@ -2774,8 +2774,8 @@ fn finding_matches_expected(
         findings.iter().any(|f| {
             f.code == code
                 && (normalize_fixture_path(&f.subject) == ref_normalized
-                    || f.subject.contains(&ref_normalized)
-                    || f.subject.ends_with(&format!("#{ref_normalized}")))
+                    || f.subject.ends_with(&format!("#{ref_normalized}"))
+                    || f.subject.ends_with(&format!(".{ref_normalized}")))
         })
     } else {
         false

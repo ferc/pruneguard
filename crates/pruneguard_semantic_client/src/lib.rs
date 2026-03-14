@@ -319,9 +319,8 @@ fn read_message(
         }
     })?;
 
-    let (size, msg_type) = decode_header(header).ok_or_else(|| {
-        SemanticClientError::ProtocolError(format!("invalid header: {header:?}"))
-    })?;
+    let (size, msg_type) = decode_header(header)
+        .ok_or_else(|| SemanticClientError::ProtocolError(format!("invalid header: {header:?}")))?;
 
     if size > MAX_PAYLOAD_SIZE {
         return Err(SemanticClientError::PayloadTooLarge { size, max: MAX_PAYLOAD_SIZE });
