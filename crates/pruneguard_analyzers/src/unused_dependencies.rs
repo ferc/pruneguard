@@ -352,6 +352,8 @@ fn is_test_fixture_path(path: &std::path::Path) -> bool {
         || s.contains("/__fixture__/")
         || s.contains("/fixtures/")
         || s.contains("\\fixtures\\")
+        || s.contains("/snapshots/")
+        || s.contains("/test-files/")
 }
 
 /// Filter out specifiers that are not valid npm package names.
@@ -373,8 +375,14 @@ fn looks_like_npm_package(dep: &str) -> bool {
     if dep.starts_with("@/") || dep.starts_with("~/") || dep.starts_with('$') {
         return false;
     }
-    // Bare tilde is always a path alias (e.g., import from '~').
-    if dep == "~" {
+    // Bare tilde or bare `src` are always path aliases.
+    if dep == "~" || dep == "src" {
+        return false;
+    }
+    // PascalCase identifiers are framework auto-imports (e.g., Vue components
+    // like `VueLogo`, `ErrorComponent`, `Outlet`), not npm packages.
+    // npm package names are always lowercase.
+    if dep.starts_with(|c: char| c.is_ascii_uppercase()) {
         return false;
     }
     // Relative paths are not packages.
