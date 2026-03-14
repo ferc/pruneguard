@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "cli-tool-deps",
+  "reference_tool": "knip",
+  "description": "CLI-invoked devDependencies (vitest, mocha, tsx) must not be flagged as unused"
+}

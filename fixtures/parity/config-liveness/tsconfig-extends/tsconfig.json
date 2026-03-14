@@ -1,0 +1,6 @@
+{
+  "extends": "@company/ts-config/base",
+  "compilerOptions": {
+    "outDir": "dist"
+  }
+}

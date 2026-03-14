@@ -1,0 +1,10 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": [
+    "unused-dependency:vitest",
+    "unused-dependency:tsx",
+    "unused-dependency:turbo"
+  ]
+}

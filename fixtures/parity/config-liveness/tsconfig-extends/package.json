@@ -1,0 +1,7 @@
+{
+  "name": "parity-tsconfig-extends",
+  "private": true,
+  "devDependencies": {
+    "@company/ts-config": "^1.0.0"
+  }
+}

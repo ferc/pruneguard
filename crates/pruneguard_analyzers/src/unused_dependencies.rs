@@ -27,6 +27,11 @@ pub fn analyze(
         if is_docs_path(&extracted_file.file.relative_path) {
             continue;
         }
+        // Skip test fixture/mock files — they contain synthetic imports
+        // (e.g., `import "fake-package"`) that are not real dependencies.
+        if is_test_fixture_path(&extracted_file.file.relative_path) {
+            continue;
+        }
 
         let Some(workspace) = &extracted_file.file.workspace else {
             continue;
@@ -80,6 +85,16 @@ pub fn analyze(
     let css_used_by_workspace = collect_css_dependency_references(build);
     for (workspace, deps) in &css_used_by_workspace {
         used_prod_by_workspace.entry(workspace.clone()).or_default().extend(deps.iter().cloned());
+    }
+
+    // Scan tsconfig.json files for `extends` field — packages referenced there
+    // are consumed by the TypeScript compiler, not via import statements.
+    for workspace in build.discovery.workspaces.values() {
+        let extends_deps = collect_tsconfig_extends_deps(&workspace.root);
+        if !extends_deps.is_empty() {
+            let ws_dev = used_dev_by_workspace.entry(workspace.name.clone()).or_default();
+            ws_dev.extend(extends_deps);
+        }
     }
 
     let mut findings = Vec::new();
@@ -258,10 +273,16 @@ pub fn analyze(
 
 /// Check whether a specifier refers to a Node.js built-in module.
 fn is_node_builtin(dep: &str) -> bool {
+    // The bare "node" specifier can appear when dependency_name() extracts the
+    // package name from `node:fs` → "node".  It is not a real npm package.
+    if dep == "node" {
+        return true;
+    }
     let dep = dep.strip_prefix("node:").unwrap_or(dep);
     matches!(
         dep,
         "assert"
+            | "async_hooks"
             | "buffer"
             | "child_process"
             | "cluster"
@@ -269,6 +290,7 @@ fn is_node_builtin(dep: &str) -> bool {
             | "constants"
             | "crypto"
             | "dgram"
+            | "diagnostics_channel"
             | "dns"
             | "domain"
             | "events"
@@ -276,6 +298,7 @@ fn is_node_builtin(dep: &str) -> bool {
             | "http"
             | "http2"
             | "https"
+            | "inspector"
             | "module"
             | "net"
             | "os"
@@ -289,8 +312,10 @@ fn is_node_builtin(dep: &str) -> bool {
             | "stream"
             | "string_decoder"
             | "sys"
+            | "test"
             | "timers"
             | "tls"
+            | "trace_events"
             | "tty"
             | "url"
             | "util"
@@ -305,6 +330,16 @@ fn is_node_builtin(dep: &str) -> bool {
 /// Check whether a specifier is the name of another workspace package.
 fn is_workspace_package(dep: &str, discovery: &pruneguard_discovery::DiscoveryResult) -> bool {
     discovery.workspaces.values().any(|ws| ws.manifest.name.as_deref() == Some(dep))
+}
+
+/// Test fixture and mock files contain synthetic imports for testing purposes.
+fn is_test_fixture_path(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    s.contains("__fixtures__")
+        || s.contains("__mocks__")
+        || s.contains("/__fixture__/")
+        || s.contains("/fixtures/")
+        || s.contains("\\fixtures\\")
 }
 
 /// Filter out specifiers that are not valid npm package names.
@@ -322,16 +357,29 @@ fn looks_like_npm_package(dep: &str) -> bool {
     if dep.starts_with('#') {
         return false;
     }
-    // Path aliases (@/components, ~/utils) are local file references.
-    if dep.starts_with("@/") || dep.starts_with("~/") {
+    // Path aliases (@/components, ~/utils, $lib/store) are local file references.
+    if dep.starts_with("@/") || dep.starts_with("~/") || dep.starts_with('$') {
+        return false;
+    }
+    // Bare tilde is always a path alias (e.g., import from '~').
+    if dep == "~" {
         return false;
     }
     // Relative paths are not packages.
     if dep.starts_with('.') || dep.starts_with('/') {
         return false;
     }
+    // Protocol imports (cloudflare:workers, bun:sqlite, deno:*, etc.) are
+    // platform-provided modules, not npm packages.
+    if dep.contains(':') {
+        return false;
+    }
     // Query parameters indicate bundler-transformed specifiers.
     if dep.contains('?') {
+        return false;
+    }
+    // Webpack loader syntax (!loader!path) is not a package.
+    if dep.contains('!') {
         return false;
     }
     // Asset extensions are not packages.
@@ -355,6 +403,49 @@ fn looks_like_npm_package(dep: &str) -> bool {
     // Scoped packages must have at least two segments (@scope/name).
     if dep.starts_with('@') && !dep.contains('/') {
         return false;
+    }
+    // Scoped packages with uppercase scope names are path aliases, not real npm
+    // packages (npm scopes are always lowercase).
+    // E.g., @API/endpoint, @Components/Button, @DS/tokens.
+    if dep.starts_with('@')
+        && let Some(scope) = dep.strip_prefix('@').and_then(|s| s.split('/').next())
+    {
+        // Uppercase scope = alias (npm scopes are always lowercase).
+        if scope.chars().any(|c| c.is_ascii_uppercase()) {
+            return false;
+        }
+        // Common alias-like scope names that are not real npm organizations.
+        if matches!(
+            scope,
+            "app"
+                | "lib"
+                | "src"
+                | "root"
+                | "server"
+                | "client"
+                | "components"
+                | "utils"
+                | "hooks"
+                | "features"
+                | "modules"
+                | "assets"
+                | "styles"
+                | "images"
+                | "config"
+                | "constants"
+                | "services"
+                | "store"
+                | "api"
+                | "pages"
+                | "layouts"
+                | "shared"
+                | "common"
+                | "core"
+                | "ui"
+                | "design-system"
+        ) {
+            return false;
+        }
     }
     true
 }
@@ -468,6 +559,7 @@ fn is_build_tool_dependency(dep: &str) -> bool {
 
     // ESLint plugins and configs are loaded by the ESLint runner, not imported.
     if dep.starts_with("@eslint/")
+        || dep.starts_with("@eslint-react/")
         || dep.starts_with("eslint-plugin-")
         || dep.starts_with("eslint-config-")
         || dep.starts_with("@next/eslint-plugin-")
@@ -552,6 +644,7 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "@vitejs/plugin-vue"
             | "vite-tsconfig-paths"
             | "vite-plugin-dts"
+            | "@tanstack/config"
             | "@tanstack/router-plugin"
             | "@tanstack/router-vite-plugin"
             | "@content-collections/core"
@@ -569,7 +662,13 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "webpack"
             | "webpack-cli"
             | "webpack-dev-server"
-            // Test runners & frameworks (invoked by config, not imported in source)
+            // Test runners & frameworks (invoked by config/CLI, not imported in source)
+            | "vitest"
+            | "mocha"
+            | "ava"
+            | "tape"
+            | "uvu"
+            | "jest"
             | "@playwright/test"
             | "playwright"
             | "cypress"
@@ -614,6 +713,12 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "rimraf"
             | "del-cli"
             | "shx"
+            // Monorepo tools (invoked by scripts, not imported)
+            | "turbo"
+            | "lerna"
+            | "tsup"
+            | "tsdown"
+            | "unbuild"
             // Documentation tools
             | "typedoc"
             | "jsdoc"
@@ -687,6 +792,47 @@ fn is_framework_implicit_dependency(
 
         _ => false,
     }
+}
+
+/// Extract package names from `tsconfig.json` `extends` fields in a workspace.
+/// The `extends` field can be a single string or an array of strings, and each
+/// value may include a subpath (e.g., `"@company/ts-config/base"`).
+fn collect_tsconfig_extends_deps(workspace_root: &std::path::Path) -> Vec<String> {
+    let mut result = Vec::new();
+    let tsconfig_names = [
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "tsconfig.app.json",
+        "tsconfig.node.json",
+        "tsconfig.lib.json",
+    ];
+    for name in &tsconfig_names {
+        let path = workspace_root.join(name);
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let extends = match json.get("extends") {
+            Some(serde_json::Value::String(s)) => vec![s.clone()],
+            Some(serde_json::Value::Array(arr)) => {
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            }
+            _ => continue,
+        };
+        for specifier in extends {
+            // Skip relative paths (./foo, ../bar)
+            if specifier.starts_with('.') {
+                continue;
+            }
+            // Extract package name via the same logic as dependency_name()
+            if let Some(pkg) = pruneguard_resolver::dependency_name(&specifier) {
+                result.push(pkg);
+            }
+        }
+    }
+    result
 }
 
 /// Scan CSS/SCSS/SASS/LESS files in the project for `@import` statements that

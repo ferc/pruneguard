@@ -1,0 +1,6 @@
+{
+  "family": "dynamic-patterns",
+  "name": "generated-cycles",
+  "reference_tool": "knip",
+  "description": "Cycles involving generated files (*.gen.ts) should be demoted to low confidence"
+}

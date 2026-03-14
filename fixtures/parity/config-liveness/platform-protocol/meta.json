@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "platform-protocol",
+  "reference_tool": "knip",
+  "description": "Platform protocol imports (cloudflare:workers, bun:sqlite) must not be flagged as unlisted dependencies"
+}

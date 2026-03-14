@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "tsconfig-extends",
+  "reference_tool": "knip",
+  "description": "Packages referenced in tsconfig.json extends field must be recognized as used dependencies"
+}

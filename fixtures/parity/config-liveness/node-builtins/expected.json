@@ -1,0 +1,9 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": [
+    "unlisted-dependency:node",
+    "unlisted-dependency:async_hooks"
+  ]
+}

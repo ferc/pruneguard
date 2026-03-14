@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "optional-binding-deps",
+  "reference_tool": "knip",
+  "description": "napi-rs platform binding packages in optionalDependencies must not be flagged as unlisted"
+}

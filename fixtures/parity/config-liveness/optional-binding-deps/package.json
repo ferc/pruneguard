@@ -1,0 +1,8 @@
+{
+  "name": "parity-optional-binding-deps",
+  "private": true,
+  "optionalDependencies": {
+    "@pkg/binding-darwin-arm64": "^1.0.0",
+    "@pkg/binding-linux-x64-gnu": "^1.0.0"
+  }
+}

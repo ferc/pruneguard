@@ -1,0 +1,7 @@
+{
+  "name": "parity-test-fixture-imports",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.0.0"
+  }
+}

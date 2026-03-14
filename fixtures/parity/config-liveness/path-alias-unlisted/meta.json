@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "path-alias-unlisted",
+  "reference_tool": "knip",
+  "description": "Path alias imports (@API, @shared, ~, $lib, uppercase scopes) must not be flagged as unlisted dependencies"
+}

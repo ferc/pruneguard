@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "test-fixture-imports",
+  "reference_tool": "knip",
+  "description": "Synthetic imports in __fixtures__ and __mocks__ directories must not leak as unlisted dependencies"
+}

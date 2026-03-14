@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "node-builtins",
+  "reference_tool": "knip",
+  "description": "Node.js builtins (node:fs, node:async_hooks, bare 'node') must not be flagged as unlisted dependencies"
+}

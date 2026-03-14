@@ -36,11 +36,20 @@ pub fn analyze(build: &GraphBuildResult, level: AnalysisSeverity) -> Vec<Finding
             .windows(2)
             .map(|window| format!("{} -> {}", window[0], window[1]))
             .collect::<Vec<_>>();
+
+        // Demote confidence for cycles involving generated/auto-generated files.
+        // These cycles are often intentional (e.g., routeTree.gen.ts ↔ router.tsx).
+        let confidence = if files.iter().any(|f| is_generated_file(f)) {
+            FindingConfidence::Low
+        } else {
+            FindingConfidence::High
+        };
+
         findings.push(make_finding(
             "cycle",
             finding_severity,
             FindingCategory::Cycle,
-            FindingConfidence::High,
+            confidence,
             &subject,
             None,
             None,
@@ -106,4 +115,9 @@ fn minimal_cycle_chain(build: &GraphBuildResult, component: &[NodeIndex]) -> Opt
     }
 
     None
+}
+
+/// Check if a file path looks like auto-generated code.
+fn is_generated_file(path: &str) -> bool {
+    path.contains(".gen.") || path.contains(".generated.") || path.contains(".gen/")
 }

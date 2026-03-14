@@ -1,0 +1,9 @@
+{
+  "name": "parity-cli-tool-deps",
+  "private": true,
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "tsx": "^4.0.0",
+    "turbo": "^2.0.0"
+  }
+}
