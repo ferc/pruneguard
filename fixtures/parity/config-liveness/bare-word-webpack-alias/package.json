@@ -1,0 +1,7 @@
+{
+  "name": "parity-bare-word-webpack-alias",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0"
+  }
+}

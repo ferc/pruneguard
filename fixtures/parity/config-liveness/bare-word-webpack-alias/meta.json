@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "bare-word-webpack-alias",
+  "reference_tool": "knip",
+  "description": "Bare single-word webpack aliases (base, theme, layout, state, vendor) configured via dynamic path.resolve should not be flagged as unlisted dependencies"
+}

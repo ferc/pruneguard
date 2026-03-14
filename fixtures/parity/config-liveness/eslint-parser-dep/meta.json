@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "eslint-parser-dep",
+  "reference_tool": "knip",
+  "description": "ESLint parsers (vue-eslint-parser, @typescript-eslint/parser) referenced in eslint config should not be flagged as unlisted dependencies"
+}

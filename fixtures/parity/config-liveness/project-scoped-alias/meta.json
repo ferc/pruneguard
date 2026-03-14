@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "project-scoped-alias",
+  "reference_tool": "knip",
+  "description": "Project-specific scoped aliases (@artifacts/, @reports/, @experiment-management-shared/) configured via dynamic webpack alias should not be flagged as unlisted"
+}

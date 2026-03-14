@@ -1,0 +1,10 @@
+{
+  "reachable_files": [],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": ["unused-file:./src/orphan.ts"],
+  "expected_no_findings": [
+    "unlisted-dependency:@artifacts/constants",
+    "unlisted-dependency:@reports/components",
+    "unlisted-dependency:@experiment-management-shared/utils"
+  ]
+}

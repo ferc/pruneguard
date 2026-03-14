@@ -1,0 +1,8 @@
+{
+  "name": "parity-eslint-parser-dep",
+  "private": true,
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "vue-eslint-parser": "^9.0.0"
+  }
+}

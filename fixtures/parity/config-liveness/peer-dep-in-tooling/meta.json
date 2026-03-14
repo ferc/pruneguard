@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "peer-dep-in-tooling",
+  "reference_tool": "knip",
+  "description": "Peer dependencies like react/solid-js used only in test snapshots or codegen templates should not be flagged as unlisted in the tooling package"
+}

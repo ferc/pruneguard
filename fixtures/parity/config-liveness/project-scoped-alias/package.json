@@ -1,0 +1,7 @@
+{
+  "name": "parity-project-scoped-alias",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0"
+  }
+}

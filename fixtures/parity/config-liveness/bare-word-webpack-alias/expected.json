@@ -1,0 +1,11 @@
+{
+  "reachable_files": [],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": ["unused-file:./src/orphan.ts"],
+  "expected_no_findings": [
+    "unlisted-dependency:base",
+    "unlisted-dependency:theme",
+    "unlisted-dependency:layout",
+    "unlisted-dependency:vendor"
+  ]
+}

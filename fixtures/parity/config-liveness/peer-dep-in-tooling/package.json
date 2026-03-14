@@ -1,0 +1,7 @@
+{
+  "name": "parity-peer-dep-in-tooling",
+  "private": true,
+  "peerDependencies": {
+    "react": "^18.0.0"
+  }
+}
