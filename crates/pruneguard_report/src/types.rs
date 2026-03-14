@@ -127,6 +127,10 @@ pub enum FindingCategory {
     UnusedMember,
     /// The same symbol is exported from multiple paths (barrel re-export collision).
     DuplicateExport,
+    /// A dependency is imported in source code but not declared in package.json.
+    UnlistedDependency,
+    /// An exported type (interface or type alias) is unused.
+    UnusedType,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

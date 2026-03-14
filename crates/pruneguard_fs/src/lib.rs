@@ -384,6 +384,12 @@ fn classify_file(relative_path: &Path, extra_patterns: &[(GlobSet, FileRole)]) -
     if path.starts_with("fixtures/")
         || path.contains("/fixtures/")
         || path.contains("/test-fixtures/")
+        || path.contains("/snapshots/")
+        || path.contains("/test-files/")
+        || file_name.ends_with(".snapshot.ts")
+        || file_name.ends_with(".snapshot.tsx")
+        || file_name.ends_with(".snapshot.js")
+        || file_name.ends_with(".snapshot.jsx")
     {
         return FileRole::Fixture;
     }

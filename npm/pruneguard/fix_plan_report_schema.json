@@ -293,6 +293,20 @@
           "enum": [
             "duplicate-export"
           ]
+        },
+        {
+          "description": "A dependency is imported in source code but not declared in package.json.",
+          "type": "string",
+          "enum": [
+            "unlisted-dependency"
+          ]
+        },
+        {
+          "description": "An exported type (interface or type alias) is unused.",
+          "type": "string",
+          "enum": [
+            "unused-type"
+          ]
         }
       ]
     },

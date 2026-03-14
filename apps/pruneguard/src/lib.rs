@@ -879,7 +879,7 @@ fn recommend_blocking_actions(
     let safe_delete_targets: Vec<String> = blocking_findings
         .iter()
         .filter(|f| {
-            matches!(f.code.as_str(), "unused-file" | "unused-export")
+            matches!(f.code.as_str(), "unused-file" | "unused-export" | "unused-type")
                 && f.confidence == FindingConfidence::High
         })
         .map(|f| f.subject.clone())
@@ -902,7 +902,7 @@ fn recommend_blocking_actions(
     let fix_plan_targets: Vec<String> = blocking_findings
         .iter()
         .filter(|f| {
-            !matches!(f.code.as_str(), "unused-file" | "unused-export")
+            !matches!(f.code.as_str(), "unused-file" | "unused-export" | "unused-type")
                 || f.confidence != FindingConfidence::High
         })
         .map(|f| f.subject.clone())
@@ -1430,7 +1430,7 @@ fn build_fix_actions(matched_findings: &[Finding]) -> (Vec<RemediationAction>, V
     for finding in matched_findings {
         let kind = match finding.code.as_str() {
             "unused-file" => RemediationActionKind::DeleteFile,
-            "unused-export" => RemediationActionKind::DeleteExport,
+            "unused-export" | "unused-type" => RemediationActionKind::DeleteExport,
             "unused-dependency" | "unused-package" => RemediationActionKind::RemoveDependency,
             "cycle" => RemediationActionKind::BreakCycle,
             "boundary-violation" => RemediationActionKind::UpdateBoundaryRule,

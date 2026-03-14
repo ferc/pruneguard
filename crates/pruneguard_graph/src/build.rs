@@ -2072,6 +2072,94 @@ fn inject_config_entrypoints(
         }
     }
 
+    // Test support files (setupTests, global.setup, global.teardown, etc.)
+    // loaded by test runner configuration, not via imports.
+    {
+        let test_setup_patterns = [
+            "**/setupTests.*",
+            "**/setup.ts",
+            "**/setup.tsx",
+            "**/setup.js",
+            "**/global.setup.*",
+            "**/global.teardown.*",
+            "**/setup/global.setup.*",
+            "**/setup/global.teardown.*",
+        ];
+        let mut test_setup_globs = Vec::new();
+        for pattern in &test_setup_patterns {
+            if let Ok(glob) = Glob::new(pattern) {
+                test_setup_globs.push(glob.compile_matcher());
+            }
+        }
+        if !test_setup_globs.is_empty() {
+            for file_path in file_inventory {
+                if existing.contains(file_path) {
+                    continue;
+                }
+                for workspace in discovery.workspaces.values() {
+                    if !file_path.starts_with(&workspace.root) {
+                        continue;
+                    }
+                    let relative = file_path.strip_prefix(&workspace.root).unwrap_or(file_path);
+                    if test_setup_globs.iter().any(|g| g.is_match(relative))
+                        && pruneguard_fs::is_tracked_source(file_path)
+                    {
+                        entrypoint_seeds.push(EntrypointSeed {
+                            path: file_path.clone(),
+                            kind: SeedKind::FrameworkPack,
+                            surface_kind: EntrypointSurfaceKind::Tooling,
+                            profile: EntrypointProfile::Development,
+                            workspace: Some(workspace.name.clone()),
+                            source: "test-setup".to_string(),
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // .dev.{ts,tsx,js,jsx} conditional build variants.
+    // When a `.dev.` variant exists alongside a non-dev version (e.g.,
+    // `index.dev.tsx` next to `index.tsx`), the dev file is treated as a
+    // Development entrypoint.
+    {
+        let dev_variant_pattern = "*.dev.{ts,tsx,js,jsx}";
+        if let Ok(glob) = Glob::new(dev_variant_pattern) {
+            let matcher = glob.compile_matcher();
+            for file_path in file_inventory {
+                if existing.contains(file_path) {
+                    continue;
+                }
+                let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                if !matcher.is_match(file_name) {
+                    continue;
+                }
+                // Derive the non-dev counterpart: `foo.dev.tsx` → `foo.tsx`
+                if let Some(stem_before_dev) = file_name
+                    .strip_suffix(".dev.ts")
+                    .or_else(|| file_name.strip_suffix(".dev.tsx"))
+                    .or_else(|| file_name.strip_suffix(".dev.js"))
+                    .or_else(|| file_name.strip_suffix(".dev.jsx"))
+                {
+                    let ext = &file_name[stem_before_dev.len() + ".dev".len()..];
+                    let non_dev_name = format!("{stem_before_dev}{ext}");
+                    let non_dev_path = file_path.with_file_name(&non_dev_name);
+                    if file_inventory.contains(&non_dev_path) {
+                        entrypoint_seeds.push(EntrypointSeed {
+                            path: file_path.clone(),
+                            kind: SeedKind::FrameworkPack,
+                            surface_kind: EntrypointSurfaceKind::Tooling,
+                            profile: EntrypointProfile::Development,
+                            workspace: None,
+                            source: "dev-variant".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     // Route entry globs (e.g. TanStack Router, React Router, Vike, Qwik City).
     // Use the pre-discovered file inventory instead of filesystem traversal.
     if !config_inputs.route_entry_globs.is_empty() {

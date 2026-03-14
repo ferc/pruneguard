@@ -165,7 +165,194 @@ pub fn analyze(
         }
     }
 
+    // --- Unlisted dependency detection ---
+    // Find dependencies that are imported in source code but not declared
+    // in any dependency field of the workspace's package.json.
+    for workspace in build.discovery.workspaces.values() {
+        let workspace_name = workspace.name.clone();
+        let package_name =
+            workspace.manifest.name.clone().unwrap_or_else(|| workspace_name.clone());
+
+        // Collect ALL declared dep names across every dependency field.
+        let mut declared: FxHashSet<&str> = FxHashSet::default();
+        if let Some(deps) = &workspace.manifest.dependencies {
+            declared.extend(deps.keys().map(String::as_str));
+        }
+        if let Some(deps) = &workspace.manifest.dev_dependencies {
+            declared.extend(deps.keys().map(String::as_str));
+        }
+        if let Some(deps) = &workspace.manifest.peer_dependencies {
+            declared.extend(deps.keys().map(String::as_str));
+        }
+        if let Some(deps) = &workspace.manifest.optional_dependencies {
+            declared.extend(deps.keys().map(String::as_str));
+        }
+
+        // Merge prod + dev used deps for this workspace.
+        let used = used_prod_by_workspace
+            .get(&workspace_name)
+            .into_iter()
+            .chain(used_dev_by_workspace.get(&workspace_name))
+            .flat_map(|set| set.iter())
+            .collect::<FxHashSet<_>>();
+
+        let manifest_path = workspace
+            .root
+            .strip_prefix(&build.discovery.project_root)
+            .unwrap_or(&workspace.root)
+            .join("package.json")
+            .to_string_lossy()
+            .to_string();
+
+        for dep in &used {
+            let dep_str = dep.as_str();
+            if declared.contains(dep_str) {
+                continue;
+            }
+            // Skip Node.js built-in modules.
+            if is_node_builtin(dep_str) {
+                continue;
+            }
+            // Skip workspace packages (resolved via workspace protocol).
+            if is_workspace_package(dep_str, &build.discovery) {
+                continue;
+            }
+            // Skip build tool deps that might be provided by the monorepo root.
+            if is_build_tool_dependency(dep_str) {
+                continue;
+            }
+            // Skip non-package specifiers that leaked through dependency_name():
+            // relative paths, asset imports, query-parameterized imports, subpath
+            // imports (#foo), single-word specifiers that look like local files.
+            if !looks_like_npm_package(dep_str) {
+                continue;
+            }
+
+            findings.push(make_finding(
+                "unlisted-dependency",
+                finding_severity,
+                FindingCategory::UnlistedDependency,
+                FindingConfidence::Medium,
+                dep_str,
+                Some(workspace_name.clone()),
+                Some(package_name.clone()),
+                format!(
+                    "`{dep_str}` is imported in `{package_name}` but not declared in package.json."
+                ),
+                vec![Evidence {
+                    kind: "dependency".to_string(),
+                    file: Some(manifest_path.clone()),
+                    line: None,
+                    description: "Package not found in dependencies, devDependencies, \
+                                  peerDependencies, or optionalDependencies."
+                        .to_string(),
+                }],
+                Some("Add the dependency to the appropriate field in package.json.".to_string()),
+                None,
+            ));
+        }
+    }
+
     findings
+}
+
+/// Check whether a specifier refers to a Node.js built-in module.
+fn is_node_builtin(dep: &str) -> bool {
+    let dep = dep.strip_prefix("node:").unwrap_or(dep);
+    matches!(
+        dep,
+        "assert"
+            | "buffer"
+            | "child_process"
+            | "cluster"
+            | "console"
+            | "constants"
+            | "crypto"
+            | "dgram"
+            | "dns"
+            | "domain"
+            | "events"
+            | "fs"
+            | "http"
+            | "http2"
+            | "https"
+            | "module"
+            | "net"
+            | "os"
+            | "path"
+            | "perf_hooks"
+            | "process"
+            | "punycode"
+            | "querystring"
+            | "readline"
+            | "repl"
+            | "stream"
+            | "string_decoder"
+            | "sys"
+            | "timers"
+            | "tls"
+            | "tty"
+            | "url"
+            | "util"
+            | "v8"
+            | "vm"
+            | "wasi"
+            | "worker_threads"
+            | "zlib"
+    )
+}
+
+/// Check whether a specifier is the name of another workspace package.
+fn is_workspace_package(dep: &str, discovery: &pruneguard_discovery::DiscoveryResult) -> bool {
+    discovery.workspaces.values().any(|ws| ws.manifest.name.as_deref() == Some(dep))
+}
+
+/// Filter out specifiers that are not valid npm package names.
+///
+/// The `dependency_name()` extractor sometimes lets through specifiers
+/// that are not real packages: relative paths that weren't caught,
+/// asset imports (`.svg`, `.css`), query-parameterized imports from
+/// bundler transforms, and Node.js subpath imports (`#foo`).
+fn looks_like_npm_package(dep: &str) -> bool {
+    // Must not be empty.
+    if dep.is_empty() {
+        return false;
+    }
+    // Subpath imports (#foo) are resolved by Node.js, not packages.
+    if dep.starts_with('#') {
+        return false;
+    }
+    // Relative paths are not packages.
+    if dep.starts_with('.') || dep.starts_with('/') {
+        return false;
+    }
+    // Query parameters indicate bundler-transformed specifiers.
+    if dep.contains('?') {
+        return false;
+    }
+    // Asset extensions are not packages.
+    let asset_exts = [
+        ".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".avif", ".css", ".scss",
+        ".sass", ".less", ".styl", ".woff", ".woff2", ".ttf", ".eot", ".html", ".md", ".mdx",
+        ".txt", ".json", ".wasm", ".graphql", ".gql",
+    ];
+    for ext in &asset_exts {
+        if dep.ends_with(ext) {
+            return false;
+        }
+    }
+    // File extensions (.ts, .tsx, .js, .jsx, .cjs, .mjs) indicate local files.
+    let code_exts = [".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs", ".mts", ".cts"];
+    for ext in &code_exts {
+        if dep.ends_with(ext) {
+            return false;
+        }
+    }
+    // Scoped packages must have at least two segments (@scope/name).
+    if dep.starts_with('@') && !dep.contains('/') {
+        return false;
+    }
+    true
 }
 
 fn workspace_unresolved_specifiers(build: &GraphBuildResult, workspace_name: &str) -> usize {
@@ -386,6 +573,16 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "c8"
             | "nyc"
             | "istanbul"
+            // Vitest addons (loaded via vitest config, not imported in source)
+            | "@vitest/browser"
+            | "@vitest/ui"
+            | "@vitest/coverage-v8"
+            | "@vitest/coverage-istanbul"
+            // Test environments (loaded via vitest/jest config `environment` key)
+            | "jsdom"
+            | "happy-dom"
+            // Test matchers (loaded via setupTests, not directly imported by user tests)
+            | "@testing-library/jest-dom"
             // Linting / formatting (invoked by scripts or config, not imported)
             | "eslint"
             | "prettier"
@@ -409,9 +606,16 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "cross-env"
             | "dotenv-cli"
             | "env-cmd"
+            // File deletion tools (invoked via scripts)
+            | "rimraf"
+            | "del-cli"
+            | "shx"
             // Documentation tools
             | "typedoc"
             | "jsdoc"
+            // Package quality tools (invoked via scripts, not imported)
+            | "publint"
+            | "@arethetypeswrong/cli"
             // Release / versioning tools
             | "changesets"
             | "@changesets/cli"
@@ -420,6 +624,11 @@ fn is_build_tool_dependency(dep: &str) -> bool {
             | "release-it"
             | "np"
             | "semantic-release"
+            // AI tooling config
+            | "vibe-rules"
+            // Benchmarking tools (invoked via scripts)
+            | "autocannon"
+            | "@platformatic/flame"
     )
 }
 

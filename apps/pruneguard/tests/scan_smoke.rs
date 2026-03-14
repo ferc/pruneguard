@@ -115,12 +115,16 @@ fn type_only_liveness_respects_type_consumers() {
     let report = run_pruneguard(&root, &["--format", "json", "scan"]);
     let findings = report["findings"].as_array().expect("findings array");
 
+    // Foo is a type export consumed via `import type` — should NOT be flagged.
     assert!(!findings.iter().any(|finding| {
-        finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#Foo"
+        (finding["code"] == "unused-export" || finding["code"] == "unused-type")
+            && finding["subject"] == "src/types.ts#Foo"
     }));
+    // Bar is an unused type export — flagged as "unused-type".
     assert!(findings.iter().any(|finding| {
-        finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#Bar"
+        finding["code"] == "unused-type" && finding["subject"] == "src/types.ts#Bar"
     }));
+    // runtimeOnly is an unused value export — flagged as "unused-export".
     assert!(findings.iter().any(|finding| {
         finding["code"] == "unused-export" && finding["subject"] == "src/types.ts#runtimeOnly"
     }));

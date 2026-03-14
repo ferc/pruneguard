@@ -205,25 +205,39 @@ pub fn analyze(
         // its liveness depends on heuristic pattern matching.
         let is_glob_target = build.glob_expanded_targets.contains(std::path::Path::new(abs_path));
 
-        let confidence =
-            if effective_unresolved >= 5 || global_pressure_pct > 15 || neighbor_pressure >= 8 {
-                FindingConfidence::Low
-            } else if is_glob_target {
-                // Glob/context expansion targets get at most Medium confidence.
+        // Type exports (interfaces, type aliases) default to Low confidence
+        // because they are often intentionally part of the public API surface
+        // for library consumers.
+        let confidence = if export.is_type
+            || effective_unresolved >= 5
+            || global_pressure_pct > 15
+            || neighbor_pressure >= 8
+        {
+            FindingConfidence::Low
+        } else if is_glob_target {
+            // Glob/context expansion targets get at most Medium confidence.
+            FindingConfidence::Medium
+        } else if effective_unresolved == 0
+            && !live.has_any_demand(export.file)
+            && neighbor_pressure == 0
+        {
+            // Truly isolated: no unresolved, no demand, no neighbor pressure.
+            if global_pressure_pct > 5 {
                 FindingConfidence::Medium
-            } else if effective_unresolved == 0
-                && !live.has_any_demand(export.file)
-                && neighbor_pressure == 0
-            {
-                // Truly isolated: no unresolved, no demand, no neighbor pressure.
-                if global_pressure_pct > 5 {
-                    FindingConfidence::Medium
-                } else {
-                    FindingConfidence::High
-                }
             } else {
-                FindingConfidence::Medium
-            };
+                FindingConfidence::High
+            }
+        } else {
+            FindingConfidence::Medium
+        };
+
+        // Distinguish type-only exports from value exports.
+        let (finding_code, finding_category) = if export.is_type {
+            ("unused-type", FindingCategory::UnusedType)
+        } else {
+            ("unused-export", FindingCategory::UnusedExport)
+        };
+
         let mut evidence = vec![Evidence {
             kind: if export.is_type { "path" } else { "reachability" }.to_string(),
             file: Some(relative_path.clone()),
@@ -241,9 +255,9 @@ pub fn analyze(
             });
         }
         findings.push(make_finding(
-            "unused-export",
+            finding_code,
             finding_severity,
-            FindingCategory::UnusedExport,
+            finding_category,
             confidence,
             &subject,
             workspace.clone(),

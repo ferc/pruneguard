@@ -99,7 +99,8 @@ impl std::fmt::Display for SkipReason {
 }
 
 /// Categories of findings that benefit from semantic refinement.
-const SEMANTIC_SENSITIVE_CODES: &[&str] = &["unused-export", "unused-member", "duplicate-export"];
+const SEMANTIC_SENSITIVE_CODES: &[&str] =
+    &["unused-export", "unused-type", "unused-member", "duplicate-export"];
 
 /// Evaluate whether the semantic helper should be invoked.
 pub fn evaluate_semantic_decision(
@@ -197,7 +198,7 @@ fn score_candidate(index: usize, finding: &Finding, min_score: u8) -> Option<Sem
     }
 
     // Unused exports in files with many exports are more uncertain
-    if finding.code == "unused-export" {
+    if finding.code == "unused-export" || finding.code == "unused-type" {
         score += 20;
     }
 

@@ -161,7 +161,7 @@ pub(crate) fn make_finding(
 pub fn primary_action_kind_for_code(code: &str) -> Option<RemediationActionKind> {
     match code {
         "unused-file" => Some(RemediationActionKind::DeleteFile),
-        "unused-export" => Some(RemediationActionKind::DeleteExport),
+        "unused-export" | "unused-type" => Some(RemediationActionKind::DeleteExport),
         "unused-dependency" | "unused-package" => Some(RemediationActionKind::RemoveDependency),
         "cycle" => Some(RemediationActionKind::BreakCycle),
         "boundary-violation" => Some(RemediationActionKind::UpdateBoundaryRule),

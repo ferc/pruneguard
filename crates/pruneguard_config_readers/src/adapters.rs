@@ -690,6 +690,7 @@ impl ConfigAdapter for ViteAdapter {
             || filename_starts_with(&config.path, "vitest.config")
     }
 
+    #[allow(clippy::too_many_lines)]
     fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
         let values = &config.values;
         let mut inputs = ConfigInputs {
@@ -764,6 +765,55 @@ impl ConfigAdapter for ViteAdapter {
         for entry in input_entries {
             if let ConfigValueKind::String(s) = &entry.value {
                 inputs.entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // build.lib.entry — can be string or array or object
+        if let Some(kind) = find_value(values, "build.lib.entry") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.runtime_entrypoints.push(PathBuf::from(s));
+                }
+                ConfigValueKind::Array(items) => {
+                    for item in items {
+                        if let ConfigValueKind::String(s) = item {
+                            inputs.runtime_entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                ConfigValueKind::Object(pairs) => {
+                    for (_, v) in pairs {
+                        if let ConfigValueKind::String(s) = v {
+                            inputs.runtime_entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Also look for build.lib.entry stored as flat keys
+        let lib_entry_entries = find_values_with_prefix(values, "build.lib.entry.");
+        for entry in lib_entry_entries {
+            if let ConfigValueKind::String(s) = &entry.value {
+                inputs.runtime_entrypoints.push(PathBuf::from(s));
+            }
+        }
+
+        // Top-level `entry` — can be string or array (used by some Vite setups)
+        if let Some(kind) = find_value(values, "entry") {
+            match kind {
+                ConfigValueKind::String(s) => {
+                    inputs.runtime_entrypoints.push(PathBuf::from(s));
+                }
+                ConfigValueKind::Array(items) => {
+                    for item in items {
+                        if let ConfigValueKind::String(s) = item {
+                            inputs.runtime_entrypoints.push(PathBuf::from(s));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
