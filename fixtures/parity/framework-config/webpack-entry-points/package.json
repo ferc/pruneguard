@@ -1,0 +1,7 @@
+{
+  "name": "parity-webpack-entry",
+  "private": true,
+  "devDependencies": {
+    "webpack": "^5.0.0"
+  }
+}

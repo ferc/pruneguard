@@ -1,0 +1,7 @@
+{
+  "name": "parity-vite-alias",
+  "private": true,
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

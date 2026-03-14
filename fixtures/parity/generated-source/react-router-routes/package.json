@@ -1,0 +1,7 @@
+{
+  "name": "parity-react-router",
+  "private": true,
+  "dependencies": {
+    "react-router": "^7.0.0"
+  }
+}

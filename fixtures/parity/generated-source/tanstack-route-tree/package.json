@@ -1,0 +1,7 @@
+{
+  "name": "parity-tanstack-routes",
+  "private": true,
+  "dependencies": {
+    "@tanstack/react-router": "^1.0.0"
+  }
+}

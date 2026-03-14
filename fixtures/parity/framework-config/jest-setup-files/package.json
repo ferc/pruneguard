@@ -1,0 +1,7 @@
+{
+  "name": "parity-jest-setup",
+  "private": true,
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}

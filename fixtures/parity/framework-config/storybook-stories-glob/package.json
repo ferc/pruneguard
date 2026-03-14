@@ -1,0 +1,7 @@
+{
+  "name": "parity-storybook-stories",
+  "private": true,
+  "devDependencies": {
+    "@storybook/react": "^7.0.0"
+  }
+}

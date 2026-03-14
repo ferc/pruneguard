@@ -1,0 +1,7 @@
+{
+  "name": "parity-nitro-utils",
+  "private": true,
+  "dependencies": {
+    "nitropack": "^2.0.0"
+  }
+}
