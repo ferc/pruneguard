@@ -24,7 +24,8 @@
         "impact": "warn",
         "unusedMembers": "warn",
         "duplicateExports": "warn",
-        "ignoreExportsUsedInFile": false
+        "ignoreExportsUsedInFile": false,
+        "memberWriteOnlyIsUnused": true
       },
       "allOf": [
         {
@@ -103,7 +104,18 @@
       "description": "Module resolver configuration.",
       "default": {
         "respectExports": true,
-        "preserveSymlinks": false
+        "preserveSymlinks": false,
+        "detectRequireResolve": true,
+        "detectImportMetaResolve": true,
+        "detectImportMetaGlob": true,
+        "detectRequireContext": true,
+        "detectUrlConstructor": true,
+        "detectJsdocImports": true,
+        "detectTripleSlash": true,
+        "detectImportEquals": true,
+        "detectTypeImports": true,
+        "detectWebpackAliases": true,
+        "detectBabelAliases": true
       },
       "allOf": [
         {
@@ -119,6 +131,22 @@
         },
         {
           "type": "null"
+        }
+      ]
+    },
+    "semantic": {
+      "description": "Semantic precision layer configuration.",
+      "default": {
+        "mode": "auto",
+        "maxColdOverheadPct": 20,
+        "maxFilesPerQueryBatch": 128,
+        "maxProjectRefs": 8,
+        "maxHelperWallMs": 1200,
+        "minUncertaintyScore": 60
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/SemanticConfig"
         }
       ]
     },
@@ -168,6 +196,13 @@
           "default": false,
           "type": "boolean"
         },
+        "ignoreMembers": {
+          "description": "Glob patterns for member names to ignore in unused-member analysis.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "impact": {
           "default": "warn",
           "allOf": [
@@ -176,6 +211,11 @@
             }
           ]
         },
+        "memberWriteOnlyIsUnused": {
+          "description": "Whether write-only member references count as \"used\". When true (default), a member that is only written to (e.g. `obj.field = x`) but never read is reported as unused.",
+          "default": true,
+          "type": "boolean"
+        },
         "ownership": {
           "default": "warn",
           "allOf": [
@@ -183,6 +223,13 @@
               "$ref": "#/definitions/AnalysisSeverity"
             }
           ]
+        },
+        "publicTagNames": {
+          "description": "`JSDoc` tag names that mark a member as public/intentionally exported. When empty, `@public` is used as the default.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "unusedDependencies": {
           "default": "warn",
@@ -318,6 +365,16 @@
             }
           ]
         },
+        "babel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cypress": {
           "anyOf": [
             {
@@ -358,6 +415,16 @@
             }
           ]
         },
+        "nitro": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "nuxt": {
           "anyOf": [
             {
@@ -378,7 +445,57 @@
             }
           ]
         },
+        "parcel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "playwright": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "playwright_ct": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "playwright_test": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "qwik": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "react_router": {
           "anyOf": [
             {
               "$ref": "#/definitions/FrameworkToggle"
@@ -398,7 +515,37 @@
             }
           ]
         },
+        "rsbuild": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rslib": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "storybook": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "svelte": {
           "anyOf": [
             {
               "$ref": "#/definitions/FrameworkToggle"
@@ -418,7 +565,37 @@
             }
           ]
         },
+        "tanstack_router": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger_dev": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "turborepo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vike": {
           "anyOf": [
             {
               "$ref": "#/definitions/FrameworkToggle"
@@ -457,6 +634,16 @@
               "type": "null"
             }
           ]
+        },
+        "vue": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FrameworkToggle"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -467,6 +654,13 @@
         "kind"
       ],
       "properties": {
+        "codes": {
+          "description": "Additional finding codes to match (beyond the primary `kind`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "comment": {
           "description": "Optional comment explaining why this is suppressed.",
           "type": [
@@ -484,6 +678,34 @@
         "kind": {
           "description": "The finding kind to suppress (e.g. \"unusedExport\", \"unusedFile\", \"cycle\").",
           "type": "string"
+        },
+        "packages": {
+          "description": "Package names to scope this rule to.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parentSymbols": {
+          "description": "Parent symbol names to scope this rule to.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "symbols": {
+          "description": "Symbol names to scope this rule to.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workspaces": {
+          "description": "Workspace names to scope this rule to.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -619,6 +841,61 @@
           "items": {
             "type": "string"
           }
+        },
+        "detectBabelAliases": {
+          "description": "Whether to detect Babel alias patterns.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectImportEquals": {
+          "description": "Whether to detect TypeScript `import =` statements.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectImportMetaGlob": {
+          "description": "Whether to detect `import.meta.glob()` calls.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectImportMetaResolve": {
+          "description": "Whether to detect `import.meta.resolve()` calls.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectJsdocImports": {
+          "description": "Whether to detect `JSDoc` `@import` tags.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectRequireContext": {
+          "description": "Whether to detect `require.context()` calls.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectRequireResolve": {
+          "description": "Whether to detect `require.resolve()` calls.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectTripleSlash": {
+          "description": "Whether to detect triple-slash reference directives.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectTypeImports": {
+          "description": "Whether to detect type-only imports.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectUrlConstructor": {
+          "description": "Whether to detect `new URL()` constructor patterns.",
+          "default": true,
+          "type": "boolean"
+        },
+        "detectWebpackAliases": {
+          "description": "Whether to detect webpack alias patterns.",
+          "default": true,
+          "type": "boolean"
         },
         "extensions": {
           "description": "File extensions to resolve.",
@@ -802,6 +1079,65 @@
           }
         }
       }
+    },
+    "SemanticConfig": {
+      "description": "Configuration for the optional semantic precision layer.",
+      "type": "object",
+      "properties": {
+        "maxColdOverheadPct": {
+          "description": "Maximum percentage of cold-scan overhead the helper is allowed to add (0-100).",
+          "default": 20,
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "maxFilesPerQueryBatch": {
+          "description": "Maximum files to include in a single query batch to the helper.",
+          "default": 128,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "maxHelperWallMs": {
+          "description": "Maximum wall-clock milliseconds the helper is allowed to run.",
+          "default": 1200,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "maxProjectRefs": {
+          "description": "Maximum number of TypeScript project references to traverse.",
+          "default": 8,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "minUncertaintyScore": {
+          "description": "Minimum uncertainty score (0-100) a candidate must have before being sent to the semantic helper. Lower values mean more candidates are refined.",
+          "default": 60,
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "mode": {
+          "description": "Whether to use the semantic helper: off, auto (default), or required.",
+          "default": "auto",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SemanticMode"
+            }
+          ]
+        }
+      }
+    },
+    "SemanticMode": {
+      "description": "Mode for the optional semantic precision helper.",
+      "type": "string",
+      "enum": [
+        "off",
+        "auto",
+        "required"
+      ]
     },
     "TeamConfig": {
       "type": "object",

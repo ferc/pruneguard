@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Pre-commit hook that mirrors the CI checks.
-# Fast checks only — run `just ready` or `just ci` for the full suite.
 set -euo pipefail
 
 echo "pre-commit: cargo fmt --all --check"
@@ -18,8 +17,38 @@ echo "pre-commit: clippy suppression audit"
 echo "pre-commit: cargo test --workspace"
 cargo test --workspace
 
+echo "pre-commit: build JS bindings"
+pnpm --dir apps/pruneguard build-js
+
 echo "pre-commit: schemas check"
 cargo run -p pruneguard --bin generate_schemas
 git diff --exit-code -- npm/pruneguard/configuration_schema.json npm/pruneguard/report_schema.json
 
-echo "pre-commit: all checks passed ✓"
+echo "pre-commit: version consistency"
+VERSION=$(node -e "console.log(require('./npm/pruneguard/package.json').version)")
+for pkg in npm/cli-*/package.json; do
+  V=$(node -e "console.log(require('./${pkg}').version)")
+  if [ "$VERSION" != "$V" ]; then
+    echo "Version mismatch: npm/pruneguard=$VERSION but $pkg=$V"
+    exit 1
+  fi
+done
+
+echo "pre-commit: stage release packages"
+node scripts/stage_npm_release.mjs
+
+echo "pre-commit: verify staged packages"
+node scripts/stage_npm_release.mjs --verify
+
+echo "pre-commit: pack smoke (staged root package)"
+PACK_DIR=$(mktemp -d)
+npm pack --pack-destination "$PACK_DIR" .release/npm/pruneguard
+tar -xzf "$PACK_DIR"/*.tgz -C "$PACK_DIR" package/package.json
+if grep -q '"workspace:' "$PACK_DIR/package/package.json"; then
+  echo "workspace: reference found in packed tarball"
+  rm -rf "$PACK_DIR"
+  exit 1
+fi
+rm -rf "$PACK_DIR"
+
+echo "pre-commit: all checks passed"

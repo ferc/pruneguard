@@ -41,6 +41,17 @@
         }
       ]
     },
+    "parityScore": {
+      "description": "External parity corpus score, if available.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ExternalParityReport"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "profile": {
       "description": "The profile used for this analysis.",
       "type": "string"
@@ -191,6 +202,218 @@
         "daemon"
       ]
     },
+    "ExternalParityCaseResult": {
+      "description": "Result of a single parity case in the external report.",
+      "type": "object",
+      "required": [
+        "family",
+        "name",
+        "passed",
+        "passedChecks",
+        "referenceTool",
+        "totalChecks"
+      ],
+      "properties": {
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "passedChecks": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "referenceTool": {
+          "type": "string"
+        },
+        "totalChecks": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ExternalParityFamilyScore": {
+      "description": "Per-family score in the external parity report.",
+      "type": "object",
+      "required": [
+        "family",
+        "passedCases",
+        "pct",
+        "totalCases"
+      ],
+      "properties": {
+        "family": {
+          "type": "string"
+        },
+        "passedCases": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "pct": {
+          "type": "number",
+          "format": "double"
+        },
+        "totalCases": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ExternalParityReport": {
+      "description": "External parity report from the fixture-derived corpus.",
+      "type": "object",
+      "required": [
+        "overallPct",
+        "passedCases",
+        "passedChecks",
+        "totalCases",
+        "totalChecks"
+      ],
+      "properties": {
+        "byFamily": {
+          "description": "Per-family parity breakdown.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExternalParityFamilyScore"
+          }
+        },
+        "byReferenceTool": {
+          "description": "Per-reference-tool parity breakdown.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExternalParityToolScore"
+          }
+        },
+        "caseResults": {
+          "description": "Individual case results.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ExternalParityCaseResult"
+          }
+        },
+        "overallPct": {
+          "description": "Overall parity percentage (0-100).",
+          "type": "number",
+          "format": "double"
+        },
+        "passedCases": {
+          "description": "Number of fully passing cases.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "passedChecks": {
+          "description": "Number of individual checks that passed.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "staleDeltas": {
+          "description": "Stale matrix deltas (features where the hand-authored tracker disagrees with reality).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ParityStaleDelta"
+          }
+        },
+        "totalCases": {
+          "description": "Total number of parity test cases.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalChecks": {
+          "description": "Total number of individual checks across all cases.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ExternalParitySummary": {
+      "description": "Summary of external parity score for the stats section.",
+      "type": "object",
+      "required": [
+        "overallPct",
+        "passedCases",
+        "passedChecks",
+        "totalCases",
+        "totalChecks"
+      ],
+      "properties": {
+        "overallPct": {
+          "description": "Overall parity percentage (0-100).",
+          "type": "number",
+          "format": "double"
+        },
+        "passedCases": {
+          "description": "Cases that fully passed.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "passedChecks": {
+          "description": "Individual checks that passed.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalCases": {
+          "description": "Total cases evaluated.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "totalChecks": {
+          "description": "Total individual checks.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ExternalParityToolScore": {
+      "description": "Per-tool score in the external parity report.",
+      "type": "object",
+      "required": [
+        "passedCases",
+        "pct",
+        "tool",
+        "totalCases"
+      ],
+      "properties": {
+        "passedCases": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "pct": {
+          "type": "number",
+          "format": "double"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "totalCases": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
     "FileInfo": {
       "description": "Info about a discovered file.",
       "type": "object",
@@ -289,6 +512,13 @@
             }
           ]
         },
+        "confidenceReason": {
+          "description": "Human-readable reason for the confidence level assigned to this finding.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "evidence": {
           "description": "Evidence supporting the finding.",
           "type": "array",
@@ -319,6 +549,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "precisionSource": {
+          "description": "Source of precision for this finding's evidence.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PrecisionSource"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "primaryActionKind": {
@@ -378,16 +619,34 @@
       }
     },
     "FindingCategory": {
-      "type": "string",
-      "enum": [
-        "unused-export",
-        "unused-file",
-        "unused-package",
-        "unused-dependency",
-        "cycle",
-        "boundary-violation",
-        "ownership-violation",
-        "impact"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unused-export",
+            "unused-file",
+            "unused-package",
+            "unused-dependency",
+            "cycle",
+            "boundary-violation",
+            "ownership-violation",
+            "impact"
+          ]
+        },
+        {
+          "description": "An exported class member, enum variant, or namespace member is unused.",
+          "type": "string",
+          "enum": [
+            "unused-member"
+          ]
+        },
+        {
+          "description": "The same symbol is exported from multiple paths (barrel re-export collision).",
+          "type": "string",
+          "enum": [
+            "duplicate-export"
+          ]
+        }
       ]
     },
     "FindingConfidence": {
@@ -487,6 +746,62 @@
         }
       }
     },
+    "ParityStaleDelta": {
+      "description": "A stale delta where the hand-authored parity matrix disagrees with actual test results.",
+      "type": "object",
+      "required": [
+        "actualLevel",
+        "feature",
+        "matrixLevel"
+      ],
+      "properties": {
+        "actualLevel": {
+          "description": "Actual level observed from test results.",
+          "type": "string"
+        },
+        "feature": {
+          "description": "Feature or test case name.",
+          "type": "string"
+        },
+        "matrixLevel": {
+          "description": "Level claimed in the parity matrix.",
+          "type": "string"
+        }
+      }
+    },
+    "PrecisionSource": {
+      "description": "Source of the precision for a finding's evidence.",
+      "oneOf": [
+        {
+          "description": "Rust static analysis only.",
+          "type": "string",
+          "enum": [
+            "rust-static"
+          ]
+        },
+        {
+          "description": "Derived from framework-generated source maps or .d.ts files.",
+          "type": "string",
+          "enum": [
+            "generated-map"
+          ]
+        },
+        {
+          "description": "Derived from framework config file extraction.",
+          "type": "string",
+          "enum": [
+            "config-derived"
+          ]
+        },
+        {
+          "description": "Refined by the semantic helper binary.",
+          "type": "string",
+          "enum": [
+            "semantic-helper"
+          ]
+        }
+      ]
+    },
     "RemediationActionKind": {
       "description": "The kind of remediation action to take.",
       "type": "string",
@@ -502,6 +817,46 @@
         "split-package",
         "acknowledge-baseline"
       ]
+    },
+    "ReplacementFamilyScore": {
+      "description": "Per-family replacement score for the weighted replacement metric.",
+      "type": "object",
+      "required": [
+        "family",
+        "passedCases",
+        "score",
+        "tier",
+        "totalCases"
+      ],
+      "properties": {
+        "family": {
+          "description": "Family name (e.g. \"vite\", \"next\", \"jest\").",
+          "type": "string"
+        },
+        "passedCases": {
+          "description": "Passing test cases in this family.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "score": {
+          "description": "Replacement score for this family (0-100).",
+          "type": "number",
+          "format": "double"
+        },
+        "tier": {
+          "description": "Tier of this family (1 or 2).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "totalCases": {
+          "description": "Total test cases in this family.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
     },
     "Stats": {
       "description": "Performance statistics.",
@@ -619,6 +974,25 @@
             }
           ]
         },
+        "externalParity": {
+          "description": "External parity score summary, if available.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExternalParitySummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "externalParityPct": {
+          "description": "External parity score percentage (0-100), if computed.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "filesCached": {
           "type": "integer",
           "format": "uint",
@@ -735,6 +1109,21 @@
             "null"
           ]
         },
+        "replacementFamilyScores": {
+          "description": "Per-family replacement scores.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReplacementFamilyScore"
+          }
+        },
+        "replacementScore": {
+          "description": "Weighted replacement score (0-100) against the external parity corpus.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
         "resolvedViaExports": {
           "type": "integer",
           "format": "uint",
@@ -758,6 +1147,61 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "semanticFiles": {
+          "description": "Number of files sent to the semantic helper.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "semanticMode": {
+          "description": "Semantic helper mode used for this analysis.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semanticProjects": {
+          "description": "Number of TypeScript projects loaded by the semantic helper.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "semanticQueries": {
+          "description": "Number of queries sent to the semantic helper.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "semanticSkippedReason": {
+          "description": "Reason the semantic helper was skipped, if applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semanticUsed": {
+          "description": "Whether the semantic helper was actually invoked.",
+          "default": false,
+          "type": "boolean"
+        },
+        "semanticWallMs": {
+          "description": "Wall-clock milliseconds spent in the semantic helper.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "strictTrustApplied": {
           "description": "Whether strict trust mode was applied.",
           "default": false,
@@ -775,6 +1219,13 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "unsupportedFrameworks": {
+          "description": "Names of unsupported frameworks detected in the workspace.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "watcherLagMs": {
           "description": "Lag of the file-system watcher in milliseconds.",
