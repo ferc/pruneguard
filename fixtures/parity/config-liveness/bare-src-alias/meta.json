@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "bare-src-alias",
+  "reference_tool": "knip",
+  "description": "Bare 'src' specifier is always a path alias (webpack/vite convention), not an npm package"
+}

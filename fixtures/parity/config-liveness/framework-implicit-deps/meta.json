@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "framework-implicit-deps",
+  "reference_tool": "knip",
+  "description": "Framework-implicit dependencies (react-dom with react, isbot with TanStack Start) must not be flagged as unused"
+}

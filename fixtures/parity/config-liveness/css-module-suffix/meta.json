@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "css-module-suffix",
+  "reference_tool": "knip",
+  "description": "Imports ending with .module suffix (CSS module convention) must not be flagged as unlisted dependencies"
+}

@@ -1,0 +1,12 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [],
+  "expected_no_findings": [
+    "unlisted-dependency:VueLogo",
+    "unlisted-dependency:ErrorComponent",
+    "unlisted-dependency:Outlet",
+    "unlisted-dependency:HeadContent",
+    "unlisted-dependency:TanStackRouterDevtools"
+  ]
+}

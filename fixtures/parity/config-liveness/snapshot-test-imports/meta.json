@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "snapshot-test-imports",
+  "reference_tool": "knip",
+  "description": "Synthetic imports in test snapshot and test-files directories must not leak as unlisted dependencies"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "parity-webpack-loader-syntax",
+  "private": true,
+  "devDependencies": {
+    "raw-loader": "^4.0.0"
+  }
+}

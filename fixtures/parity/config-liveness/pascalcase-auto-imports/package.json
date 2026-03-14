@@ -1,0 +1,7 @@
+{
+  "name": "parity-pascalcase-auto-imports",
+  "private": true,
+  "dependencies": {
+    "vue": "^3.4.0"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "uppercase-scope-alias",
+  "reference_tool": "knip",
+  "description": "Scoped packages with uppercase scope names (@API/, @DS/, @Components/) are path aliases since npm scopes are always lowercase"
+}

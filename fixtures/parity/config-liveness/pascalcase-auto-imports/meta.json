@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "pascalcase-auto-imports",
+  "reference_tool": "knip",
+  "description": "PascalCase identifiers (Vue/Solid auto-imported components) must not be flagged as unlisted dependencies since npm packages are always lowercase"
+}

@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "webpack-loader-syntax",
+  "reference_tool": "knip",
+  "description": "Webpack inline loader syntax (!loader!path) must not be flagged as unlisted dependencies"
+}
