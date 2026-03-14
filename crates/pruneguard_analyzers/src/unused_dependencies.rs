@@ -24,15 +24,28 @@ pub fn analyze(
     let mut used_dev_by_workspace: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
 
     for extracted_file in &build.files {
-        if extracted_file.file.role.excluded_from_dead_code_by_default()
-            || is_docs_path(&extracted_file.file.relative_path)
-        {
+        if is_docs_path(&extracted_file.file.relative_path) {
             continue;
         }
 
         let Some(workspace) = &extracted_file.file.workspace else {
             continue;
         };
+
+        // Config files (vite.config.ts, jest.config.js, etc.) are excluded from
+        // dead-code analysis by default, but their imports MUST still count as
+        // dependency usage.  A dependency imported only in a config file is not
+        // unused.  Credit their external_dependencies to the workspace's dev set.
+        if extracted_file.file.role.excluded_from_dead_code_by_default() {
+            if !extracted_file.external_dependencies.is_empty() {
+                let ws_dev = used_dev_by_workspace.entry(workspace.clone()).or_default();
+                for dependency in &extracted_file.external_dependencies {
+                    ws_dev.insert(dependency.clone());
+                }
+            }
+            continue;
+        }
+
         let Some(file_id) = build.module_graph.file_id(&extracted_file.file.path.to_string_lossy())
         else {
             continue;
@@ -428,6 +441,37 @@ fn is_framework_implicit_dependency(
         // framework (Next.js, Vite+React, TanStack Start, Remix, CRA, etc.)
         // but never directly imported in user code with modern JSX transforms.
         "react-dom" => has_dep("react") || has_dep("next") || has_dep("@tanstack/react-start"),
+
+        // JSX frameworks: these are consumed by the JSX transform at compile
+        // time and never appear as explicit import statements in source.
+        // When a package has .tsx/.jsx files AND lists the framework as a
+        // peer/dev dependency, the framework is implicitly used.
+        "react" => {
+            has_dep("react-dom")
+                || has_dep("next")
+                || has_dep("@tanstack/react-start")
+                || has_dep("@tanstack/react-router")
+        }
+        "solid-js" => {
+            has_dep("@solidjs/router")
+                || has_dep("@tanstack/solid-router")
+                || has_dep("@tanstack/solid-start")
+        }
+        "vue" => {
+            has_dep("@tanstack/vue-router") || has_dep("nuxt") || has_dep("@tanstack/vue-start")
+        }
+
+        // isbot is used by SSR frameworks at the server entry level, not
+        // imported in user-facing source files.
+        "isbot" => {
+            has_dep("@tanstack/react-start")
+                || has_dep("@tanstack/solid-start")
+                || has_dep("@tanstack/vue-start")
+                || has_dep("@tanstack/react-router")
+                || has_dep("@tanstack/solid-router")
+                || has_dep("@tanstack/vue-router")
+        }
+
         _ => false,
     }
 }

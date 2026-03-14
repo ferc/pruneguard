@@ -617,6 +617,15 @@ fn resolve_dist_to_source(workspace_root: &Path, file: &str) -> Option<PathBuf> 
         .or_else(|| file.strip_prefix("out/"))
         .or_else(|| file.strip_prefix("lib/"))?;
 
+    // Strip common format subdirectories (esm/, cjs/, source/, types/).
+    // e.g. "dist/esm/ssr/client.js" → "ssr/client.js"
+    let stem = stem
+        .strip_prefix("esm/")
+        .or_else(|| stem.strip_prefix("cjs/"))
+        .or_else(|| stem.strip_prefix("source/"))
+        .or_else(|| stem.strip_prefix("types/"))
+        .unwrap_or(stem);
+
     // Remove the JS extension to get the bare stem
     let bare = Path::new(stem);
     let bare_stem = bare.with_extension("");

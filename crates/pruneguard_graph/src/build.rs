@@ -2001,6 +2001,77 @@ fn inject_config_entrypoints(
         }
     }
 
+    // Test file patterns (e.g. "**/*.test.*", "**/*.spec.*") from framework
+    // config adapters (vitest, jest, playwright).  These make individual test
+    // files into Development entrypoints so their imports count as used.
+    //
+    // When no explicit test patterns are configured but a test runner
+    // (vitest, jest) is detected as a dependency, fall back to conventional
+    // test file patterns so test files are not falsely flagged as unused.
+    {
+        let mut effective_test_patterns = config_inputs.test_patterns.clone();
+        if effective_test_patterns.is_empty() {
+            // Check if any workspace has vitest or jest as a dependency.
+            let has_test_runner = discovery.workspaces.values().any(|ws| {
+                let has_dep = |name: &str| -> bool {
+                    ws.manifest.dependencies.as_ref().is_some_and(|deps| deps.contains_key(name))
+                        || ws
+                            .manifest
+                            .dev_dependencies
+                            .as_ref()
+                            .is_some_and(|deps| deps.contains_key(name))
+                };
+                has_dep("vitest") || has_dep("jest")
+            });
+            if has_test_runner {
+                effective_test_patterns = vec![
+                    "**/*.test.*".to_string(),
+                    "**/*.spec.*".to_string(),
+                    "**/__tests__/**/*.{ts,tsx,js,jsx}".to_string(),
+                    "**/tests/**/*.test.*".to_string(),
+                    "**/tests/**/*.spec.*".to_string(),
+                ];
+            }
+        }
+
+        let mut test_globs = Vec::new();
+        for pattern in &effective_test_patterns {
+            if let Ok(glob) = Glob::new(pattern) {
+                test_globs.push(glob.compile_matcher());
+            }
+        }
+        if !test_globs.is_empty() {
+            for file_path in file_inventory {
+                if existing.contains(file_path) {
+                    continue;
+                }
+                for workspace in discovery.workspaces.values() {
+                    if !file_path.starts_with(&workspace.root) {
+                        continue;
+                    }
+                    let relative = file_path.strip_prefix(&workspace.root).unwrap_or(file_path);
+                    if test_globs.iter().any(|g| g.is_match(relative))
+                        && pruneguard_fs::is_tracked_source(file_path)
+                    {
+                        entrypoint_seeds.push(EntrypointSeed {
+                            path: file_path.clone(),
+                            kind: SeedKind::FrameworkPack,
+                            surface_kind: EntrypointSurfaceKind::Test,
+                            profile: EntrypointProfile::Development,
+                            workspace: Some(workspace.name.clone()),
+                            source: config_inputs
+                                .framework
+                                .as_deref()
+                                .unwrap_or("test-pattern")
+                                .to_string(),
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     // Route entry globs (e.g. TanStack Router, React Router, Vike, Qwik City).
     // Use the pre-discovered file inventory instead of filesystem traversal.
     if !config_inputs.route_entry_globs.is_empty() {
