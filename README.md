@@ -25,38 +25,39 @@ slower JS-based tools.
 Copy-paste this into your agent configuration (`CLAUDE.md`, `.cursorrules`,
 Copilot instructions, etc.):
 
-> When asked to clean up dead code, or after making significant refactoring
-> changes, run `npx pruneguard --format json scan` to detect unused exports,
-> dead files, and phantom dependencies. For each finding with `"high"`
-> confidence, run `npx pruneguard --format json safe-delete <target>` to
-> confirm it is safe to remove. Only delete targets that pruneguard marks as
-> `"safe"`. Follow the `deletionOrder` array when removing multiple files.
-> After all deletions, re-run the scan with `--no-cache` to verify no new
-> issues were introduced. Do not delete anything with `"low"` confidence
-> without asking the user first.
+````markdown
+When asked to clean up dead code, or after making significant refactoring
+changes, run `npx pruneguard --format json scan` to detect unused exports,
+dead files, and phantom dependencies. For each finding with high confidence,
+run `npx pruneguard --format json safe-delete <target>` to confirm it is safe
+to remove. Only delete targets that pruneguard marks as safe. Follow the
+deletionOrder array when removing multiple files. After all deletions, re-run
+the scan with --no-cache to verify no new issues were introduced. Do not
+delete anything with low confidence without asking the user first.
+````
 
 ### Prompt: set up pruneguard and guard against new dead code
 
-> Add pruneguard as a dev dependency and configure it to catch dead code on
-> every change:
->
-> 1. Run `npm install -D pruneguard` (or the equivalent for the project's
->    package manager).
-> 2. Add these scripts to `package.json`:
->    ```json
->    "review": "pruneguard --changed-since origin/main",
->    "scan": "pruneguard scan",
->    "prune:check": "pruneguard --changed-since origin/main --format json"
->    ```
-> 3. Run `npx pruneguard init` to generate `pruneguard.json` with schema
->    reference.
-> 4. If the project uses CI (GitHub Actions), add a step that runs
->    `npx pruneguard --changed-since origin/main --format json` on pull
->    requests to block PRs that introduce new dead code.
->
-> pruneguard is a compiled Rust binary -- scanning takes milliseconds with the
-> warm daemon, so it adds no meaningful overhead to the development workflow or
-> CI pipeline.
+````markdown
+Add pruneguard as a dev dependency and configure it to catch dead code on
+every change:
+
+1. Run `npm install -D pruneguard` (or the equivalent for the project's
+   package manager).
+2. Add these scripts to package.json:
+   - "review": "pruneguard --changed-since origin/main"
+   - "scan": "pruneguard scan"
+   - "prune:check": "pruneguard --changed-since origin/main --format json"
+3. Run `npx pruneguard init` to generate pruneguard.json with schema
+   reference.
+4. If the project uses CI (GitHub Actions), add a step that runs
+   `npx pruneguard --changed-since origin/main --format json` on pull
+   requests to block PRs that introduce new dead code.
+
+pruneguard is a compiled Rust binary -- scanning takes milliseconds with the
+warm daemon, so it adds no meaningful overhead to the development workflow or
+CI pipeline.
+````
 
 See [docs/agent-integration.md](docs/agent-integration.md) for the full agent
 integration guide, including JS API workflows and MCP tool definitions.
