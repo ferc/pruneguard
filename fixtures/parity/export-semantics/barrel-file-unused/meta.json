@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "barrel-file-unused",
+  "reference_tool": "knip",
+  "description": "A barrel file that re-exports but is never imported is flagged as unused"
+}

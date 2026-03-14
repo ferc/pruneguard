@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "star-reexport-partial",
+  "reference_tool": "knip",
+  "description": "Star re-exports only mark consumed names as live when includeEntryExports is enabled"
+}

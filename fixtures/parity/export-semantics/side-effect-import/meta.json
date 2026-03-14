@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "side-effect-import",
+  "reference_tool": "knip",
+  "description": "Side-effect imports (import './file') keep the imported file reachable"
+}

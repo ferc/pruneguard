@@ -58,6 +58,7 @@ pub fn run_analyzers(
         config.analysis.unused_exports,
         profile,
         config.analysis.ignore_exports_used_in_file,
+        config.entrypoints.include_entry_exports,
         &reachable,
     ));
     findings.extend(unused_dependencies::analyze(

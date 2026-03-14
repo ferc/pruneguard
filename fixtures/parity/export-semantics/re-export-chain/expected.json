@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/module.ts", "./src/barrel-a.ts", "./src/barrel-b.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-export:unusedDeep"],
+  "expected_no_findings": ["unused-export:usedDeep", "unused-file:./src/module.ts"]
+}

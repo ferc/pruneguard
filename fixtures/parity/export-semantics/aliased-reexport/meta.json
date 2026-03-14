@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "aliased-reexport",
+  "reference_tool": "knip",
+  "description": "Aliased re-exports (export { x as y }) propagate demand to the original"
+}

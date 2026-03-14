@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "exports-used-in-file",
+  "reference_tool": "knip",
+  "description": "Exports consumed within the same file can be ignored via ignoreExportsUsedInFile"
+}

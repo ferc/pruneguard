@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/polyfill.ts"],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/polyfill.ts"]
+}

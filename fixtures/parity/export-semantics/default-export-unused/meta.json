@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "default-export-unused",
+  "reference_tool": "knip",
+  "description": "Default exports that are never imported are flagged as unused"
+}

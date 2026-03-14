@@ -1,6 +1,6 @@
 {
   "name": "@pruneguard/cli-win32-arm64-msvc",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "pruneguard platform binary for Windows ARM64",
   "license": "MIT",
   "os": [

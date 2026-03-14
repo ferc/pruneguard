@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "type-only-reexport",
+  "reference_tool": "knip",
+  "description": "Type-only re-exports propagate demand for types correctly"
+}

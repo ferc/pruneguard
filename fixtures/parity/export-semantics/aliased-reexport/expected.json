@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/helpers.ts", "./src/barrel.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-export:notUsed"],
+  "expected_no_findings": ["unused-export:originalName", "unused-export:renamedExport"]
+}

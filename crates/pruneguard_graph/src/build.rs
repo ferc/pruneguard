@@ -1307,20 +1307,13 @@ fn seed_public_exports_with_config(
 
         // Decide whether this seed's exports should be marked live.
         //
-        // - PublicApi and FrameworkConvention exports are always live (these are
-        //   the package's public surface and framework-convention files like
-        //   Next.js pages).
-        // - Runtime / Tooling / Test / Story exports are only live when
-        //   `include_entry_exports` is false (the default).  When the flag is
-        //   true, those exports are *not* automatically marked live so the
-        //   analyzer can report unused exports in those files.
-        let should_mark_live = match seed.surface_kind {
-            EntrypointSurfaceKind::PublicApi | EntrypointSurfaceKind::FrameworkConvention => true,
-            EntrypointSurfaceKind::Runtime
-            | EntrypointSurfaceKind::Tooling
-            | EntrypointSurfaceKind::Test
-            | EntrypointSurfaceKind::Story => !include_entry_exports,
-        };
+        // When `include_entry_exports` is true, *no* entrypoint kind has its
+        // exports automatically marked live — the analyzer checks every export
+        // for actual usage across the graph (matching knip's behaviour).
+        //
+        // When `include_entry_exports` is false (the default), all entrypoint
+        // exports are marked live so they are never reported as unused.
+        let should_mark_live = !include_entry_exports;
 
         if should_mark_live {
             symbol_graph.mark_all_file_exports_live(*file_id, None);

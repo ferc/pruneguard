@@ -1,0 +1,8 @@
+{
+  "entrypoints": {
+    "includeEntryExports": true
+  },
+  "analysis": {
+    "ignoreExportsUsedInFile": true
+  }
+}

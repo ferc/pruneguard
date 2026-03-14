@@ -2591,11 +2591,22 @@ fn evaluate_parity_case(
     }
 
     // Run a scan on the isolated case directory.
-    let mut config = PruneguardConfig::default();
+    // If the fixture ships its own pruneguard.json, use it as base config so
+    // that per-case settings (e.g. includeEntryExports) are honoured.
+    let mut config = if config_path.exists() {
+        PruneguardConfig::load(&scan_dir, Some(&config_path)).unwrap_or_default()
+    } else {
+        PruneguardConfig::default()
+    };
     // Enable member analysis for member-semantics cases.
     config.analysis.unused_members = pruneguard_config::AnalysisSeverity::Warn;
     // Add the extra entrypoints directly via the include list.
-    config.entrypoints.include = extra_entrypoints.iter().map(|p| format!("./{p}")).collect();
+    for ep in &extra_entrypoints {
+        let entry = format!("./{ep}");
+        if !config.entrypoints.include.contains(&entry) {
+            config.entrypoints.include.push(entry);
+        }
+    }
     let profile = EntrypointProfile::Both;
     let report = match scan(&scan_dir, &config, &[], profile) {
         Ok(report) => report,

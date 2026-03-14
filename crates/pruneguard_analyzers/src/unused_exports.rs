@@ -16,6 +16,7 @@ pub fn analyze(
     level: AnalysisSeverity,
     profile: EntrypointProfile,
     ignore_exports_used_in_file: bool,
+    include_entry_exports: bool,
     reachable_files: &FxHashSet<pruneguard_graph::FileId>,
 ) -> Vec<Finding> {
     let Some(finding_severity) = severity(level) else {
@@ -24,9 +25,14 @@ pub fn analyze(
     let active_entrypoints = active_entrypoint_files(build, profile);
 
     let mut live = LiveDemand::default();
-    for file_id in active_entrypoints {
-        live.mark_all(file_id, false);
-        live.mark_all(file_id, true);
+    // When `include_entry_exports` is true, do NOT blanket-mark all entrypoint
+    // exports as live.  Instead, let each export's liveness be determined solely
+    // by actual import/re-export demand across the graph.
+    if !include_entry_exports {
+        for file_id in active_entrypoints {
+            live.mark_all(file_id, false);
+            live.mark_all(file_id, true);
+        }
     }
 
     for import_edge in &build.symbol_graph.import_edges {
@@ -118,17 +124,22 @@ pub fn analyze(
     }
 
     // When `ignore_exports_used_in_file` is enabled, collect exports that are
-    // consumed by an import edge where the importer is the same file as the source.
-    // These same-file references make the export "used in file" and should not be
-    // reported as unused.
+    // consumed within the same file.  This includes both:
+    //  1. import edges where importer == source (self-imports), and
+    //  2. same-file references (direct calls/references to an exported symbol
+    //     without going through an import statement).
     let same_file_used: FxHashSet<(FileId, CompactString)> = if ignore_exports_used_in_file {
-        build
+        let mut set: FxHashSet<(FileId, CompactString)> = build
             .symbol_graph
             .import_edges
             .iter()
             .filter(|edge| edge.importer == edge.source)
             .map(|edge| (edge.source, edge.export_name.clone()))
-            .collect()
+            .collect();
+        for same_ref in &build.symbol_graph.same_file_refs {
+            set.insert((same_ref.file, same_ref.export_name.clone()));
+        }
+        set
     } else {
         FxHashSet::default()
     };

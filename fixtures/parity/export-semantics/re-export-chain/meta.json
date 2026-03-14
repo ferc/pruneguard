@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "re-export-chain",
+  "reference_tool": "knip",
+  "description": "Exports reachable through deep re-export chains are marked live"
+}

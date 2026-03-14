@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/used-lib.ts"],
+  "unreachable_files": ["./src/dead-barrel.ts", "./src/dead-lib.ts"],
+  "expected_findings": [],
+  "expected_no_findings": ["unused-file:./src/used-lib.ts"]
+}

@@ -1,0 +1,6 @@
+{
+  "reachable_files": ["./src/lib.ts"],
+  "unreachable_files": [],
+  "expected_findings": ["unused-export:default"],
+  "expected_no_findings": ["unused-export:usedNamed", "unused-file:./src/lib.ts"]
+}
