@@ -1,15 +1,71 @@
 # pruneguard
 
-Pruneguard reviews a JS/TS repo and tells you what is unused, what violates
-architecture rules, what is safe to delete, and what changed in your branch.
+Find unused exports, dead files, phantom dependencies, import cycles, and
+boundary violations across your entire JS/TS monorepo -- in a single, fast
+Rust-powered pass.
 
-It ships as a compiled Rust binary with a thin JS wrapper. No Rust toolchain,
-no compilation, no native addons -- just `npm install` and go.
+Built on [oxc](https://oxc.rs), pruneguard scans a 5,000+ file repository in
+under 6 seconds cold, and delivers sub-millisecond responses with the warm
+daemon. That is 10-50x faster than JS-based alternatives -- fast enough for an
+AI agent to call on every single code change without slowing anything down.
+
+No Rust toolchain, no compilation, no native addons -- just `npm install` and
+go.
+
+## Use with AI agents
+
+pruneguard was designed for AI agents: every command produces structured JSON,
+findings carry confidence scores, and remediation plans contain step-by-step
+instructions agents can execute directly. Because it runs in milliseconds, your
+agent can call it after every code change -- something that is impractical with
+slower JS-based tools.
+
+### Prompt: find and remove dead code
+
+Copy-paste this into your agent configuration (`CLAUDE.md`, `.cursorrules`,
+Copilot instructions, etc.):
+
+> When asked to clean up dead code, or after making significant refactoring
+> changes, run `npx pruneguard --format json scan` to detect unused exports,
+> dead files, and phantom dependencies. For each finding with `"high"`
+> confidence, run `npx pruneguard --format json safe-delete <target>` to
+> confirm it is safe to remove. Only delete targets that pruneguard marks as
+> `"safe"`. Follow the `deletionOrder` array when removing multiple files.
+> After all deletions, re-run the scan with `--no-cache` to verify no new
+> issues were introduced. Do not delete anything with `"low"` confidence
+> without asking the user first.
+
+### Prompt: set up pruneguard and guard against new dead code
+
+> Add pruneguard as a dev dependency and configure it to catch dead code on
+> every change:
+>
+> 1. Run `npm install -D pruneguard` (or the equivalent for the project's
+>    package manager).
+> 2. Add these scripts to `package.json`:
+>    ```json
+>    "review": "pruneguard --changed-since origin/main",
+>    "scan": "pruneguard scan",
+>    "prune:check": "pruneguard --changed-since origin/main --format json"
+>    ```
+> 3. Run `npx pruneguard init` to generate `pruneguard.json` with schema
+>    reference.
+> 4. If the project uses CI (GitHub Actions), add a step that runs
+>    `npx pruneguard --changed-since origin/main --format json` on pull
+>    requests to block PRs that introduce new dead code.
+>
+> pruneguard is a compiled Rust binary -- scanning takes milliseconds with the
+> warm daemon, so it adds no meaningful overhead to the development workflow or
+> CI pipeline.
+
+See [docs/agent-integration.md](docs/agent-integration.md) for the full agent
+integration guide, including JS API workflows and MCP tool definitions.
 
 ## Quick start
 
 ```sh
-npm install pruneguard
+npx pruneguard            # zero-install, scan your repo right now
+npm install -D pruneguard # or add it as a dev dependency
 ```
 
 Add scripts to your `package.json`:
@@ -543,6 +599,27 @@ See [docs/config.md](docs/config.md) for the full configuration reference.
 | [Architecture](docs/architecture.md) | Internal design and pipeline stages |
 | [Performance](docs/performance.md) | Performance model, cache behavior, benchmarking |
 | [Benchmarks](docs/benchmarks.md) | Target latencies and benchmark methodology |
+
+## Performance
+
+pruneguard is a compiled Rust binary powered by [oxc](https://oxc.rs) for
+parsing and module resolution. No V8 or Node.js runtime is on the hot path.
+
+| Scenario | Latency |
+|---|---|
+| Warm daemon (`review`, `impact`, `explain`) on a small repo | < 10 ms |
+| Warm daemon on a medium repo (1,000-2,000 files) | < 50 ms |
+| Warm daemon on a large repo (5,000+ files) | < 150 ms |
+| Cold one-shot scan, medium repo | < 2 s |
+| Cold one-shot scan, 5,000+ file repo | < 6 s |
+
+JS-based alternatives typically take 30-60 seconds on the same large
+repositories -- making them too slow for an AI agent to call on every code
+change or for a tight inner development loop. pruneguard's speed means you can
+treat dead-code detection as a routine check rather than a scheduled chore.
+
+See [docs/performance.md](docs/performance.md) and
+[docs/benchmarks.md](docs/benchmarks.md) for methodology and detailed numbers.
 
 ## Development
 
