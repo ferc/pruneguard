@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "prisma-seed-script",
+  "reference_tool": "knip",
+  "description": "Prisma seed files referenced via package.json prisma.seed config are entrypoints invoked by prisma db seed, not imported in source"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "parity-basic-unused-file",
+  "private": true,
+  "main": "./src/index.ts"
+}

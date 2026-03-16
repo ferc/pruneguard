@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "react-router-routes-file",
+  "reference_tool": "knip",
+  "description": "React Router v7 / Remix v3 projects use app/routes.ts as the route configuration entrypoint; it should not be flagged as unused"
+}

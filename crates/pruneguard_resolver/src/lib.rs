@@ -181,8 +181,10 @@ pub struct ModuleResolver {
     /// Cached workspace package.json fallback main fields (`typings`, `types`, `module`).
     workspace_main_fields: FxHashMap<String, WorkspaceMainFields>,
     /// Aliases from framework config adapters (e.g. Vite resolve.alias, Webpack resolve.alias).
-    /// Each entry maps a prefix pattern to an absolute target directory, along with its origin.
-    config_aliases: Vec<(String, PathBuf, AliasOrigin)>,
+    /// Each entry maps a prefix pattern to an absolute target directory, along with its origin
+    /// and an optional scope (workspace root).  When the scope is set, the alias only applies
+    /// to imports from files within that directory.
+    config_aliases: Vec<(String, PathBuf, AliasOrigin, Option<PathBuf>)>,
     /// External packages from framework config adapters.
     /// Specifiers matching these names are treated as external dependencies.
     config_externals: FxHashSet<String>,
@@ -242,7 +244,21 @@ impl ModuleResolver {
                 references: TsconfigReferences::Auto,
             })
         } else {
-            TsconfigDiscovery::Auto
+            // If the project root has a tsconfig.json with references, use it
+            // as a manual entry point so the resolver discovers all workspace
+            // tsconfigs (their `paths` mappings) from the references.
+            // This is critical for pnpm monorepos where auto-discovery fails
+            // when workspace tsconfigs use `extends` with workspace-protocol
+            // package references.
+            let root_tsconfig = cwd.join("tsconfig.json");
+            if root_tsconfig.exists() {
+                TsconfigDiscovery::Manual(TsconfigOptions {
+                    config_file: root_tsconfig,
+                    references: TsconfigReferences::Auto,
+                })
+            } else {
+                TsconfigDiscovery::Auto
+            }
         });
 
         let inner = Resolver::new(options);
@@ -295,13 +311,23 @@ impl ModuleResolver {
                     let stripped = target.strip_prefix("./").unwrap_or(&target);
                     project_root.join(stripped)
                 };
-                (pattern, abs, origin)
+                (pattern, abs, origin, None)
             })
             .collect();
 
         // Sort by origin priority so higher-precedence aliases are tried first.
         // Uses a stable sort to preserve insertion order among same-origin aliases.
-        self.config_aliases.sort_by_key(|(_, _, origin)| origin.priority());
+        self.config_aliases.sort_by_key(|(_, _, origin, _)| origin.priority());
+    }
+
+    /// Register workspace-scoped aliases from tsconfig `paths`.
+    /// These aliases only apply to imports from files within the specified
+    /// workspace root directory.
+    pub fn add_scoped_aliases(&mut self, aliases: Vec<(String, PathBuf, PathBuf)>) {
+        for (pattern, target, scope) in aliases {
+            self.config_aliases.push((pattern, target, AliasOrigin::TsconfigPaths, Some(scope)));
+        }
+        self.config_aliases.sort_by_key(|(_, _, origin, _)| origin.priority());
     }
 
     /// Register external packages from framework config adapters.
@@ -410,8 +436,14 @@ impl ModuleResolver {
     /// For each alias `(pattern, target_dir, origin)`, if the specifier starts with
     /// `pattern`, replace the prefix and resolve the remainder relative to the
     /// target directory.  The `AliasOrigin` is attached to the returned module.
-    fn resolve_via_config_alias(&self, specifier: &str, _from: &Path) -> Option<ResolvedModule> {
-        for (pattern, target_dir, origin) in &self.config_aliases {
+    fn resolve_via_config_alias(&self, specifier: &str, from: &Path) -> Option<ResolvedModule> {
+        for (pattern, target_dir, origin, scope) in &self.config_aliases {
+            // Scoped aliases only apply to imports from within the scope directory.
+            if let Some(scope_dir) = scope
+                && !from.starts_with(scope_dir)
+            {
+                continue;
+            }
             // Exact match: `@` → `./src` means `@` resolves to `./src/index`
             if specifier == pattern {
                 return resolve_with_extensions(target_dir, "index").map(|mut m| {

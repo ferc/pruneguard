@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "basic-unused-export",
+  "reference_tool": "knip",
+  "description": "An exported function that is never imported by any consumer should be flagged as unused export"
+}

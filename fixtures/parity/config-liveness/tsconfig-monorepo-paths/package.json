@@ -1,0 +1,5 @@
+{
+  "name": "parity-tsconfig-monorepo-paths",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}

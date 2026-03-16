@@ -1,0 +1,9 @@
+{
+  "reachable_files": ["./apps/web/src/components/Header.tsx", "./packages/shared/src/utils.ts"],
+  "unreachable_files": ["./apps/web/src/components/Orphan.tsx"],
+  "expected_findings": ["unused-file:./apps/web/src/components/Orphan.tsx"],
+  "expected_no_findings": [
+    "unused-file:./apps/web/src/components/Header.tsx",
+    "unused-file:./packages/shared/src/utils.ts"
+  ]
+}

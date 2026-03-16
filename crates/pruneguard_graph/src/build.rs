@@ -240,6 +240,117 @@ pub fn build_graph_with_options(
         ));
     }
 
+    // Extract tsconfig `paths` from each workspace and wire them as resolver
+    // aliases.  Only add aliases that are unambiguous (unique pattern across all
+    // workspaces).  Per-workspace aliases like `@/*` that differ between
+    // workspaces are NOT safe to add as global aliases — those must be resolved
+    // via the oxc_resolver's tsconfig auto-discovery.
+    //
+    // We specifically add cross-workspace aliases (e.g. `@tw/ui/*` → `../../packages/ui/src/*`)
+    // since those are the same across workspaces that declare them.
+    {
+        let mut alias_targets: FxHashMap<String, Vec<String>> = FxHashMap::default();
+        for workspace in discovery.workspaces.values() {
+            let tsconfig_path = workspace.root.join("tsconfig.json");
+            if !tsconfig_path.exists() {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&tsconfig_path)
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+            {
+                let compiler_options = json.get("compilerOptions").and_then(|v| v.as_object());
+                let base_url =
+                    compiler_options.and_then(|co| co.get("baseUrl")).and_then(|v| v.as_str());
+                if let Some(paths_obj) =
+                    compiler_options.and_then(|co| co.get("paths")).and_then(|v| v.as_object())
+                {
+                    let base_dir = if let Some(bu) = base_url {
+                        workspace.root.join(bu)
+                    } else {
+                        workspace.root.clone()
+                    };
+                    for (pattern, targets) in paths_obj {
+                        if let Some(target_arr) = targets.as_array()
+                            && let Some(first_target) = target_arr.first().and_then(|v| v.as_str())
+                        {
+                            let alias_pattern =
+                                pattern.strip_suffix("/*").unwrap_or(pattern).to_string();
+                            let target_path =
+                                first_target.strip_suffix("/*").unwrap_or(first_target);
+                            let full_target = base_dir.join(target_path);
+                            let canonical = full_target
+                                .canonicalize()
+                                .unwrap_or(full_target)
+                                .to_string_lossy()
+                                .to_string();
+                            alias_targets.entry(alias_pattern).or_default().push(canonical);
+                        }
+                    }
+                }
+            }
+        }
+        // Add aliases where all workspaces agree on the same canonical target
+        // as global (unscoped) aliases.
+        for (pattern, targets) in &alias_targets {
+            let unique: FxHashSet<&String> = targets.iter().collect();
+            if unique.len() == 1 {
+                let target = targets.first().unwrap();
+                all_aliases.push((
+                    pattern.clone(),
+                    target.clone(),
+                    pruneguard_resolver::AliasOrigin::TsconfigPaths,
+                ));
+            }
+        }
+    }
+
+    // Register per-workspace scoped aliases for conflicting patterns (e.g. `@/*`).
+    // These only apply to imports from files within each workspace root.
+    {
+        let mut scoped_aliases: Vec<(String, PathBuf, PathBuf)> = Vec::new();
+        for workspace in discovery.workspaces.values() {
+            let tsconfig_path = workspace.root.join("tsconfig.json");
+            if !tsconfig_path.exists() {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&tsconfig_path)
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+            {
+                let compiler_options = json.get("compilerOptions").and_then(|v| v.as_object());
+                let base_url =
+                    compiler_options.and_then(|co| co.get("baseUrl")).and_then(|v| v.as_str());
+                if let Some(paths_obj) =
+                    compiler_options.and_then(|co| co.get("paths")).and_then(|v| v.as_object())
+                {
+                    let base_dir = if let Some(bu) = base_url {
+                        workspace.root.join(bu)
+                    } else {
+                        workspace.root.clone()
+                    };
+                    for (pattern, targets) in paths_obj {
+                        if let Some(target_arr) = targets.as_array()
+                            && let Some(first_target) = target_arr.first().and_then(|v| v.as_str())
+                        {
+                            let alias_pattern =
+                                pattern.strip_suffix("/*").unwrap_or(pattern).to_string();
+                            let target_path =
+                                first_target.strip_suffix("/*").unwrap_or(first_target);
+                            let full_target = base_dir.join(target_path);
+                            scoped_aliases.push((
+                                alias_pattern,
+                                full_target,
+                                workspace.root.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if !scoped_aliases.is_empty() {
+            resolver.add_scoped_aliases(scoped_aliases);
+        }
+    }
+
     if !all_aliases.is_empty() {
         resolver.set_config_aliases(all_aliases, &discovery.project_root);
     }

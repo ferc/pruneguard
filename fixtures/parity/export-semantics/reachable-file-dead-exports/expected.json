@@ -1,0 +1,13 @@
+{
+  "reachable_files": ["./src/utils.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-export:src/utils.ts#unusedHelper",
+    "unused-export:src/utils.ts#UNUSED_CONSTANT"
+  ],
+  "expected_no_findings": [
+    "unused-file:./src/utils.ts",
+    "unused-export:src/utils.ts#usedHelper",
+    "unused-export:src/utils.ts#USED_CONSTANT"
+  ]
+}

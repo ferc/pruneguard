@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "reachable-file-dead-exports",
+  "reference_tool": "knip",
+  "description": "A reachable utility file exports multiple functions but some are never consumed by any importer; knip catches these as unused exports"
+}

@@ -1,0 +1,10 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unlisted-dependency:chalk"
+  ],
+  "expected_no_findings": [
+    "unlisted-dependency:express"
+  ]
+}

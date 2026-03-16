@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "vue-implicit-deps",
+  "reference_tool": "knip",
+  "description": "Vue projects with @vitejs/plugin-vue implicitly require vue at runtime; vue should not be flagged as unused dependency"
+}

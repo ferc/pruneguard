@@ -1,0 +1,11 @@
+{
+  "reachable_files": ["./src/lib.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-export:src/lib.ts#deadExport"
+  ],
+  "expected_no_findings": [
+    "unused-export:src/lib.ts#liveExport",
+    "unused-file:./src/lib.ts"
+  ]
+}

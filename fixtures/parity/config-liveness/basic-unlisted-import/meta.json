@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "basic-unlisted-import",
+  "reference_tool": "knip",
+  "description": "An npm package imported in source code but not declared in package.json should be flagged as unlisted"
+}

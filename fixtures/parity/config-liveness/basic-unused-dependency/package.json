@@ -1,0 +1,9 @@
+{
+  "name": "parity-basic-unused-dependency",
+  "private": true,
+  "main": "./src/index.ts",
+  "dependencies": {
+    "express": "^4.18.0",
+    "lodash": "^4.17.0"
+  }
+}

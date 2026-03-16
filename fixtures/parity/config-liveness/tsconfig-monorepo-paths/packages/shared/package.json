@@ -1,0 +1,4 @@
+{
+  "name": "@mono/shared",
+  "main": "src/index.ts"
+}

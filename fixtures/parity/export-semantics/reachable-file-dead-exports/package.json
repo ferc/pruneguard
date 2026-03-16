@@ -1,0 +1,5 @@
+{
+  "name": "parity-reachable-file-dead-exports",
+  "private": true,
+  "main": "./src/index.ts"
+}

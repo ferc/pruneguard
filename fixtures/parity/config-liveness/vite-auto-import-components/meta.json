@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "vite-auto-import-components",
+  "reference_tool": "knip",
+  "description": "Vue/Vite projects using unplugin-vue-components auto-import components from src/components/ without explicit imports; these files should not be flagged as unused"
+}

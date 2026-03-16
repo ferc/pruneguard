@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "tsconfig-monorepo-paths",
+  "reference_tool": "knip",
+  "description": "Monorepo with per-workspace tsconfig paths (@/* aliases) must resolve imports to the correct workspace files, not conflict across workspaces"
+}

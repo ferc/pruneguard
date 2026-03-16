@@ -1,0 +1,10 @@
+{
+  "reachable_files": ["./src/utils.ts"],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": [
+    "unused-file:./src/orphan.ts"
+  ],
+  "expected_no_findings": [
+    "unused-file:./src/utils.ts"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "parity-basic-unused-export",
+  "private": true,
+  "main": "./src/index.ts"
+}

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["./*"],
+      "@mono/shared/*": ["../../packages/shared/src/*"]
+    }
+  }
+}

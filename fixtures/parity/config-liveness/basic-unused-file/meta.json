@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "basic-unused-file",
+  "reference_tool": "knip",
+  "description": "A source file that is never imported by any entrypoint-reachable module should be flagged as unused"
+}

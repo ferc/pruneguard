@@ -1,0 +1,10 @@
+{
+  "reachable_files": [],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-dependency:lodash"
+  ],
+  "expected_no_findings": [
+    "unused-dependency:express"
+  ]
+}
