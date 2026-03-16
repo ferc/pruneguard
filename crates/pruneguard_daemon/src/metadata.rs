@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Information written to `.pruneguard/daemon.json` while the daemon is running.
+/// Information written to `node_modules/.cache/pruneguard/daemon.json` while the daemon is running.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonMetadata {
@@ -36,12 +36,12 @@ pub enum MetadataError {
 impl DaemonMetadata {
     /// Path to the metadata file for a given project root.
     pub fn path(project_root: &Path) -> PathBuf {
-        project_root.join(".pruneguard").join("daemon.json")
+        project_root.join("node_modules/.cache/pruneguard").join("daemon.json")
     }
 
     /// Write daemon metadata to disk.
     pub fn write(&self, project_root: &Path) -> Result<(), MetadataError> {
-        let dir = project_root.join(".pruneguard");
+        let dir = project_root.join("node_modules/.cache/pruneguard");
         std::fs::create_dir_all(&dir).map_err(MetadataError::Write)?;
         let path = Self::path(project_root);
         let json = serde_json::to_string_pretty(self).expect("serialize daemon metadata");

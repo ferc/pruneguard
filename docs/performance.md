@@ -30,7 +30,7 @@ and resolution. No V8 or Node.js runtime is involved in the hot path.
 
 ## Cache behavior
 
-- Default path: `.pruneguard/cache.redb`
+- Default path: `node_modules/.cache/pruneguard/cache.redb`
 - Disabled via `--no-cache`
 - Stores: extracted facts, parse diagnostics, resolutions, manifest metadata
 - Does not store: final findings (always recomputed)

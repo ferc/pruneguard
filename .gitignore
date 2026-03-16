@@ -15,9 +15,7 @@ npm/cli-*/bin/
 # Release staging
 .release/
 
-# Cache
-.pruneguard-cache/
-.pruneguard/
+# Cache (lives inside node_modules/.cache/pruneguard/)
 
 # OS
 .DS_Store

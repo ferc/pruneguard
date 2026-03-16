@@ -26,7 +26,7 @@ to one-shot if the daemon is not running. In detected CI environments
 
 ## Cache
 
-- Default path: `.pruneguard/cache.redb`
+- Default path: `node_modules/.cache/pruneguard/cache.redb`
 - Disable with `--no-cache`
 - Stores extracted facts, parse diagnostics, resolutions, and manifest metadata
 - Does not store final findings -- those are always recomputed

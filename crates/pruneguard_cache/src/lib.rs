@@ -83,7 +83,7 @@ impl AnalysisCache {
     /// Open or create the cache database.
     /// If the database is corrupted, it is deleted and recreated.
     pub fn open(project_root: &Path) -> Result<Self, CacheError> {
-        let cache_dir = project_root.join(".pruneguard");
+        let cache_dir = project_root.join("node_modules/.cache/pruneguard");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|err| CacheError::OpenError(err.to_string()))?;
         let db_path = cache_dir.join("cache.redb");

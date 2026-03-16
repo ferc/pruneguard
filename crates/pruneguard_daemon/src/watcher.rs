@@ -107,8 +107,8 @@ fn is_relevant_path(path: &Path) -> bool {
     // Skip paths inside node_modules or hidden directories.
     let path_str = path.to_string_lossy();
     if path_str.contains("node_modules") || path_str.contains("/.") || path_str.contains("\\.") {
-        // Allow .pruneguard paths (for config changes).
-        if !path_str.contains(".pruneguard") {
+        // Allow .pruneguardrc.json config files through the hidden-directory filter.
+        if !path_str.contains(".pruneguardrc") {
             return false;
         }
     }
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn pruneguardrc_in_absolute_path() {
         // .pruneguardrc.json contains "/." in absolute paths but should be
-        // allowed through the hidden-directory filter via the .pruneguard
+        // allowed through the hidden-directory filter via the .pruneguardrc
         // exception.
         assert!(is_relevant_path(Path::new("/home/user/project/.pruneguardrc.json")));
     }
