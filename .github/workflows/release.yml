@@ -273,5 +273,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - name: Wait for npm propagation
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          for i in $(seq 1 30); do
+            if npm view "pruneguard@${VERSION}" version 2>/dev/null | grep -qx "$VERSION"; then
+              echo "pruneguard@${VERSION} is available on npm (attempt $i)"
+              exit 0
+            fi
+            echo "Waiting for pruneguard@${VERSION} to propagate... (attempt $i/30)"
+            sleep 10
+          done
+          echo "::error::pruneguard@${VERSION} not available on npm after 5 minutes"
+          exit 1
       - name: Smoke test
         run: npx pruneguard@${{ needs.check-version.outputs.version }} --help
