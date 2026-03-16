@@ -232,6 +232,29 @@ fn path_contains_dir(path: &std::path::Path, dir: &str) -> bool {
     path.components().any(|c| c.as_os_str() == dir)
 }
 
+/// Normalize a Jest `moduleNameMapper` entry from regex → alias.
+///
+/// Converts `^@api/(.*)$` → `@api` and `<rootDir>/src/$1` → `src`.
+/// This is a best-effort conversion — complex regex patterns are passed through.
+fn normalize_jest_module_mapper(pattern: &str, target: &str) -> (String, String) {
+    // Strip <rootDir>/ from the target.
+    let clean_target = target.replace("<rootDir>/", "").replace("<rootDir>", ".");
+
+    // Strip regex anchors and capture groups from the pattern.
+    // ^@api/(.*)$  →  @api
+    let clean_pattern =
+        pattern.strip_prefix('^').unwrap_or(pattern).strip_suffix('$').unwrap_or(pattern);
+    // Remove trailing capture group like /(.*)
+    let clean_pattern = clean_pattern
+        .strip_suffix("/(.*)")
+        .or_else(|| clean_pattern.strip_suffix("/(.+)"))
+        .unwrap_or(clean_pattern);
+    // Remove $1 from the target to get the base directory
+    let clean_target = clean_target.strip_suffix("/$1").unwrap_or(&clean_target).to_string();
+
+    (clean_pattern.to_string(), clean_target)
+}
+
 // ---------------------------------------------------------------------------
 // Generated .d.ts parsing helpers
 // ---------------------------------------------------------------------------
@@ -817,6 +840,11 @@ impl ConfigAdapter for ViteAdapter {
             }
         }
 
+        // build.ssr — SSR entry point (string path)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "build.ssr") {
+            inputs.runtime_entrypoints.push(PathBuf::from(s));
+        }
+
         // test.include (vitest)
         if let Some(kind) = find_value(values, "test.include") {
             inputs.test_patterns.extend(strings_from_array(kind));
@@ -916,9 +944,11 @@ impl ConfigAdapter for JestAdapter {
         if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "moduleNameMapper") {
             for (pattern, value) in pairs {
                 if let ConfigValueKind::String(target) = value {
+                    let (alias_pattern, alias_target) =
+                        normalize_jest_module_mapper(pattern, target);
                     inputs.aliases.push(AliasEntry {
-                        pattern: pattern.clone(),
-                        target: target.clone(),
+                        pattern: alias_pattern,
+                        target: alias_target,
                         ..Default::default()
                     });
                 }
@@ -929,9 +959,10 @@ impl ConfigAdapter for JestAdapter {
         for entry in mapper_entries {
             let pattern = entry.key.strip_prefix("moduleNameMapper.").unwrap_or(&entry.key);
             if let ConfigValueKind::String(target) = &entry.value {
+                let (alias_pattern, alias_target) = normalize_jest_module_mapper(pattern, target);
                 inputs.aliases.push(AliasEntry {
-                    pattern: pattern.to_string(),
-                    target: target.clone(),
+                    pattern: alias_pattern,
+                    target: alias_target,
                     ..Default::default()
                 });
             }
@@ -983,6 +1014,27 @@ impl ConfigAdapter for JestAdapter {
         // globalTeardown — a single file path for global teardown.
         if let Some(ConfigValueKind::String(s)) = find_value(values, "globalTeardown") {
             inputs.global_setup_files.push(PathBuf::from(s));
+        }
+
+        // transform — object where keys are regex patterns and values are
+        // transformer file paths or [path, options] tuples.  Local file
+        // references (starting with ./ or ../) are entrypoints.
+        if let Some(ConfigValueKind::Object(pairs)) = find_value(values, "transform") {
+            for (_, value) in pairs {
+                if let ConfigValueKind::String(s) = value
+                    && (s.starts_with("./") || s.starts_with("../"))
+                {
+                    inputs.entrypoints.push(PathBuf::from(s));
+                }
+            }
+        }
+        let transform_entries = find_values_with_prefix(values, "transform.");
+        for entry in &transform_entries {
+            if let ConfigValueKind::String(s) = &entry.value
+                && (s.starts_with("./") || s.starts_with("../"))
+            {
+                inputs.entrypoints.push(PathBuf::from(s));
+            }
         }
 
         // roots
@@ -1047,6 +1099,16 @@ impl ConfigAdapter for PlaywrightAdapter {
                 }
                 _ => {}
             }
+        }
+
+        // globalSetup — file path for global setup entrypoint
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "globalSetup") {
+            inputs.entrypoints.push(PathBuf::from(s));
+        }
+
+        // globalTeardown — file path for global teardown entrypoint
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "globalTeardown") {
+            inputs.entrypoints.push(PathBuf::from(s));
         }
 
         inputs
@@ -1189,6 +1251,24 @@ impl ConfigAdapter for WebpackAdapter {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Module Federation `exposes` — exposed modules are entrypoints consumed
+        // by remote containers.  Keys may appear as flat `exposes.*` entries.
+        let expose_entries = find_values_with_prefix(values, "exposes.");
+        for entry in &expose_entries {
+            if let ConfigValueKind::String(target) = &entry.value {
+                inputs.entrypoints.push(PathBuf::from(target));
+            }
+        }
+        // Also check nested plugin options that contain `.exposes.` in the key path.
+        for value in values {
+            if value.key.contains(".exposes.")
+                && !value.key.starts_with("exposes.")
+                && let ConfigValueKind::String(target) = &value.value
+            {
+                inputs.entrypoints.push(PathBuf::from(target));
             }
         }
 
@@ -1519,11 +1599,25 @@ impl ConfigAdapter for SvelteKitAdapter {
             }
         }
 
-        // SvelteKit virtual modules.
+        // $lib is a built-in SvelteKit alias that maps to `src/lib` (or the
+        // value of `kit.files.lib`).  Register it as a resolver alias so that
+        // `import { x } from '$lib/utils'` resolves to `src/lib/utils`.
+        let lib_dir = find_value(values, "kit.files.lib")
+            .and_then(|v| match v {
+                ConfigValueKind::String(s) => Some(s.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "src/lib".to_string());
+        inputs.aliases.push(AliasEntry {
+            pattern: "$lib".to_string(),
+            target: lib_dir,
+            origin: AliasOrigin::FrameworkGenerated,
+        });
+
+        // SvelteKit virtual modules (platform-provided, no file on disk).
         inputs.ignore_unresolved.extend([
             "$app/".to_string(),
             "$env/".to_string(),
-            "$lib/".to_string(),
             "$service-worker".to_string(),
         ]);
 
@@ -1654,6 +1748,8 @@ impl ConfigAdapter for NxAdapter {
     fn matches(&self, config: &ConfigReadResult) -> bool {
         filename_starts_with(&config.path, "nx.json")
             || filename_starts_with(&config.path, "project.json")
+            || filename_starts_with(&config.path, "generators.json")
+            || filename_starts_with(&config.path, "collection.json")
     }
 
     fn extract(&self, config: &ConfigReadResult) -> ConfigInputs {
@@ -1671,6 +1767,32 @@ impl ConfigAdapter for NxAdapter {
         // implicitDependencies → externals
         if let Some(kind) = find_value(values, "implicitDependencies") {
             inputs.externals.extend(strings_from_array(kind));
+        }
+
+        // generators/schematics — extract factory paths as entrypoints.
+        // generators.json: { "generators": { "name": { "factory": "./path/to/index" } } }
+        let generator_entries = find_values_with_prefix(values, "generators.");
+        for entry in &generator_entries {
+            if entry.key.ends_with(".factory")
+                && let ConfigValueKind::String(factory_path) = &entry.value
+            {
+                inputs.entrypoints.push(PathBuf::from(factory_path));
+            }
+            if entry.key.ends_with(".schema")
+                && let ConfigValueKind::String(schema_path) = &entry.value
+            {
+                // Schema files referenced by generators are also entrypoints.
+                inputs.entrypoints.push(PathBuf::from(schema_path));
+            }
+        }
+        // Also check schematics (older Nx convention)
+        let schematic_entries = find_values_with_prefix(values, "schematics.");
+        for entry in &schematic_entries {
+            if entry.key.ends_with(".factory")
+                && let ConfigValueKind::String(factory_path) = &entry.value
+            {
+                inputs.entrypoints.push(PathBuf::from(factory_path));
+            }
         }
 
         inputs
@@ -4168,7 +4290,9 @@ mod tests {
         assert!(adapter.matches(&config));
         let inputs = adapter.extract(&config);
         assert_eq!(inputs.aliases.len(), 1);
-        assert_eq!(inputs.aliases[0].pattern, "^@/(.*)$");
+        // The regex pattern is normalized: ^@/(.*)$ → @, <rootDir>/src/$1 → src
+        assert_eq!(inputs.aliases[0].pattern, "@");
+        assert_eq!(inputs.aliases[0].target, "src");
         assert_eq!(inputs.test_patterns, vec!["**/__tests__/**/*.[jt]s?(x)"]);
         assert_eq!(inputs.source_roots, vec![PathBuf::from("<rootDir>/src")]);
     }
@@ -4443,9 +4567,13 @@ mod tests {
             inputs.source_roots,
             vec![PathBuf::from("src/routes"), PathBuf::from("src/lib")]
         );
-        assert_eq!(inputs.aliases.len(), 1);
+        // 2 aliases: the explicit kit.alias.$lib AND the built-in $lib → src/lib
+        assert_eq!(inputs.aliases.len(), 2);
         assert_eq!(inputs.aliases[0].pattern, "$lib");
         assert_eq!(inputs.aliases[0].target, "./src/lib");
+        // Built-in $lib alias uses the kit.files.lib value
+        assert_eq!(inputs.aliases[1].pattern, "$lib");
+        assert_eq!(inputs.aliases[1].target, "src/lib");
         assert_eq!(inputs.framework, Some("sveltekit".to_string()));
     }
 

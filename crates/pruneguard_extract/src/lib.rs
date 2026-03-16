@@ -1219,7 +1219,30 @@ where
             continue;
         }
 
-        let Some(quote) = bytes.get(open_paren + 1).copied() else {
+        // Skip whitespace and block comments between `(` and the string literal.
+        // This handles webpack magic comments: import(/* webpackChunkName: "x" */ './y')
+        let mut after_paren = open_paren + 1;
+        while after_paren < bytes.len() {
+            let b = bytes[after_paren];
+            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+                after_paren += 1;
+            } else if b == b'/' && after_paren + 1 < bytes.len() && bytes[after_paren + 1] == b'*' {
+                // Skip block comment /* ... */
+                after_paren += 2;
+                while after_paren + 1 < bytes.len()
+                    && !(bytes[after_paren] == b'*' && bytes[after_paren + 1] == b'/')
+                {
+                    after_paren += 1;
+                }
+                if after_paren + 1 < bytes.len() {
+                    after_paren += 2; // skip */
+                }
+            } else {
+                break;
+            }
+        }
+
+        let Some(quote) = bytes.get(after_paren).copied() else {
             break;
         };
         if !matches!(quote, b'"' | b'\'') {
@@ -1227,7 +1250,7 @@ where
             continue;
         }
 
-        let literal_start = open_paren + 2;
+        let literal_start = after_paren + 1;
         let mut literal_end = literal_start;
         while literal_end < bytes.len() && bytes[literal_end] != quote {
             literal_end += 1;

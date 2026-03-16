@@ -2311,7 +2311,13 @@ impl FrameworkPack for AngularPack {
             entries.push(angular_json);
         }
 
-        for name in &["src/main.ts", "src/polyfills.ts"] {
+        for name in &[
+            "src/main.ts",
+            "src/polyfills.ts",
+            // Fallback Angular app entrypoints when main.ts is absent.
+            "src/app/app.module.ts",
+            "src/app/app.component.ts",
+        ] {
             let path = workspace_root.join(name);
             if path.exists() {
                 entries.push(path);
@@ -2347,7 +2353,12 @@ impl FrameworkPack for AngularPack {
             });
         }
 
-        for name in &["src/main.ts", "src/polyfills.ts"] {
+        for name in &[
+            "src/main.ts",
+            "src/polyfills.ts",
+            "src/app/app.module.ts",
+            "src/app/app.component.ts",
+        ] {
             let path = workspace_root.join(name);
             if path.exists() {
                 seeds.push(FrameworkEntrypointSeed {

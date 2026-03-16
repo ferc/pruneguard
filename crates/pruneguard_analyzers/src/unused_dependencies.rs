@@ -850,6 +850,10 @@ fn is_framework_implicit_dependency(
             has_dep("@tanstack/vue-router") || has_dep("nuxt") || has_dep("@tanstack/vue-start")
         }
 
+        // svelte is consumed by the SvelteKit compiler at build time, not
+        // imported directly in user code.
+        "svelte" => has_dep("@sveltejs/kit"),
+
         // isbot is used by SSR frameworks at the server entry level, not
         // imported in user-facing source files.
         "isbot" => {

@@ -934,6 +934,9 @@ pub fn read_workspace_configs(workspace_root: &Path) -> Vec<ConfigReadResult> {
         "gatsby-browser.ts",
         "gatsby-ssr.js",
         "gatsby-ssr.ts",
+        // Nx generators / schematics
+        "generators.json",
+        "collection.json",
     ];
 
     let mut results = Vec::new();

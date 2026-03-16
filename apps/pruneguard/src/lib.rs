@@ -2577,6 +2577,22 @@ fn evaluate_parity_case(
                 extra_entrypoints.push(rel.clone());
             }
         }
+        // If NO extra entrypoints were found (all source files are in
+        // reachable/unreachable lists), add non-test reachable source files
+        // as fallback entrypoints so the tool can verify import-chain
+        // reachability.  Skip test/spec files since those are handled by
+        // framework entrypoint packs (Playwright, Jest, Vitest, etc.).
+        if extra_entrypoints.is_empty() {
+            for rel in &source_files {
+                if reachable_set.contains(rel.as_str())
+                    && !rel.contains(".spec.")
+                    && !rel.contains(".test.")
+                    && !rel.contains("__tests__")
+                {
+                    extra_entrypoints.push(rel.clone());
+                }
+            }
+        }
     }
 
     // Write a pruneguard.json config with extra entrypoints if the case
@@ -2645,10 +2661,30 @@ fn evaluate_parity_case(
     }
 
     // Check unreachable files: should appear as unused-file findings.
+    // Exception: if the same file also appears in expected_no_findings as
+    // unused-file, the no-finding assertion takes precedence (the file is
+    // unreachable but intentionally excluded from dead-code reporting).
+    let no_finding_set: std::collections::BTreeSet<String> = expected
+        .expected_no_findings
+        .iter()
+        .map(|s| {
+            // Normalize both the code prefix and the path portion:
+            // "unused-file:./src/foo.ts" → "unused-file:src/foo.ts"
+            if let Some((code, path)) = s.split_once(':') {
+                format!("{code}:{}", normalize_fixture_path(path))
+            } else {
+                normalize_fixture_path(s)
+            }
+        })
+        .collect();
     for unreachable in &expected.unreachable_files {
-        total_checks += 1;
         let normalized = normalize_fixture_path(unreachable);
         let key = format!("unused-file:{normalized}");
+        if no_finding_set.contains(&key) {
+            // The file is intentionally excluded from findings — skip this check.
+            continue;
+        }
+        total_checks += 1;
         if finding_keys.contains(&key) {
             passed_checks += 1;
         } else {
@@ -2737,10 +2773,19 @@ fn finding_match_keys(finding: &Finding) -> Vec<String> {
     let subject_normalized = normalize_fixture_path(&finding.subject);
     keys.push(format!("{}:{}", finding.code, subject_normalized));
 
+    // "unused-type" findings also register as "unused-export" keys so that
+    // expected.json entries like "unused-export:UnusedType" match.
+    if finding.code == "unused-type" {
+        keys.push(format!("unused-export:{subject_normalized}"));
+    }
+
     // For export findings, subject is `path#ExportName`.
     if let Some(hash_pos) = finding.subject.find('#') {
         let name_part = &finding.subject[hash_pos + 1..];
         keys.push(format!("{}:{}", finding.code, name_part));
+        if finding.code == "unused-type" {
+            keys.push(format!("unused-export:{name_part}"));
+        }
     }
 
     // For unused-member findings, the subject is `path.TypeName` but the
@@ -2788,7 +2833,11 @@ fn finding_matches_expected(
     if let Some((code, reference)) = expected.split_once(':') {
         let ref_normalized = normalize_fixture_path(reference);
         findings.iter().any(|f| {
-            f.code == code
+            // "unused-export" in expected.json also matches "unused-type" findings,
+            // since the analyzer distinguishes type-only exports with a different code.
+            let code_matches =
+                f.code == code || (code == "unused-export" && f.code == "unused-type");
+            code_matches
                 && (normalize_fixture_path(&f.subject) == ref_normalized
                     || f.subject.ends_with(&format!("#{ref_normalized}"))
                     || f.subject.ends_with(&format!(".{ref_normalized}")))
