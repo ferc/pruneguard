@@ -135,6 +135,12 @@ pub fn analyze(
                 continue;
             }
 
+            // Skip workspace packages — they may be consumed via tsconfig
+            // path aliases which are filtered from external_dependencies.
+            if is_workspace_package(dependency, &build.discovery) {
+                continue;
+            }
+
             // Skip dependencies that are referenced directly in package.json scripts
             // (e.g. "build": "vite build" means vite is used even without source imports).
             if scripts_reference_dependency(&workspace.manifest, dependency) {
@@ -640,7 +646,7 @@ fn is_build_tool_dependency(dep: &str) -> bool {
     }
 
     // Prettier plugins are loaded by the Prettier runner.
-    if dep.starts_with("prettier-plugin-") {
+    if dep.starts_with("prettier-plugin-") || dep.contains("/prettier-plugin-") {
         return true;
     }
 
@@ -847,7 +853,10 @@ fn is_framework_implicit_dependency(
                 || has_dep("@tanstack/solid-start")
         }
         "vue" => {
-            has_dep("@tanstack/vue-router") || has_dep("nuxt") || has_dep("@tanstack/vue-start")
+            has_dep("@tanstack/vue-router")
+                || has_dep("nuxt")
+                || has_dep("@tanstack/vue-start")
+                || has_dep("@vitejs/plugin-vue")
         }
 
         // svelte is consumed by the SvelteKit compiler at build time, not
