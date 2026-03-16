@@ -2600,6 +2600,11 @@ fn evaluate_parity_case(
     };
     // Enable member analysis for member-semantics cases.
     config.analysis.unused_members = pruneguard_config::AnalysisSeverity::Warn;
+    // Enable includeEntryExports when the fixture expects unused-export findings,
+    // otherwise entry-file exports are blanket-marked live and can't be detected.
+    if expected.expected_findings.iter().any(|f| f.starts_with("unused-export:")) {
+        config.entrypoints.include_entry_exports = true;
+    }
     // Add the extra entrypoints directly via the include list.
     for ep in &extra_entrypoints {
         let entry = format!("./{ep}");

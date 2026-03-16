@@ -21,6 +21,7 @@ pub enum SourceKind {
     Svelte,
     Astro,
     Mdx,
+    Css,
 }
 
 impl SourceKind {
@@ -46,6 +47,7 @@ impl SourceKind {
             "svelte" => Some(Self::Svelte),
             "astro" => Some(Self::Astro),
             "mdx" => Some(Self::Mdx),
+            "css" | "scss" | "sass" | "less" => Some(Self::Css),
             _ => None,
         }
     }
@@ -63,6 +65,11 @@ impl SourceKind {
         matches!(self, Self::Vue | Self::Svelte | Self::Astro | Self::Mdx)
     }
 
+    /// Whether this kind is a stylesheet (CSS, SCSS, SASS, LESS).
+    pub const fn is_css(self) -> bool {
+        matches!(self, Self::Css)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Js => "js",
@@ -76,6 +83,7 @@ impl SourceKind {
             Self::Svelte => "svelte",
             Self::Astro => "astro",
             Self::Mdx => "mdx",
+            Self::Css => "css",
         }
     }
 }

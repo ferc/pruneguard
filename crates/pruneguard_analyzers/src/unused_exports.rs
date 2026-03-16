@@ -25,26 +25,12 @@ pub fn analyze(
     let active_entrypoints = active_entrypoint_files(build, profile);
 
     let mut live = LiveDemand::default();
-    // When `include_entry_exports` is true, do NOT blanket-mark all entrypoint
+    // When `include_entry_exports` is true, do NOT blanket-mark any entrypoint
     // exports as live.  Instead, let each export's liveness be determined solely
-    // by actual import/re-export demand across the graph.
-    //
-    // Exception: PackageExports entrypoints (files referenced in package.json
-    // "exports") are the public API contract and must remain live even in this
-    // mode — consumers depend on them.
-    if include_entry_exports {
-        // Only keep PackageExports entrypoints live — these are the public API
-        // contract (files referenced in package.json "exports").
-        for seed in &build.entrypoint_seeds {
-            if seed.kind == pruneguard_entrypoints::EntrypointKind::PackageExports {
-                let normalized: std::path::PathBuf = seed.path.components().collect();
-                if let Some(fid) = build.module_graph.file_id(&normalized.to_string_lossy()) {
-                    live.mark_all(fid, false);
-                    live.mark_all(fid, true);
-                }
-            }
-        }
-    } else {
+    // by actual import/re-export demand across the graph.  This enables
+    // detection of unused re-exports in barrel files even when the barrel is
+    // referenced by package.json "exports".
+    if !include_entry_exports {
         for file_id in active_entrypoints {
             live.mark_all(file_id, false);
             live.mark_all(file_id, true);

@@ -866,6 +866,13 @@ fn extract_file(
         return Ok(());
     }
 
+    // CSS/SCSS/SASS/LESS files are tracked for file-level reachability but
+    // do not contain JS/TS imports. Skip extraction so the parser doesn't
+    // attempt to parse stylesheet syntax as JavaScript.
+    if extracted_file.file.source_kind.is_some_and(pruneguard_fs::SourceKind::is_css) {
+        return Ok(());
+    }
+
     let source_bytes = std::fs::read(&extracted_file.file.path).into_diagnostic()?;
     let source = String::from_utf8(source_bytes).into_diagnostic()?;
     match extract_file_facts(&extracted_file.file.path, &source) {
@@ -1618,6 +1625,10 @@ fn add_symbol_edges(
                 false,
                 reexport.is_type,
             );
+            // Also register the re-exported name as an export of the
+            // re-exporting file so the unused-exports analyzer can detect
+            // unconsumed re-exports in barrel files.
+            symbol_graph.add_export(importer_id, name.exported.clone(), reexport.is_type);
         }
     }
 

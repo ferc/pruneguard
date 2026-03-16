@@ -2870,6 +2870,14 @@ impl ConfigAdapter for EslintAdapter {
             ..Default::default()
         };
 
+        // parser → externals (ESLint parser packages)
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "parser") {
+            inputs.externals.push(s.clone());
+        }
+        if let Some(ConfigValueKind::String(s)) = find_value(values, "parserOptions.parser") {
+            inputs.externals.push(s.clone());
+        }
+
         // plugins → externals (package names)
         if let Some(kind) = find_value(values, "plugins") {
             inputs.externals.extend(strings_from_array(kind));

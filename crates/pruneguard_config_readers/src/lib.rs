@@ -282,6 +282,7 @@ fn read_ts_static(path: &Path, content: &str) -> Result<ConfigReadResult, Config
 /// Parses the file with oxc, finds the default export (or `module.exports`),
 /// and extracts literal properties from object expressions. Dynamic values
 /// are marked as `ConfigValueKind::Dynamic`.
+#[allow(clippy::too_many_lines)]
 fn read_js_ts_static(
     path: &Path,
     content: &str,
@@ -318,17 +319,22 @@ fn read_js_ts_static(
     //   export default config;
     let top_level_decls = collect_top_level_declarations(program);
 
+    // Eagerly evaluate top-level variable initializers so that downstream
+    // extraction can resolve identifier references in expressions like
+    // `path.join(ROOT, 'src')` where ROOT was defined earlier.
+    let var_values = evaluate_top_level_vars(program);
+
     for stmt in &program.body {
         // 1. export default <expr>
         if let Statement::ExportDefaultDeclaration(export) = stmt {
             found_export = true;
             match &export.declaration {
                 ExportDefaultDeclarationKind::ObjectExpression(obj) => {
-                    extract_object_expression("", obj, &mut values, &mut warnings);
+                    extract_object_expression("", obj, &mut values, &mut warnings, &var_values);
                 }
                 ExportDefaultDeclarationKind::CallExpression(call) => {
                     // e.g. export default defineConfig({...})
-                    extract_from_call_expression(call, &mut values, &mut warnings);
+                    extract_from_call_expression(call, &mut values, &mut warnings, &var_values);
                 }
                 ExportDefaultDeclarationKind::FunctionDeclaration(_)
                 | ExportDefaultDeclarationKind::ArrowFunctionExpression(_) => {
@@ -346,6 +352,7 @@ fn read_js_ts_static(
                             name,
                             &mut values,
                             &mut warnings,
+                            &var_values,
                         );
                     } else {
                         warnings.push(
@@ -356,13 +363,28 @@ fn read_js_ts_static(
                 }
                 ExportDefaultDeclarationKind::TSAsExpression(ts_as) => {
                     // export default { ... } as const  /  export default { ... } satisfies Config
-                    extract_from_expression(&ts_as.expression, &mut values, &mut warnings);
+                    extract_from_expression(
+                        &ts_as.expression,
+                        &mut values,
+                        &mut warnings,
+                        &var_values,
+                    );
                 }
                 ExportDefaultDeclarationKind::TSSatisfiesExpression(ts_sat) => {
-                    extract_from_expression(&ts_sat.expression, &mut values, &mut warnings);
+                    extract_from_expression(
+                        &ts_sat.expression,
+                        &mut values,
+                        &mut warnings,
+                        &var_values,
+                    );
                 }
                 ExportDefaultDeclarationKind::ParenthesizedExpression(paren) => {
-                    extract_from_expression(&paren.expression, &mut values, &mut warnings);
+                    extract_from_expression(
+                        &paren.expression,
+                        &mut values,
+                        &mut warnings,
+                        &var_values,
+                    );
                 }
                 _ => {
                     warnings.push("Default export has an unsupported form".to_string());
@@ -376,7 +398,7 @@ fn read_js_ts_static(
             && is_module_exports_target(&assign.left)
         {
             found_export = true;
-            extract_from_expression(&assign.right, &mut values, &mut warnings);
+            extract_from_expression(&assign.right, &mut values, &mut warnings, &var_values);
         }
     }
 
@@ -428,6 +450,38 @@ fn collect_top_level_declarations<'a>(
     map
 }
 
+/// Eagerly evaluate all top-level variable initializers in declaration order.
+/// Later variables can reference earlier ones (e.g. `const ROOT = path.resolve(__dirname, '..');
+/// const SRC = path.join(ROOT, 'src');`).
+fn evaluate_top_level_vars(
+    program: &oxc_ast::ast::Program<'_>,
+) -> rustc_hash::FxHashMap<String, ConfigValueKind> {
+    use oxc_ast::ast::Statement;
+
+    let empty = rustc_hash::FxHashMap::default();
+    let mut var_values = rustc_hash::FxHashMap::default();
+
+    for stmt in &program.body {
+        if let Statement::VariableDeclaration(decl) = stmt {
+            for declarator in &decl.declarations {
+                if let oxc_ast::ast::BindingPattern::BindingIdentifier(id) = &declarator.id
+                    && let Some(init) = &declarator.init
+                {
+                    // Use the current var_values so later vars can reference earlier ones.
+                    if let Ok(val) = expression_to_config_value(init, &var_values) {
+                        var_values.insert(id.name.to_string(), val);
+                    } else if let Ok(val) = expression_to_config_value(init, &empty) {
+                        // Fallback: try without vars for simple literals.
+                        var_values.insert(id.name.to_string(), val);
+                    }
+                }
+            }
+        }
+    }
+
+    var_values
+}
+
 /// Extract config values from the initializer of a top-level variable declaration
 /// that matches the given identifier name.
 fn extract_from_declaration_initializer(
@@ -435,6 +489,7 @@ fn extract_from_declaration_initializer(
     name: &str,
     values: &mut Vec<ConfigValue>,
     warnings: &mut Vec<String>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
 ) {
     use oxc_ast::ast::Statement;
 
@@ -444,7 +499,7 @@ fn extract_from_declaration_initializer(
                 && id.name.as_str() == name
                 && let Some(init) = &declarator.init
             {
-                extract_from_expression(init, values, warnings);
+                extract_from_expression(init, values, warnings, vars);
                 return;
             }
         }
@@ -458,17 +513,18 @@ fn extract_from_expression(
     expr: &oxc_ast::ast::Expression<'_>,
     values: &mut Vec<ConfigValue>,
     warnings: &mut Vec<String>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
 ) {
     use oxc_ast::ast::Expression;
     match expr {
         Expression::ObjectExpression(obj) => {
-            extract_object_expression("", obj, values, warnings);
+            extract_object_expression("", obj, values, warnings, vars);
         }
         Expression::CallExpression(call) => {
-            extract_from_call_expression(call, values, warnings);
+            extract_from_call_expression(call, values, warnings, vars);
         }
         Expression::ParenthesizedExpression(paren) => {
-            extract_from_expression(&paren.expression, values, warnings);
+            extract_from_expression(&paren.expression, values, warnings, vars);
         }
         _ => {
             warnings.push("Export value is not a static object literal".to_string());
@@ -493,6 +549,7 @@ fn extract_from_call_expression(
     call: &oxc_ast::ast::CallExpression<'_>,
     values: &mut Vec<ConfigValue>,
     warnings: &mut Vec<String>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
 ) {
     // Try to get the wrapper function name for a better warning message
     let callee_name = match &call.callee {
@@ -518,11 +575,11 @@ fn extract_from_call_expression(
     // Look for the first object argument, or unwrap function/arrow arguments.
     for arg in &call.arguments {
         if let oxc_ast::ast::Argument::ObjectExpression(obj) = arg {
-            extract_object_expression("", obj, values, warnings);
+            extract_object_expression("", obj, values, warnings, vars);
             return;
         }
         if let Some(obj) = try_unwrap_argument_to_object(arg) {
-            extract_object_expression("", obj, values, warnings);
+            extract_object_expression("", obj, values, warnings, vars);
             return;
         }
     }
@@ -594,6 +651,7 @@ fn extract_object_expression(
     obj: &oxc_ast::ast::ObjectExpression<'_>,
     values: &mut Vec<ConfigValue>,
     warnings: &mut Vec<String>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
 ) {
     use oxc_ast::ast::{Expression, ObjectPropertyKind, PropertyKey};
 
@@ -612,12 +670,12 @@ fn extract_object_expression(
                     format!("{prefix}.{key_name}")
                 };
 
-                match expression_to_config_value(&prop.value) {
+                match expression_to_config_value(&prop.value, vars) {
                     Ok(val) => {
                         values.push(ConfigValue { key: full_key.clone(), value: val });
                         // Recurse for nested objects
                         if let Expression::ObjectExpression(nested) = &prop.value {
-                            extract_object_expression(&full_key, nested, values, warnings);
+                            extract_object_expression(&full_key, nested, values, warnings, vars);
                         }
                     }
                     Err(desc) => {
@@ -642,6 +700,7 @@ fn extract_object_expression(
 /// Returns `Err(description)` if the expression is dynamic.
 fn expression_to_config_value(
     expr: &oxc_ast::ast::Expression<'_>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
 ) -> Result<ConfigValueKind, String> {
     use oxc_ast::ast::Expression;
 
@@ -700,18 +759,28 @@ fn expression_to_config_value(
                 "Infinity" => Ok(ConfigValueKind::Number(f64::INFINITY)),
                 "NaN" => Ok(ConfigValueKind::Number(f64::NAN)),
                 "__dirname" => Ok(ConfigValueKind::String("<__dirname>".to_string())),
-                _ => Err(format!("identifier `{name}`")),
+                _ => {
+                    // Try to resolve from top-level variable declarations.
+                    if let Some(val) = vars.get(name) {
+                        Ok(val.clone())
+                    } else {
+                        Err(format!("identifier `{name}`"))
+                    }
+                }
             }
         }
-        Expression::CallExpression(call) => try_evaluate_call(call),
+        Expression::CallExpression(call) => try_evaluate_call(call, vars),
         _ => Err("dynamic expression".to_string()),
     }
 }
 
 /// Try to statically evaluate well-known call expressions:
-/// - `path.join(a, b)` / `path.resolve(a, b)` with string literal args
+/// - `path.join(a, b)` / `path.resolve(a, b)` with string literal or variable args
 /// - `require.resolve('pkg')` → string value
-fn try_evaluate_call(call: &oxc_ast::ast::CallExpression<'_>) -> Result<ConfigValueKind, String> {
+fn try_evaluate_call(
+    call: &oxc_ast::ast::CallExpression<'_>,
+    vars: &rustc_hash::FxHashMap<String, ConfigValueKind>,
+) -> Result<ConfigValueKind, String> {
     use oxc_ast::ast::Expression;
 
     if let Expression::StaticMemberExpression(member) = &call.callee {
@@ -726,10 +795,15 @@ fn try_evaluate_call(call: &oxc_ast::ast::CallExpression<'_>) -> Result<ConfigVa
                         oxc_ast::ast::Argument::StringLiteral(lit) => {
                             segments.push(lit.value.to_string());
                         }
-                        oxc_ast::ast::Argument::Identifier(ident)
-                            if ident.name.as_str() == "__dirname" =>
-                        {
-                            segments.push("<__dirname>".to_string());
+                        oxc_ast::ast::Argument::Identifier(ident) => {
+                            let name = ident.name.as_str();
+                            if name == "__dirname" {
+                                segments.push("<__dirname>".to_string());
+                            } else if let Some(ConfigValueKind::String(val)) = vars.get(name) {
+                                segments.push(val.clone());
+                            } else {
+                                return Err(format!("path.{method}() with dynamic argument"));
+                            }
                         }
                         _ => {
                             return Err(format!("path.{method}() with dynamic argument"));

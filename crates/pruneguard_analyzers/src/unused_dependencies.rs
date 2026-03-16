@@ -621,13 +621,20 @@ fn is_build_tool_dependency(dep: &str) -> bool {
         return true;
     }
 
-    // ESLint plugins and configs are loaded by the ESLint runner, not imported.
+    // ESLint plugins, configs, and parsers are loaded by the ESLint runner, not imported.
     if dep.starts_with("@eslint/")
         || dep.starts_with("@eslint-react/")
         || dep.starts_with("eslint-plugin-")
         || dep.starts_with("eslint-config-")
         || dep.starts_with("@next/eslint-plugin-")
         || dep.starts_with("@typescript-eslint/")
+    {
+        return true;
+    }
+
+    // ESLint parsers (loaded by the ESLint runner via config, not imported).
+    if dep.ends_with("-parser")
+        && (dep.contains("eslint") || dep.contains("vue") || dep.contains("babel"))
     {
         return true;
     }
