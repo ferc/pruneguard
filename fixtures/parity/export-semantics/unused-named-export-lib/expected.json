@@ -1,0 +1,13 @@
+{
+  "reachable_files": ["./src/lib/storage.ts"],
+  "unreachable_files": [],
+  "expected_findings": [
+    "unused-export:src/lib/storage.ts#getHighestLevel",
+    "unused-export:src/lib/storage.ts#clearAllData"
+  ],
+  "expected_no_findings": [
+    "unused-export:src/lib/storage.ts#saveProgress",
+    "unused-export:src/lib/storage.ts#loadProgress",
+    "unused-file:./src/lib/storage.ts"
+  ]
+}

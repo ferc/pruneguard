@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "template-dir-excluded",
+  "reference_tool": "knip",
+  "description": "Files inside template/ directories are scaffolding templates, not source code; they should be excluded from dead-code analysis"
+}

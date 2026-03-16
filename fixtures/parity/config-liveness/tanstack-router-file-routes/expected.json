@@ -1,0 +1,10 @@
+{
+  "reachable_files": ["./src/components/Dashboard.tsx"],
+  "unreachable_files": ["./src/orphan.ts"],
+  "expected_findings": ["unused-file:./src/orphan.ts"],
+  "expected_no_findings": [
+    "unused-file:./src/routes/index.tsx",
+    "unused-file:./src/routes/__root.tsx",
+    "unused-file:./src/components/Dashboard.tsx"
+  ]
+}

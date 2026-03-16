@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "tanstack-router-file-routes",
+  "reference_tool": "knip",
+  "description": "TanStack Router file-based routing makes route files in src/routes/ implicit entrypoints; components imported from routes should not be flagged unused"
+}

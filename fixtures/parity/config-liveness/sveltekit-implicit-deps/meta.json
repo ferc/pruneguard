@@ -1,0 +1,6 @@
+{
+  "family": "config-liveness",
+  "name": "sveltekit-implicit-deps",
+  "reference_tool": "knip",
+  "description": "SvelteKit projects declare svelte and @sveltejs/kit as dependencies consumed by the framework build, not imported in user code"
+}

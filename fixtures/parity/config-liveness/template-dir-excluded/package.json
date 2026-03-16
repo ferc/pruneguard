@@ -1,0 +1,8 @@
+{
+  "name": "parity-template-dir-excluded",
+  "private": true,
+  "main": "./src/cli.ts",
+  "bin": {
+    "my-cli": "./src/cli.ts"
+  }
+}

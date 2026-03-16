@@ -1,0 +1,6 @@
+{
+  "family": "export-semantics",
+  "name": "unused-named-export-lib",
+  "reference_tool": "knip",
+  "description": "A reachable library file exports multiple named functions but only some are consumed; the unconsumeded exports should be flagged"
+}
